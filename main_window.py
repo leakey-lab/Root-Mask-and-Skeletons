@@ -13,22 +13,20 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QFileDialog,
     QListWidgetItem,
-    QApplication,
 )
-from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal
 from image_manager import ImageManager
 from display_controller import DisplayController
 from skeleton_handler import SkeletonHandler
 from mask_handler import MaskHandler
 from mask_tracing_interface import MaskTracingInterface
+from root_length_visulization import RootLengthVisualization
 import os
-
-# TODO 1: Make The Green signal from mask saved and chnage the dilename to green. Potentila issue might be how the names are displayed in the QListWidget witrh the .jpg,.png whereas while matching names we are matching the name with even that suffix
 
 
 class MainWindow(QMainWindow):
-    mask_saved = pyqtSignal(str)  # Signal to emit when a mask is saved
+    mask_saved = pyqtSignal(str)
     mask_cleared = pyqtSignal(str)
 
     def __init__(self):
@@ -42,6 +40,7 @@ class MainWindow(QMainWindow):
         self.skeleton_handler = SkeletonHandler(self)
         self.mask_handler = MaskHandler(self)
         self.mask_tracing_interface = MaskTracingInterface()
+        self.root_length_viz = None
 
         # Connect the mask_saved and mask_cleared signals
         self.mask_saved.connect(self.highlight_saved_mask)
@@ -65,6 +64,8 @@ class MainWindow(QMainWindow):
         self.right_panel = QStackedWidget()
         self.right_panel.addWidget(self.create_right_panel())
         self.right_panel.addWidget(self.mask_tracing_interface)
+        self.visualization_widget = QWidget()  # Placeholder for visualization
+        self.right_panel.addWidget(self.visualization_widget)
         splitter.addWidget(self.right_panel)
 
         splitter.setSizes([400, 800])
@@ -89,6 +90,13 @@ class MainWindow(QMainWindow):
         self.calculate_length_button = QPushButton("Calculate Root Length")
         self.calculate_length_button.clicked.connect(self.calculate_root_length)
         layout.addWidget(self.calculate_length_button)
+
+        # New button for root length visualization
+        self.visualize_root_length_button = QPushButton("Visualize Root Length")
+        self.visualize_root_length_button.clicked.connect(
+            self.show_root_length_visualization
+        )
+        layout.addWidget(self.visualize_root_length_button)
 
         # Toggle Mask Tracing Interface Button
         self.toggle_mask_tracing_button = QPushButton("Toggle Mask Tracing")
@@ -208,20 +216,16 @@ class MainWindow(QMainWindow):
             self.status_bar.showMessage("Results loaded, but no HTML file found.", 5000)
 
     def toggle_mask_tracing(self):
-        if self.right_panel.currentIndex() == 0:
-            self.right_panel.setCurrentIndex(1)
+        if self.right_panel.currentIndex() != 1:
+            self.switch_right_panel("mask_tracing")
             self.toggle_mask_tracing_button.setText("Return to Main View")
             self.mask_tracing_interface.mask_saved.connect(self.on_mask_saved)
-            self.mask_tracing_interface.mask_cleared.connect(
-                self.on_mask_cleared
-            )  # Connect the new signal
+            self.mask_tracing_interface.mask_cleared.connect(self.on_mask_cleared)
         else:
-            self.right_panel.setCurrentIndex(0)
+            self.switch_right_panel("display")
             self.toggle_mask_tracing_button.setText("Toggle Mask Tracing")
             self.mask_tracing_interface.mask_saved.disconnect(self.on_mask_saved)
-            self.mask_tracing_interface.mask_cleared.disconnect(
-                self.on_mask_cleared
-            )  # Disconnect the new signal
+            self.mask_tracing_interface.mask_cleared.disconnect(self.on_mask_cleared)
 
         # Load the current image into the mask tracing interface
         current_item = self.file_list.currentItem()
@@ -235,3 +239,78 @@ class MainWindow(QMainWindow):
     def on_mask_cleared(self, image_path):
         print(f"DEBUG: on_mask_cleared called with image_path: {image_path}")
         self.mask_cleared.emit(image_path)
+
+    def show_root_length_visualization(self):
+        print("DEBUG: Entering show_root_length_visualization method")
+
+        if self.file_list.count() == 0:
+            print("DEBUG: file_list is empty")
+            QMessageBox.warning(
+                self, "Warning", "No images loaded. Please load images first."
+            )
+            return
+
+        first_image_name = self.file_list.item(0).text()
+        first_image_path = self.image_manager.get_image_path(first_image_name)
+        print(f"DEBUG: First image path: {first_image_path}")
+
+        if first_image_path is None:
+            print("DEBUG: Failed to get image path from image_manager")
+            QMessageBox.warning(
+                self, "Warning", "Failed to get image path. Please reload images."
+            )
+            return
+
+        base_path = os.path.dirname(first_image_path)
+        if "output/skeletonizer/test_latest" not in base_path:
+            base_path = os.path.join(base_path, "output", "skeletonizer", "test_latest")
+        csv_path = os.path.join(base_path, "root_lengths.csv")
+        print(f"DEBUG: Constructed csv_path: {csv_path}")
+
+        if os.path.exists(csv_path):
+            print(f"DEBUG: CSV file found at {csv_path}")
+            try:
+                if self.root_length_viz is None:
+                    self.root_length_viz = RootLengthVisualization(csv_path)
+                    self.right_panel.addWidget(self.root_length_viz)
+                self.right_panel.setCurrentWidget(self.root_length_viz)
+                print("DEBUG: RootLengthVisualization added to right panel")
+                self.visualize_root_length_button.setText("Close Visualization")
+            except Exception as e:
+                print(f"DEBUG: Error creating RootLengthVisualization: {str(e)}")
+                QMessageBox.critical(
+                    self, "Error", f"Failed to create visualization: {str(e)}"
+                )
+        else:
+            print(f"DEBUG: CSV file not found at {csv_path}")
+            QMessageBox.warning(
+                self,
+                "Warning",
+                "No root length data found. Please calculate root lengths first.",
+            )
+
+    def switch_right_panel(self, panel):
+        if panel == "display":
+            self.right_panel.setCurrentIndex(0)
+        elif panel == "mask_tracing":
+            self.right_panel.setCurrentIndex(1)
+        elif panel == "visualization":
+            self.right_panel.setCurrentIndex(2)
+
+    def close_root_length_visualization(self):
+        if self.root_length_viz:
+            self.right_panel.removeWidget(self.root_length_viz)
+            self.root_length_viz.deleteLater()
+            self.root_length_viz = None
+            self.visualize_root_length_button.setText("Visualize Root Length")
+            print("DEBUG: Root length visualization closed")
+            self.right_panel.setCurrentWidget(self.display_controller.magnifying_view)
+
+    def toggle_root_length_visualization(self):
+        if (
+            self.root_length_viz is None
+            or not self.right_panel.currentWidget() == self.root_length_viz
+        ):
+            self.show_root_length_visualization()
+        else:
+            self.close_root_length_visualization()

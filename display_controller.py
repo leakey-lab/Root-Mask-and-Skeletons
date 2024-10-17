@@ -1,5 +1,4 @@
 from PyQt6.QtWidgets import (
-    QLabel,
     QVBoxLayout,
     QHBoxLayout,
     QGraphicsView,
@@ -11,9 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QWheelEvent
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWidgets import QMessageBox
 import cv2
-import os
 
 
 class MagnifyingGraphicsView(QGraphicsView):

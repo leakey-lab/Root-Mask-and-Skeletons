@@ -1,11 +1,9 @@
 import os
-import torch
 from options.test_options import TestOptions
 from models import create_model
 from data import create_dataset
 from util.visualizer import save_images
 from util import html
-from tqdm import tqdm
 
 
 def main():

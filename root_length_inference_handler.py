@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 import os
 from PyQt6.QtCore import QThread, pyqtSignal
-from math import sqrt
 
 
 class RootLengthCalculatorThread(QThread):
@@ -26,7 +25,8 @@ class RootLengthCalculatorThread(QThread):
             results[name] = total_length
             self.progress.emit(int((i + 1) / total_images * 100))
 
-        csv_path = os.path.join(self.output_dir, "root_lengths.csv")
+        # Change the CSV path to be in the main directory
+        csv_path = os.path.join(os.path.dirname(self.output_dir), "root_lengths.csv")
         self.save_to_csv(results, csv_path)
         self.finished.emit(csv_path)
 
