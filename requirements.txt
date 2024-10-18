@@ -1,0 +1,16 @@
+dash==2.18.1
+dash_bootstrap_components==1.6.0
+dominate==2.9.1
+numpy==1.24.4
+opencv_python==4.10.0
+opencv_python_headless==4.10.0
+pandas==1.5.1
+Pillow==11.0.0
+plotly==5.24.1
+PyQt6==6.7.1
+PyQt6_sip==13.8.0
+scipy==1.14.1
+skimage==0.0
+tqdm==4.66.5
+visdom==0.2.4
+wandb==0.18.5
