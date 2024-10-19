@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
         # New button for root length visualization
         self.visualize_root_length_button = QPushButton("Visualize Root Length")
         self.visualize_root_length_button.clicked.connect(
-            self.show_root_length_visualization
+            self.toggle_root_length_visualization
         )
         layout.addWidget(self.visualize_root_length_button)
 
@@ -298,13 +298,26 @@ class MainWindow(QMainWindow):
             self.right_panel.setCurrentIndex(2)
 
     def close_root_length_visualization(self):
+        print("DEBUG: Entering close_root_length_visualization method")
         if self.root_length_viz:
+            print("DEBUG: root_length_viz exists, attempting to close")
             self.right_panel.removeWidget(self.root_length_viz)
             self.root_length_viz.deleteLater()
             self.root_length_viz = None
             self.visualize_root_length_button.setText("Visualize Root Length")
             print("DEBUG: Root length visualization closed")
-            self.right_panel.setCurrentWidget(self.display_controller.magnifying_view)
+
+            # Switch back to the main display area
+            self.switch_right_panel("display")
+
+            # Update the display to show the current image
+            current_item = self.file_list.currentItem()
+            if current_item:
+                self.on_image_selected(current_item)
+
+            print("DEBUG: Switched back to main display area")
+        else:
+            print("DEBUG: root_length_viz is None, nothing to close")
 
     def toggle_root_length_visualization(self):
         if (
