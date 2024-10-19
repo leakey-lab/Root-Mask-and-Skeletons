@@ -25,10 +25,6 @@ from PyQt6.QtGui import (
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRect, QEvent, QPointF
 import os
 import numpy as np
-from scipy.ndimage import (
-    binary_opening,
-    binary_closing,
-)
 import cv2
 
 
@@ -345,14 +341,14 @@ class MaskTracingInterface(QWidget):
                 0,
                 min(
                     scaled_x - cursor_hotspot.x() + self.brush_size,
-                    self.mask_pixmap.width() - 1,
+                    self.mask_pixmap.width(),
                 ),
             )
             final_y = max(
                 0,
                 min(
                     scaled_y - cursor_hotspot.y() + self.brush_size,
-                    self.mask_pixmap.height() - 1,
+                    self.mask_pixmap.height(),
                 ),
             )
         else:
@@ -376,8 +372,8 @@ class MaskTracingInterface(QWidget):
             scaled_pos = adjusted_pos / self.zoom_factor
 
             # Ensure the position is within the image bounds
-            scaled_pos.setX(max(0, min(scaled_pos.x(), self.mask_pixmap.width() - 1)))
-            scaled_pos.setY(max(0, min(scaled_pos.y(), self.mask_pixmap.height() - 1)))
+            scaled_pos.setX(max(0, min(scaled_pos.x(), self.mask_pixmap.width())))
+            scaled_pos.setY(max(0, min(scaled_pos.y(), self.mask_pixmap.height())))
 
             # Adjust for the cursor hotspot
             cursor_hotspot = self.cursor().hotSpot()
@@ -385,8 +381,8 @@ class MaskTracingInterface(QWidget):
             final_y = scaled_pos.y() - cursor_hotspot.y() + self.brush_size // 2
 
         # Ensure final position is within image bounds
-        final_x = max(0, min(final_x, self.mask_pixmap.width() - 1))
-        final_y = max(0, min(final_y, self.mask_pixmap.height() - 1))
+        final_x = max(0, min(final_x, self.mask_pixmap.width()))
+        final_y = max(0, min(final_y, self.mask_pixmap.height()))
 
         final_pos = QPoint(int(final_x), int(final_y))
 

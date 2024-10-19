@@ -1,12 +1,13 @@
 import sys
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QPalette, QColor
 from main_window import MainWindow
+from PyQt6.QtGui import QPalette, QColor
 
 
 def apply_stylesheet(app):
     with open("./themes/dark_theme.qss", "r") as f:
         stylesheet = f.read()
+
     app.setStyleSheet(stylesheet)
 
     # Set the application palette for a consistent dark theme
@@ -24,12 +25,12 @@ def apply_stylesheet(app):
     palette.setColor(QPalette.ColorRole.Link, QColor("#8be9fd"))
     palette.setColor(QPalette.ColorRole.Highlight, QColor("#bd93f9"))
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+
     app.setPalette(palette)
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    apply_stylesheet(app)
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

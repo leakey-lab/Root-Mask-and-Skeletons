@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QFileDialog,
     QListWidgetItem,
+    QApplication,
 )
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -56,6 +57,19 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         main_layout.addWidget(splitter)
 
+        # Set splitter properties
+        splitter.setHandleWidth(5)
+        splitter.setStyleSheet(
+            """
+            QSplitter::handle {
+                background-color: #ff79c6;
+            }
+            QSplitter::handle:hover {
+                background-color: #bd93f9;
+            }
+        """
+        )
+
         # Left Panel
         left_panel = self.create_left_panel()
         splitter.addWidget(left_panel)
@@ -78,7 +92,7 @@ class MainWindow(QMainWindow):
         left_widget = QWidget()
         layout = QVBoxLayout(left_widget)
 
-        # Buttons
+        # Other buttons and widgets...
         self.generate_button = QPushButton("Generate Skeleton")
         self.generate_button.clicked.connect(self.skeleton_handler.generate_skeleton)
         layout.addWidget(self.generate_button)
@@ -91,19 +105,16 @@ class MainWindow(QMainWindow):
         self.calculate_length_button.clicked.connect(self.calculate_root_length)
         layout.addWidget(self.calculate_length_button)
 
-        # New button for root length visualization
         self.visualize_root_length_button = QPushButton("Visualize Root Length")
         self.visualize_root_length_button.clicked.connect(
             self.toggle_root_length_visualization
         )
         layout.addWidget(self.visualize_root_length_button)
 
-        # Toggle Mask Tracing Interface Button
         self.toggle_mask_tracing_button = QPushButton("Toggle Mask Tracing")
         self.toggle_mask_tracing_button.clicked.connect(self.toggle_mask_tracing)
         layout.addWidget(self.toggle_mask_tracing_button)
 
-        # View Mode ComboBox
         self.view_mode_combo = QComboBox()
         self.view_mode_combo.addItems(
             ["Single Image", "Overlay", "Side by Side", "Basic View"]
@@ -113,7 +124,6 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.view_mode_combo)
 
-        # Image List
         layout.addWidget(QLabel("Images:"))
         self.file_list = QListWidget()
         self.file_list.itemClicked.connect(self.on_image_selected)
