@@ -6,11 +6,14 @@ from PyQt6.QtWidgets import (
     QWidget,
     QPushButton,
     QSlider,
+    QGraphicsScene,
+    QGraphicsPixmapItem,
 )
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QWheelEvent
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 import cv2
+import numpy as np
 
 
 class MagnifyingGraphicsView(QGraphicsView):
@@ -154,41 +157,58 @@ class DisplayController:
             print("DEBUG: Missing real or fake image path")
             return
 
-        real_pixmap = QPixmap(self.current_image)
-        fake_image_gray = cv2.imread(self.current_fake_image, cv2.IMREAD_GRAYSCALE)
-        if fake_image_gray is None:
+        # Load real image
+        real_image = QImage(self.current_image)
+
+        # Load fake image (skeleton)
+        fake_image = cv2.imread(self.current_fake_image, cv2.IMREAD_GRAYSCALE)
+        if fake_image is None:
             print("DEBUG: Failed to load fake image")
             return
 
-        _, binary_mask = cv2.threshold(
-            fake_image_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-        )
-
-        real_image = real_pixmap.toImage()
-
-        if real_image.size() != (binary_mask.shape[1], binary_mask.shape[0]):
-            print("DEBUG: Resizing binary mask to match real image.")
-            binary_mask = cv2.resize(
-                binary_mask,
+        # Resize fake image if necessary
+        if (fake_image.shape[1], fake_image.shape[0]) != (
+            real_image.width(),
+            real_image.height(),
+        ):
+            fake_image = cv2.resize(
+                fake_image,
                 (real_image.width(), real_image.height()),
                 interpolation=cv2.INTER_NEAREST,
             )
 
-        result_image = QImage(
-            real_image.size(), QImage.Format.Format_ARGB32_Premultiplied
+        # Convert real image to numpy array
+        ptr = real_image.bits()
+        ptr.setsize(real_image.sizeInBytes())
+        real_array = np.array(ptr).reshape(real_image.height(), real_image.width(), 4)
+
+        # Create a mask for the skeleton
+        skeleton_mask = fake_image > 0
+
+        # Create neon green color for the skeleton
+        neon_green = np.array([57, 255, 20, 255], dtype=np.uint8)  # BGRA format
+
+        # Create the overlay
+        overlay = np.zeros_like(real_array)
+        overlay[skeleton_mask] = neon_green
+
+        # Blend the original image with the neon skeleton
+        alpha = 0.7  # Adjust this value to change the visibility of the skeleton
+        result_array = np.where(
+            skeleton_mask[:, :, None],
+            cv2.addWeighted(real_array, 1 - alpha, overlay, alpha, 0),
+            real_array,
         )
-        result_image.fill(Qt.GlobalColor.transparent)
 
-        painter = QPainter(result_image)
-        painter.drawImage(0, 0, real_image)
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
-
-        for x in range(real_image.width()):
-            for y in range(real_image.height()):
-                if binary_mask[y, x] >= 50:
-                    result_image.setPixelColor(x, y, QColor(Qt.GlobalColor.black))
-
-        painter.end()
+        # Convert back to QImage
+        bytes_per_line = 4 * real_image.width()
+        result_image = QImage(
+            result_array.data,
+            real_image.width(),
+            real_image.height(),
+            bytes_per_line,
+            QImage.Format.Format_RGBA8888,
+        ).copy()
 
         result_pixmap = QPixmap.fromImage(result_image)
         self.set_magnifying_view_image(result_pixmap)
@@ -198,8 +218,14 @@ class DisplayController:
         real_pixmap = QPixmap(self.current_image)
         if self.current_fake_image:
             fake_pixmap = QPixmap(self.current_fake_image)
-            combined_pixmap = QPixmap(real_pixmap.width() * 2, real_pixmap.height())
+
+            # Create a new pixmap to hold both images side by side
+            combined_width = real_pixmap.width() + fake_pixmap.width()
+            combined_height = max(real_pixmap.height(), fake_pixmap.height())
+            combined_pixmap = QPixmap(combined_width, combined_height)
             combined_pixmap.fill(Qt.GlobalColor.white)
+
+            # Draw both images onto the combined pixmap
             painter = QPainter(combined_pixmap)
             painter.drawPixmap(0, 0, real_pixmap)
             painter.drawPixmap(real_pixmap.width(), 0, fake_pixmap)
@@ -207,15 +233,25 @@ class DisplayController:
         else:
             combined_pixmap = real_pixmap
 
-        scaled_pixmap = combined_pixmap.scaled(
-            800, 600, Qt.AspectRatioMode.KeepAspectRatio
+        # Create a new scene and add the combined pixmap to it
+        scene = QGraphicsScene()
+        pixmap_item = QGraphicsPixmapItem(combined_pixmap)
+        scene.addItem(pixmap_item)
+
+        # Set the scene to the magnifying view
+        self.magnifying_view.setScene(scene)
+
+        # Fit the view to the scene contents while keeping the aspect ratio
+        self.magnifying_view.fitInView(
+            scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio
         )
-        self.set_magnifying_view_image(scaled_pixmap)
-        print(f"DEBUG: Side-by-side images displayed. Size: {scaled_pixmap.size()}")
+
+        print(f"DEBUG: Side-by-side images displayed. Size: {combined_pixmap.size()}")
 
     def set_magnifying_view_image(self, pixmap):
         scene = QGraphicsScene()
-        scene.addPixmap(pixmap)
+        pixmap_item = QGraphicsPixmapItem(pixmap)
+        scene.addItem(pixmap_item)
         self.magnifying_view.setScene(scene)
         self.magnifying_view.fitInView(
             scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio
