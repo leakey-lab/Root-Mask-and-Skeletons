@@ -26,11 +26,11 @@ def main():
     opt.no_flip = True
     opt.display_id = -1
     opt.results_dir = f"{opt.dataroot}/output"
-    # opt.aspect_ratio = 3 / 4
-    opt.aspect_ratio = 0.94
-    # opt.load_size = 256
-    opt.load_size = 255
-    opt.crop_size = 255
+    opt.aspect_ratio = 3 / 4
+    # opt.aspect_ratio = 0.94
+    opt.load_size = 256
+    # opt.load_size = 255
+    # opt.crop_size = 255
 
     print(f"Debug: Dataroot: {opt.dataroot}")
     print(f"Debug: Results directory: {opt.results_dir}")

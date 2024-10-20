@@ -157,59 +157,110 @@ class DisplayController:
             print("DEBUG: Missing real or fake image path")
             return
 
-        # Load real image
+        # Load the real image as QImage
         real_image = QImage(self.current_image)
+        if real_image.isNull():
+            print("DEBUG: Failed to load real image")
+            return
 
-        # Load fake image (skeleton)
-        fake_image = cv2.imread(self.current_fake_image, cv2.IMREAD_GRAYSCALE)
-        if fake_image is None:
+        # Load the fake image as grayscale using OpenCV
+        fake_image_gray = cv2.imread(self.current_fake_image, cv2.IMREAD_GRAYSCALE)
+        if fake_image_gray is None:
             print("DEBUG: Failed to load fake image")
             return
 
-        # Resize fake image if necessary
-        if (fake_image.shape[1], fake_image.shape[0]) != (
-            real_image.width(),
-            real_image.height(),
+        # Binarize the fake image using OTSU thresholding
+        _, binary_mask = cv2.threshold(
+            fake_image_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+        )
+
+        # Resize the binary mask to match the real image size if necessary
+        if (real_image.width(), real_image.height()) != (
+            binary_mask.shape[1],
+            binary_mask.shape[0],
         ):
-            fake_image = cv2.resize(
-                fake_image,
+            print("DEBUG: Resizing binary mask to match real image.")
+            binary_mask = cv2.resize(
+                binary_mask,
                 (real_image.width(), real_image.height()),
                 interpolation=cv2.INTER_NEAREST,
             )
 
-        # Convert real image to numpy array
+        # Ensure the QImage format is ARGB32_Premultiplied for consistent handling
+        if real_image.format() != QImage.Format.Format_ARGB32_Premultiplied:
+            real_image = real_image.convertToFormat(
+                QImage.Format.Format_ARGB32_Premultiplied
+            )
+
+        # Convert QImage to NumPy array
         ptr = real_image.bits()
         ptr.setsize(real_image.sizeInBytes())
-        real_array = np.array(ptr).reshape(real_image.height(), real_image.width(), 4)
+        real_array = np.array(ptr).reshape(
+            real_image.height(), real_image.width(), 4
+        )  # BGRA
 
-        # Create a mask for the skeleton
-        skeleton_mask = fake_image > 0
+        # Create a boolean mask where the binary mask is active
+        mask = binary_mask >= 50  # Adjust threshold as needed
 
-        # Create neon green color for the skeleton
-        neon_green = np.array([57, 255, 20, 255], dtype=np.uint8)  # BGRA format
+        # Debug information
+        print(f"DEBUG: Real image shape: {real_array.shape}")
+        print(f"DEBUG: Mask shape: {mask.shape}")
 
-        # Create the overlay
-        overlay = np.zeros_like(real_array)
-        overlay[skeleton_mask] = neon_green
+        # Define semi-transparent neon green in BGRA format
+        neon_green = np.array([57, 255, 20, 128], dtype=np.uint8)  # B, G, R, A
+        # Breakdown:
+        # B (Blue)   = 57
+        # G (Green)  = 255
+        # R (Red)    = 20
+        # A (Alpha)  = 128 (semi-transparent)
 
-        # Blend the original image with the neon skeleton
-        alpha = 0.7  # Adjust this value to change the visibility of the skeleton
-        result_array = np.where(
-            skeleton_mask[:, :, None],
-            cv2.addWeighted(real_array, 1 - alpha, overlay, alpha, 0),
-            real_array,
-        )
+        # Ensure neon_green is broadcastable to the real_array
+        neon_green = neon_green.reshape(1, 1, 4)
 
-        # Convert back to QImage
-        bytes_per_line = 4 * real_image.width()
+        # Extract the mask indices
+        mask_indices = np.where(mask)
+
+        # Perform alpha blending only on the RGB channels
+        alpha = neon_green[0, 0, 3] / 255.0  # Normalize alpha to [0, 1]
+        inv_alpha = 1.0 - alpha
+
+        # Blend the neon green with the original image
+        # Only modify the RGB channels; preserve the original alpha channel
+        real_array[mask_indices[0], mask_indices[1], 0] = (
+            neon_green[0, 0, 0] * alpha
+            + real_array[mask_indices[0], mask_indices[1], 0] * inv_alpha
+        ).astype(
+            np.uint8
+        )  # Blue channel
+
+        real_array[mask_indices[0], mask_indices[1], 1] = (
+            neon_green[0, 0, 1] * alpha
+            + real_array[mask_indices[0], mask_indices[1], 1] * inv_alpha
+        ).astype(
+            np.uint8
+        )  # Green channel
+
+        real_array[mask_indices[0], mask_indices[1], 2] = (
+            neon_green[0, 0, 2] * alpha
+            + real_array[mask_indices[0], mask_indices[1], 2] * inv_alpha
+        ).astype(
+            np.uint8
+        )  # Red channel
+
+        # Optionally, adjust the alpha channel if you want to modify it
+        # For example, keep it as is or set to maximum
+        # real_array[mask_indices[0], mask_indices[1], 3] = 255  # Full opacity
+
+        # Convert the modified NumPy array back to QImage
         result_image = QImage(
-            result_array.data,
+            real_array.data,
             real_image.width(),
             real_image.height(),
-            bytes_per_line,
-            QImage.Format.Format_RGBA8888,
-        ).copy()
+            real_image.bytesPerLine(),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        ).copy()  # Use .copy() to ensure the data is owned by QImage
 
+        # Convert QImage to QPixmap and set it to the view
         result_pixmap = QPixmap.fromImage(result_image)
         self.set_magnifying_view_image(result_pixmap)
         print(f"DEBUG: Overlay image displayed. Size: {result_pixmap.size()}")
