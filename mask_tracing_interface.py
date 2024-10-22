@@ -205,10 +205,6 @@ class MaskTracingInterface(QWidget):
         # Set the hotspot to the center of the cursor
         hotspot = QPoint(cursor_size // 2, cursor_size // 2)
 
-        print(
-            f"DEBUG: Cursor created with size: {cursor_size}, hotspot: ({hotspot.x()}, {hotspot.y()}), Brush size: {size}"
-        )
-
         return QCursor(cursor_pixmap, hotspot.x(), hotspot.y())
 
     def load_image(self, image_path):
@@ -228,23 +224,34 @@ class MaskTracingInterface(QWidget):
 
     def update_display(self):
         if self.image_pixmap and self.mask_pixmap:
+            # Create a new pixmap for the combined display
             combined_pixmap = QPixmap(self.image_pixmap.size())
             combined_pixmap.fill(Qt.GlobalColor.transparent)
             painter = QPainter(combined_pixmap)
+
+            # Always draw the background image at full opacity
             painter.drawPixmap(0, 0, self.image_pixmap)
+
+            # Draw the mask with current opacity
             painter.setOpacity(self.brush_opacity)
+
+            # When erasing, reduce the mask opacity further to show more of the underlying image
+            if self.eraser_button.isChecked():
+                # Use a lower opacity while erasing to better see the original image
+                painter.setOpacity(max(0.3, self.brush_opacity))
+
             painter.drawPixmap(0, 0, self.mask_pixmap)
             painter.end()
 
+            # Scale the combined image according to zoom factor
             scaled_pixmap = combined_pixmap.scaled(
                 combined_pixmap.size() * self.zoom_factor,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
+
             self.image_mask_label.setPixmap(scaled_pixmap)
             self.image_mask_label.setFixedSize(scaled_pixmap.size())
-
-            # Center the image in the scroll area
             self.image_container.setFixedSize(scaled_pixmap.size())
             self.scroll_area.setWidgetResizable(False)
             self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -313,78 +320,97 @@ class MaskTracingInterface(QWidget):
     #####################################################
 
     def map_to_image(self, pos):
-        # Check if scrollbars are visible
-        h_scrollbar_visible = self.scroll_area.horizontalScrollBar().isVisible()
-        v_scrollbar_visible = self.scroll_area.verticalScrollBar().isVisible()
+        """Maps window coordinates to image coordinates with proper centering calculations."""
 
-        if h_scrollbar_visible or v_scrollbar_visible:
-            # Scrollbars are present, use the scroll-based approach
-            scroll_x = self.scroll_area.horizontalScrollBar().value()
-            scroll_y = self.scroll_area.verticalScrollBar().value()
+        print("\n=== BEGIN CURSOR POSITION MAPPING DEBUG ===")
+        print(f"Raw input position: ({pos.x()}, {pos.y()})")
+        print(f"Current zoom factor: {self.zoom_factor}")
 
-            # Calculate the position relative to the top-left of the image in the scroll area
-            adjusted_pos = QPoint(pos.x() + scroll_x, pos.y() + scroll_y)
+        # Get scroll information
+        h_scroll = self.scroll_area.horizontalScrollBar()
+        v_scroll = self.scroll_area.verticalScrollBar()
+        h_scroll_visible = h_scroll.isVisible()
+        v_scroll_visible = v_scroll.isVisible()
+        scroll_x = h_scroll.value() if h_scroll_visible else 0
+        scroll_y = v_scroll.value() if v_scroll_visible else 0
 
-            # Calculate the position relative to the image mask label
-            relative_x = adjusted_pos.x() - self.image_mask_label.pos().x()
-            relative_y = adjusted_pos.y() - self.image_mask_label.pos().y()
+        print(
+            f"Scroll visibility - Horizontal: {h_scroll_visible}, Vertical: {v_scroll_visible}"
+        )
+        print(f"Scroll values - X: {scroll_x}, Y: {scroll_y}")
 
-            # Adjust for zoom factor
-            scaled_x = relative_x / self.zoom_factor
-            scaled_y = relative_y / self.zoom_factor
+        # Get image and viewport geometries
+        image_pos = self.image_mask_label.pos()
+        viewport_pos = self.scroll_area.viewport().pos()
+        image_rect = self.image_mask_label.rect()
+        viewport_rect = self.scroll_area.viewport().rect()
 
-            # Get the cursor's hotspot (center point)
-            cursor_hotspot = self.cursor().hotSpot()
+        # Calculate the actual displayed size of the image (after zoom)
+        displayed_width = image_rect.width()  # This is already scaled by zoom
+        displayed_height = image_rect.height()  # This is already scaled by zoom
 
-            # Adjust the position to account for the cursor hotspot
-            final_x = max(
-                0,
-                min(
-                    scaled_x - cursor_hotspot.x() + self.brush_size,
-                    self.mask_pixmap.width(),
-                ),
-            )
-            final_y = max(
-                0,
-                min(
-                    scaled_y - cursor_hotspot.y() + self.brush_size,
-                    self.mask_pixmap.height(),
-                ),
-            )
+        print(f"Image position: ({image_pos.x()}, {image_pos.y()})")
+        print(f"Viewport position: ({viewport_pos.x()}, {viewport_pos.y()})")
+        print(
+            f"Original Image dimensions: {self.mask_pixmap.width()}x{self.mask_pixmap.height()}"
+        )
+        print(f"Displayed Image dimensions: {displayed_width}x{displayed_height}")
+        print(f"Viewport dimensions: {viewport_rect.width()}x{viewport_rect.height()}")
+
+        # Calculate centering offsets based on displayed size vs viewport
+        offset_x = (
+            abs(viewport_rect.width() - displayed_width) // 2
+            if viewport_rect.width() > displayed_width
+            else 0
+        )
+        offset_y = (
+            abs(viewport_rect.height() - displayed_height) // 2
+            if viewport_rect.height() > displayed_height
+            else 0
+        )
+
+        print(f"Centering offsets - X: {offset_x}, Y: {offset_y}")
+
+        # Get cursor information
+        cursor = self.cursor()
+        hotspot = cursor.hotSpot()
+        print(f"Cursor hotspot: ({hotspot.x()}, {hotspot.y()})")
+        print(f"Current brush size: {self.brush_size}")
+
+        # Calculate position in image coordinates
+        if h_scroll_visible or v_scroll_visible:
+            # When scrollbars are visible, adjust for scroll position
+            screen_x = pos.x() + scroll_x - image_pos.x()
+            screen_y = pos.y() + scroll_y - image_pos.y()
+            print(f"Scroll-adjusted position: ({screen_x}, {screen_y})")
         else:
-            # No scrollbars, use the offset-based approach
-            image_rect = self.image_mask_label.rect()
-            scroll_rect = self.scroll_area.viewport().rect()
-            offset = QPoint(
-                max(0, (scroll_rect.width() - image_rect.width()) // 2),
-                max(0, (scroll_rect.height() - image_rect.height()) // 2),
-            )
+            # When no scrollbars, use centering offset
+            screen_x = pos.x() - offset_x - image_pos.x()
+            screen_y = pos.y() - offset_y - image_pos.y()
+            print(f"Offset-adjusted position: ({screen_x}, {screen_y})")
 
-            # Adjust the position based on scroll area's viewport position and image offset
-            adjusted_pos = (
-                pos
-                - self.image_mask_label.pos()
-                - offset
-                + self.scroll_area.viewport().pos()
-            )
+        # Scale the position based on zoom
+        scaled_x = screen_x / self.zoom_factor
+        scaled_y = screen_y / self.zoom_factor
+        print(f"Zoom-scaled position: ({scaled_x}, {scaled_y})")
 
-            # Scale the position based on zoom factor
-            scaled_pos = adjusted_pos / self.zoom_factor
+        # Apply cursor centering correction
+        # Center the brush on the cursor by subtracting half the brush size
+        brush_offset = self.brush_size / 2
+        final_x = scaled_x - brush_offset
+        final_y = scaled_y - brush_offset
+        print(f"Brush-centered position: ({final_x}, {final_y})")
 
-            # Ensure the position is within the image bounds
-            scaled_pos.setX(max(0, min(scaled_pos.x(), self.mask_pixmap.width())))
-            scaled_pos.setY(max(0, min(scaled_pos.y(), self.mask_pixmap.height())))
-
-            # Adjust for the cursor hotspot
-            cursor_hotspot = self.cursor().hotSpot()
-            final_x = scaled_pos.x() - cursor_hotspot.x() + self.brush_size // 2
-            final_y = scaled_pos.y() - cursor_hotspot.y() + self.brush_size // 2
-
-        # Ensure final position is within image bounds
-        final_x = max(0, min(final_x, self.mask_pixmap.width()))
-        final_y = max(0, min(final_y, self.mask_pixmap.height()))
-
+        # Ensure coordinates are within image bounds
+        final_x = max(0, min(final_x, self.mask_pixmap.width() - 1))
+        final_y = max(0, min(final_y, self.mask_pixmap.height() - 1))
         final_pos = QPoint(int(final_x), int(final_y))
+
+        print(f"Final mapped position: ({final_pos.x()}, {final_pos.y()})")
+        print(
+            f"Image boundaries: width={self.mask_pixmap.width()}, height={self.mask_pixmap.height()}"
+        )
+        print("=== END CURSOR POSITION MAPPING DEBUG ===\n")
 
         return final_pos
 
@@ -401,19 +427,18 @@ class MaskTracingInterface(QWidget):
         temp_painter = QPainter(temp_pixmap)
         temp_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # Set up the pen for full opacity
+        # Set up the pen and brush
         pen = QPen(
             self.brush_color,
-            1,  # Set pen width to 1 for precise control
+            1,
             Qt.PenStyle.SolidLine,
             Qt.PenCapStyle.RoundCap,
             Qt.PenJoinStyle.RoundJoin,
         )
         temp_painter.setPen(pen)
-        temp_painter.setBrush(QBrush(self.brush_color))  # Set brush for filling
-        temp_painter.setOpacity(self.brush_opacity)
+        temp_painter.setBrush(QBrush(self.brush_color))
 
-        # Draw the stroke with full opacity
+        # Draw the stroke
         if self.last_point:
             temp_painter.setPen(
                 QPen(
@@ -425,20 +450,14 @@ class MaskTracingInterface(QWidget):
                 )
             )
             temp_painter.drawLine(self.last_point, pos)
-            print(
-                f"DEBUG: Drawing line from ({self.last_point.x()}, {self.last_point.y()}) to ({pos.x()}, {pos.y()})"
-            )
         else:
-            # Draw a filled circle with diameter equal to brush size
             diameter = self.brush_size
             top_left = QPoint(pos.x() - diameter // 2, pos.y() - diameter // 2)
             temp_painter.drawEllipse(top_left.x(), top_left.y(), diameter, diameter)
-            print(
-                f"DEBUG: Drawing point at ({pos.x()}, {pos.y()}) with brush size {self.brush_size}"
-            )
 
         temp_painter.end()
 
+        # Apply the stroke to the mask
         if self.eraser_button.isChecked():
             painter.setCompositionMode(
                 QPainter.CompositionMode.CompositionMode_DestinationOut
@@ -460,8 +479,8 @@ class MaskTracingInterface(QWidget):
         self.setCursor(self.create_cursor(self.brush_size))
 
     def update_opacity(self, value):
-        # Map the 0-100 range to 51-100
-        self.brush_opacity = value / 100
+        # Map the 0-100 range to 0.3-1.0 range to maintain minimum visibility
+        self.brush_opacity = 0.3 + (value / 100) * 0.7
         self.opacity_label.setText(
             f"Opacity: {value}%"
         )  # Display the original 0-100 value
