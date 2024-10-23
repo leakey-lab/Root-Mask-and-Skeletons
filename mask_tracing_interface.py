@@ -320,99 +320,42 @@ class MaskTracingInterface(QWidget):
     #####################################################
 
     def map_to_image(self, pos):
-        """Maps window coordinates to image coordinates with proper centering calculations."""
+        """Maps window coordinates to image coordinates with conditional mapping based on scroll bar visibility."""
 
-        print("\n=== BEGIN CURSOR POSITION MAPPING DEBUG ===")
-        print(f"Raw input position: ({pos.x()}, {pos.y()})")
-        print(f"Current zoom factor: {self.zoom_factor}")
+        # Get scroll bar visibility status
+        h_scroll_visible = self.scroll_area.horizontalScrollBar().isVisible()
+        v_scroll_visible = self.scroll_area.verticalScrollBar().isVisible()
 
-        # Get scroll information
-        h_scroll = self.scroll_area.horizontalScrollBar()
-        v_scroll = self.scroll_area.verticalScrollBar()
-        h_scroll_visible = h_scroll.isVisible()
-        v_scroll_visible = v_scroll.isVisible()
-        scroll_x = h_scroll.value() if h_scroll_visible else 0
-        scroll_y = v_scroll.value() if v_scroll_visible else 0
-
-        print(
-            f"Scroll visibility - Horizontal: {h_scroll_visible}, Vertical: {v_scroll_visible}"
-        )
-        print(f"Scroll values - X: {scroll_x}, Y: {scroll_y}")
-
-        # Get image and viewport geometries
-        image_pos = self.image_mask_label.pos()
-        viewport_pos = self.scroll_area.viewport().pos()
-        image_rect = self.image_mask_label.rect()
-        viewport_rect = self.scroll_area.viewport().rect()
-
-        # Calculate the actual displayed size of the image (after zoom)
-        displayed_width = image_rect.width()  # This is already scaled by zoom
-        displayed_height = image_rect.height()  # This is already scaled by zoom
-
-        print(f"Image position: ({image_pos.x()}, {image_pos.y()})")
-        print(f"Viewport position: ({viewport_pos.x()}, {viewport_pos.y()})")
-        print(
-            f"Original Image dimensions: {self.mask_pixmap.width()}x{self.mask_pixmap.height()}"
-        )
-        print(f"Displayed Image dimensions: {displayed_width}x{displayed_height}")
-        print(f"Viewport dimensions: {viewport_rect.width()}x{viewport_rect.height()}")
-
-        # Calculate centering offsets based on displayed size vs viewport
-        offset_x = (
-            abs(viewport_rect.width() - displayed_width) // 2
-            if viewport_rect.width() > displayed_width
-            else 0
-        )
-        offset_y = (
-            abs(viewport_rect.height() - displayed_height) // 2
-            if viewport_rect.height() > displayed_height
-            else 0
-        )
-
-        print(f"Centering offsets - X: {offset_x}, Y: {offset_y}")
-
-        # Get cursor information
-        cursor = self.cursor()
-        hotspot = cursor.hotSpot()
-        print(f"Cursor hotspot: ({hotspot.x()}, {hotspot.y()})")
-        print(f"Current brush size: {self.brush_size}")
-
-        # Calculate position in image coordinates
         if h_scroll_visible or v_scroll_visible:
-            # When scrollbars are visible, adjust for scroll position
-            screen_x = pos.x() + scroll_x - image_pos.x()
-            screen_y = pos.y() + scroll_y - image_pos.y()
-            print(f"Scroll-adjusted position: ({screen_x}, {screen_y})")
+            # If scroll bars are visible, use viewport mapping
+            viewport_pos = self.scroll_area.viewport().mapFromGlobal(
+                self.mapToGlobal(pos)
+            )
+            label_pos = self.image_mask_label.mapFrom(
+                self.image_container, viewport_pos
+            )
+
+            # Get scroll positions
+            h_scroll = self.scroll_area.horizontalScrollBar().value()
+            v_scroll = self.scroll_area.verticalScrollBar().value()
+
+            # Add scroll offset to the position
+            pos_with_scroll = QPoint(label_pos.x() + h_scroll, label_pos.y() + v_scroll)
+
+            # Calculate position relative to the actual image size
+            image_x = int(pos_with_scroll.x() / self.zoom_factor)
+            image_y = int(pos_with_scroll.y() / self.zoom_factor)
         else:
-            # When no scrollbars, use centering offset
-            screen_x = pos.x() - offset_x - image_pos.x()
-            screen_y = pos.y() - offset_y - image_pos.y()
-            print(f"Offset-adjusted position: ({screen_x}, {screen_y})")
+            # If no scroll bars, map directly to image label
+            label_pos = self.image_mask_label.mapFromGlobal(self.mapToGlobal(pos))
+            image_x = int(label_pos.x() / self.zoom_factor)
+            image_y = int(label_pos.y() / self.zoom_factor)
 
-        # Scale the position based on zoom
-        scaled_x = screen_x / self.zoom_factor
-        scaled_y = screen_y / self.zoom_factor
-        print(f"Zoom-scaled position: ({scaled_x}, {scaled_y})")
+        # Ensure coordinates are within image boundaries
+        final_x = max(0, min(image_x, self.mask_pixmap.width() - 1))
+        final_y = max(0, min(image_y, self.mask_pixmap.height() - 1))
 
-        # Apply cursor centering correction
-        # Center the brush on the cursor by subtracting half the brush size
-        brush_offset = self.brush_size / 2
-        final_x = scaled_x - brush_offset
-        final_y = scaled_y - brush_offset
-        print(f"Brush-centered position: ({final_x}, {final_y})")
-
-        # Ensure coordinates are within image bounds
-        final_x = max(0, min(final_x, self.mask_pixmap.width() - 1))
-        final_y = max(0, min(final_y, self.mask_pixmap.height() - 1))
-        final_pos = QPoint(int(final_x), int(final_y))
-
-        print(f"Final mapped position: ({final_pos.x()}, {final_pos.y()})")
-        print(
-            f"Image boundaries: width={self.mask_pixmap.width()}, height={self.mask_pixmap.height()}"
-        )
-        print("=== END CURSOR POSITION MAPPING DEBUG ===\n")
-
-        return final_pos
+        return QPoint(final_x, final_y)
 
     def draw_point(self, pos):
         if not self.mask_pixmap:
