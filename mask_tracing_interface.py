@@ -450,22 +450,22 @@ class MaskTracingInterface(QWidget):
             width = mask_image.width()
             height = mask_image.height()
             ptr = mask_image.bits()
-            ptr.setsize(height * width * 4)
+            ptr.setsize(height * width * 4)  # Assuming 4 channels (RGBA)
             arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))
 
             # Extract RGB and alpha channels
-            rgb = arr[:, :, :3]
+            rgb = arr[:, :, :3]  # Only RGB channels
             alpha = arr[:, :, 3].astype(float) / 255.0  # Normalize alpha to 0-1 range
 
             # Create a mask for additions (white areas with any level of opacity)
             additions_mask = np.max(rgb, axis=2) * alpha
 
             # Create a mask for erasures (dark areas with any level of opacity)
-            erasures_mask = np.max(rgb, axis=2) < 254  # This makes it binary
+            erasures_mask = np.max(rgb, axis=2) < 254  # Binary mask for erasures
 
             # Check if a mask already exists
             if os.path.exists(save_path):
-                # Load the existing mask
+                # Load the existing mask in greyscale
                 existing_mask = (
                     cv2.imread(save_path, cv2.IMREAD_GRAYSCALE).astype(float) / 255.0
                 )
@@ -489,16 +489,28 @@ class MaskTracingInterface(QWidget):
             # Convert to 8-bit grayscale
             gray_mask = (merged_mask * 255).astype(np.uint8)
 
-            # Apply morphological operations
+            # Apply edge-preserving smoothing using a bilateral filter
+            smoothed_mask = cv2.bilateralFilter(
+                gray_mask, d=9, sigmaColor=75, sigmaSpace=75
+            )
+
+            # Optionally, you can detect edges using Sobel or Laplacian if you want more control
+            edges = cv2.Laplacian(smoothed_mask, cv2.CV_64F)
+            edges = cv2.convertScaleAbs(edges)
+
+            # Combine the smoothed mask and the detected edges to preserve the edges in the final mask
+            combined_mask = cv2.addWeighted(smoothed_mask, 0.8, edges, 0.2, 0)
+
+            # Apply morphological operations to clean up the mask
             kernel = np.ones((3, 3), np.uint8)
-            opened_mask = cv2.morphologyEx(gray_mask, cv2.MORPH_OPEN, kernel)
-            smoothed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel)
+            opened_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
+            final_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel)
 
-            # Apply threshold to create final binary mask
-            _, binary_mask = cv2.threshold(smoothed_mask, 127, 255, cv2.THRESH_BINARY)
+            # Apply threshold to create the final binary mask
+            _, binary_mask = cv2.threshold(final_mask, 127, 255, cv2.THRESH_BINARY)
 
-            # Save the binary mask
-            cv2.imwrite(save_path, binary_mask)
+            # Save the binary mask with high quality
+            cv2.imwrite(save_path, binary_mask, [cv2.IMWRITE_PNG_COMPRESSION, 9])
 
             print(f"DEBUG: Mask saved to {save_path}")
 
