@@ -2,6 +2,7 @@ import sys
 from PyQt6.QtWidgets import QApplication
 from main_window import MainWindow
 from PyQt6.QtGui import QPalette, QColor
+import os
 
 
 def apply_stylesheet(app):
@@ -30,6 +31,7 @@ def apply_stylesheet(app):
 
 
 if __name__ == "__main__":
+    os.environ["QT_ENABLE_DIRECTWRITE"] = "0"
     app = QApplication(sys.argv)
     apply_stylesheet(app)
     window = MainWindow()

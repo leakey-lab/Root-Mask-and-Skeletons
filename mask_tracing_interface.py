@@ -318,31 +318,39 @@ class MaskTracingInterface(QWidget):
     #####################################################
 
     def map_to_image(self, pos):
-        """Maps window coordinates to image coordinates with conditional mapping based on scroll bar visibility."""
+        """Maps window coordinates to image coordinates accounting for scroll position and widget alignment."""
 
-        # Get scroll bar visibility status
+        # Get scroll bar visibility and scroll values
         h_scroll_visible = self.scroll_area.horizontalScrollBar().isVisible()
         v_scroll_visible = self.scroll_area.verticalScrollBar().isVisible()
+        h_scroll = self.scroll_area.horizontalScrollBar().value()
+        v_scroll = self.scroll_area.verticalScrollBar().value()
 
-        # Get the viewport position
-        viewport_pos = self.scroll_area.viewport().mapFromGlobal(self.mapToGlobal(pos))
+        # Get viewport and widget geometries
+        viewport_rect = self.scroll_area.viewport().rect()
+        label_rect = self.image_mask_label.rect()
 
-        # Map directly from viewport to image label
-        label_pos = self.image_mask_label.mapFrom(
-            self.scroll_area.viewport(), viewport_pos
-        )
+        # Calculate centering offsets if the widget is smaller than viewport
+        h_offset = max(0, (viewport_rect.width() - label_rect.width()) // 2)
+        v_offset = max(0, (viewport_rect.height() - label_rect.height()) // 2)
 
-        # Get scroll positions
-        h_scroll = (
-            self.scroll_area.horizontalScrollBar().value() if h_scroll_visible else 0
-        )
-        v_scroll = (
-            self.scroll_area.verticalScrollBar().value() if v_scroll_visible else 0
-        )
+        # Convert input position to viewport coordinates
+        viewport_pos = self.scroll_area.viewport().mapFrom(self, pos)
 
-        # Calculate final position with scroll offsets
-        image_x = int((label_pos.x() + h_scroll) / self.zoom_factor)
-        image_y = int((label_pos.y() + v_scroll) / self.zoom_factor)
+        # Adjust for scrolling and centering
+        if h_scroll_visible:
+            x = viewport_pos.x() + h_scroll - h_offset
+        else:
+            x = viewport_pos.x() - h_offset
+
+        if v_scroll_visible:
+            y = viewport_pos.y() + v_scroll - v_offset
+        else:
+            y = viewport_pos.y() - v_offset
+
+        # Scale coordinates according to zoom factor
+        image_x = int(x / self.zoom_factor)
+        image_y = int(y / self.zoom_factor)
 
         # Ensure coordinates are within image boundaries
         final_x = max(0, min(image_x, self.mask_pixmap.width() - 1))
