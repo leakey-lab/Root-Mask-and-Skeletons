@@ -70,15 +70,13 @@ class MaskTracingInterface(QWidget):
         # Install event filter on scroll area's viewport
         self.scroll_area.viewport().installEventFilter(self)
 
-        self.image_container = QWidget()
-        self.scroll_area.setWidget(self.image_container)
-        main_layout.addWidget(self.scroll_area)
-
-        image_layout = QVBoxLayout(self.image_container)
-        image_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Create label and set its alignment
         self.image_mask_label = QLabel()
         self.image_mask_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image_layout.addWidget(self.image_mask_label)
+
+        # Set the label directly as the scroll area widget
+        self.scroll_area.setWidget(self.image_mask_label)
+        main_layout.addWidget(self.scroll_area)
 
         # Controls
         controls_layout = QHBoxLayout()
@@ -235,9 +233,8 @@ class MaskTracingInterface(QWidget):
             # Draw the mask with current opacity
             painter.setOpacity(self.brush_opacity)
 
-            # When erasing, reduce the mask opacity further to show more of the underlying image
+            # When erasing, reduce the mask opacity further
             if self.eraser_button.isChecked():
-                # Use a lower opacity while erasing to better see the original image
                 painter.setOpacity(max(0.3, self.brush_opacity))
 
             painter.drawPixmap(0, 0, self.mask_pixmap)
@@ -252,7 +249,8 @@ class MaskTracingInterface(QWidget):
 
             self.image_mask_label.setPixmap(scaled_pixmap)
             self.image_mask_label.setFixedSize(scaled_pixmap.size())
-            self.image_container.setFixedSize(scaled_pixmap.size())
+            # Remove this line since image_container no longer exists:
+            # self.image_container.setFixedSize(scaled_pixmap.size())
             self.scroll_area.setWidgetResizable(False)
             self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -326,30 +324,25 @@ class MaskTracingInterface(QWidget):
         h_scroll_visible = self.scroll_area.horizontalScrollBar().isVisible()
         v_scroll_visible = self.scroll_area.verticalScrollBar().isVisible()
 
-        if h_scroll_visible or v_scroll_visible:
-            # If scroll bars are visible, use viewport mapping
-            viewport_pos = self.scroll_area.viewport().mapFromGlobal(
-                self.mapToGlobal(pos)
-            )
-            label_pos = self.image_mask_label.mapFrom(
-                self.image_container, viewport_pos
-            )
+        # Get the viewport position
+        viewport_pos = self.scroll_area.viewport().mapFromGlobal(self.mapToGlobal(pos))
 
-            # Get scroll positions
-            h_scroll = self.scroll_area.horizontalScrollBar().value()
-            v_scroll = self.scroll_area.verticalScrollBar().value()
+        # Map directly from viewport to image label
+        label_pos = self.image_mask_label.mapFrom(
+            self.scroll_area.viewport(), viewport_pos
+        )
 
-            # Add scroll offset to the position
-            pos_with_scroll = QPoint(label_pos.x() + h_scroll, label_pos.y() + v_scroll)
+        # Get scroll positions
+        h_scroll = (
+            self.scroll_area.horizontalScrollBar().value() if h_scroll_visible else 0
+        )
+        v_scroll = (
+            self.scroll_area.verticalScrollBar().value() if v_scroll_visible else 0
+        )
 
-            # Calculate position relative to the actual image size
-            image_x = int(pos_with_scroll.x() / self.zoom_factor)
-            image_y = int(pos_with_scroll.y() / self.zoom_factor)
-        else:
-            # If no scroll bars, map directly to image label
-            label_pos = self.image_mask_label.mapFromGlobal(self.mapToGlobal(pos))
-            image_x = int(label_pos.x() / self.zoom_factor)
-            image_y = int(label_pos.y() / self.zoom_factor)
+        # Calculate final position with scroll offsets
+        image_x = int((label_pos.x() + h_scroll) / self.zoom_factor)
+        image_y = int((label_pos.y() + v_scroll) / self.zoom_factor)
 
         # Ensure coordinates are within image boundaries
         final_x = max(0, min(image_x, self.mask_pixmap.width() - 1))
