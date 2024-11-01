@@ -162,6 +162,22 @@ class MainWindow(QMainWindow):
     def load_images(self):
         dir_name = QFileDialog.getExistingDirectory(self, "Select Image Directory")
         if dir_name:
+            # Clear undo/redo stacks if mask tracing interface exists
+            if hasattr(self, "mask_tracing_interface"):
+                self.mask_tracing_interface.undo_stack.clear()
+                self.mask_tracing_interface.redo_stack.clear()
+                # Clear the last drawn point and any active drawing state
+                self.mask_tracing_interface.last_point = None
+                self.mask_tracing_interface.drawing = False
+                # Reset the mask pixmap if it exists
+                if (
+                    hasattr(self.mask_tracing_interface, "mask_pixmap")
+                    and self.mask_tracing_interface.mask_pixmap
+                ):
+                    self.mask_tracing_interface.mask_pixmap.fill(
+                        Qt.GlobalColor.transparent
+                    )
+
             self.image_manager.load_images(dir_name)
             self.populate_file_list()
 
@@ -274,7 +290,7 @@ class MainWindow(QMainWindow):
         base_path = os.path.dirname(first_image_path)
         if "output/skeletonizer/test_latest" not in base_path:
             base_path = os.path.join(base_path, "output", "skeletonizer", "test_latest")
-        csv_path = os.path.join(base_path, "root_lengths.csv")
+        csv_path = os.path.normpath(os.path.join(base_path, "root_lengths.csv"))
         print(f"DEBUG: Constructed csv_path: {csv_path}")
 
         if os.path.exists(csv_path):

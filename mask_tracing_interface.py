@@ -206,18 +206,37 @@ class MaskTracingInterface(QWidget):
         return QCursor(cursor_pixmap, hotspot.x(), hotspot.y())
 
     def load_image(self, image_path):
+        # Clear previous image and mask data
         self.current_image_path = image_path
         self.mask_directory = os.path.join(os.path.dirname(image_path), "mask")
 
+        # Clear undo/redo stacks
+        self.undo_stack.clear()
+        self.redo_stack.clear()
+
+        # Load the new image
         self.image_pixmap = QPixmap(image_path)
+
+        # Create a fresh transparent mask
         self.mask_pixmap = QPixmap(self.image_pixmap.size())
         self.mask_pixmap.fill(Qt.GlobalColor.transparent)
+
+        # Reset drawing state
+        self.drawing = False
+        self.last_point = None
+
+        # Reset zoom and opacity to default values
+        if self.zoom_slider:
+            self.zoom_slider.setValue(100)
+        if self.opacity_slider:
+            self.opacity_slider.setValue(0)
 
         # Load existing mask if it exists
         mask_path = os.path.join(self.mask_directory, os.path.basename(image_path))
         if os.path.exists(mask_path):
             self.mask_pixmap = QPixmap(mask_path)
 
+        # Force update of the display
         self.update_display()
 
     def update_display(self):
@@ -490,21 +509,9 @@ class MaskTracingInterface(QWidget):
             # Convert to 8-bit grayscale
             gray_mask = (merged_mask * 255).astype(np.uint8)
 
-            # Apply edge-preserving smoothing using a bilateral filter
-            smoothed_mask = cv2.bilateralFilter(
-                gray_mask, d=9, sigmaColor=75, sigmaSpace=75
-            )
-
-            # Optionally, you can detect edges using Sobel or Laplacian if you want more control
-            edges = cv2.Laplacian(smoothed_mask, cv2.CV_64F)
-            edges = cv2.convertScaleAbs(edges)
-
-            # Combine the smoothed mask and the detected edges to preserve the edges in the final mask
-            combined_mask = cv2.addWeighted(smoothed_mask, 0.8, edges, 0.2, 0)
-
             # Apply morphological operations to clean up the mask
             kernel = np.ones((3, 3), np.uint8)
-            opened_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
+            opened_mask = cv2.morphologyEx(gray_mask, cv2.MORPH_OPEN, kernel)
             final_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel)
 
             # Apply threshold to create the final binary mask
