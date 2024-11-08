@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QScrollArea,
     QButtonGroup,
-    QApplication,
+    QGroupBox,
 )
 from PyQt6.QtGui import (
     QPixmap,
@@ -17,7 +17,6 @@ from PyQt6.QtGui import (
     QCursor,
     QImage,
     QBrush,
-    QFont,
     QKeySequence,
     QShortcut,
     QWheelEvent,
@@ -26,6 +25,7 @@ from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRect, QEvent, QPointF
 import os
 import numpy as np
 import cv2
+from image_normalization_interface import ImageNormalization, NormalizationControls
 
 
 def is_point_in_closed_area(arr, pos):
@@ -62,103 +62,231 @@ class MaskTracingInterface(QWidget):
 
     def initUI(self):
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)  # Reduce overall margins
 
         # Scroll area for image and mask
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # Install event filter on scroll area's viewport
         self.scroll_area.viewport().installEventFilter(self)
 
-        # Create label and set its alignment
         self.image_mask_label = QLabel()
         self.image_mask_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        # Set the label directly as the scroll area widget
         self.scroll_area.setWidget(self.image_mask_label)
         main_layout.addWidget(self.scroll_area)
 
-        # Controls
-        controls_layout = QHBoxLayout()
+        # Bottom control panel with dark background
+        control_panel = QWidget()
+        control_panel.setStyleSheet(
+            """
+            QWidget {
+                background-color: #1e1e1e;
+            }
+            QGroupBox {
+                border: 1px solid #333333;
+                border-radius: 4px;
+                margin-top: 4px;
+                padding-top: 12px;
+                color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 7px;
+                padding: 0px 5px 0px 5px;
+            }
+        """
+        )
 
-        # Create a button group for mutually exclusive selection
+        control_layout = QHBoxLayout(control_panel)
+        control_layout.setSpacing(4)  # Reduce spacing between groups
+        control_layout.setContentsMargins(2, 1, 2, 1)  # Reduce vertical margins
+
+        # Tools Group
+        tools_group = QGroupBox("Tools")
+        tools_group.setFixedWidth(100)  # Make tools group wider
+        tools_layout = QVBoxLayout()
+        tools_layout.setSpacing(2)  # Reduce spacing between buttons
+        tools_layout.setContentsMargins(4, 2, 4, 2)  # Reduce margins inside group
+
+        # Tool buttons style
+        tool_button_style = """
+            QPushButton {
+                background-color: #2d2d2d;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                color: white;
+                min-width: 40px;
+                max-width: 100px;
+                min-height: 28px;
+                max-height: 28px;
+                font-size: 16px;
+            }
+            QPushButton:checked {
+                background-color: #404040;
+            }
+            QPushButton:hover {
+                background-color: #404040;
+            }
+        """
+
         self.tool_button_group = QButtonGroup(self)
         self.tool_button_group.setExclusive(True)
 
-        self.brush_button = QPushButton("🖌️")
-        self.brush_button.setCheckable(True)
+        self.brush_button = QPushButton("🖌️ Brush")
+        self.eraser_button = QPushButton("🧽 Eraser")
+        self.fill_button = QPushButton("🪣 Fill")
+
+        for button in [self.brush_button, self.eraser_button, self.fill_button]:
+            button.setStyleSheet(tool_button_style)
+            button.setCheckable(True)
+            self.tool_button_group.addButton(button)
+            tools_layout.addWidget(button)
+
         self.brush_button.setChecked(True)
-        self.brush_button.setFont(QFont("Roboto", 30))
-        self.tool_button_group.addButton(self.brush_button)
-        controls_layout.addWidget(self.brush_button)
+        tools_group.setLayout(tools_layout)
+        control_layout.addWidget(tools_group)
 
-        self.eraser_button = QPushButton("🧽")
-        self.eraser_button.setCheckable(True)
-        self.eraser_button.setFont(QFont("Roboto", 30))
-        self.tool_button_group.addButton(self.eraser_button)
-        controls_layout.addWidget(self.eraser_button)
+        # Actions Group
+        actions_group = QGroupBox("Actions")
+        actions_group.setFixedWidth(100)  # Make actions group wider
+        actions_layout = QVBoxLayout()
+        actions_layout.setSpacing(2)  # Reduce spacing between buttons
+        actions_layout.setContentsMargins(4, 2, 4, 2)  # Reduce margins inside group
 
-        self.fill_button = QPushButton("🪣")
-        self.fill_button.setCheckable(True)
-        self.fill_button.setFont(QFont("Roboto", 30))
-        self.tool_button_group.addButton(self.fill_button)
-        controls_layout.addWidget(self.fill_button)
+        action_button_style = """
+            QPushButton {
+                background-color: #2d2d2d;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                color: white;
+                min-width: 40px;
+                max-width: 100px;
+                min-height: 28px;
+                max-height: 28px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #404040;
+            }
+        """
 
         self.clear_button = QPushButton("Clear Mask")
-        self.clear_button.clicked.connect(self.clear_mask)
-        controls_layout.addWidget(self.clear_button)
-
         self.save_button = QPushButton("Save Mask")
-        self.save_button.clicked.connect(self.save_mask)
-        controls_layout.addWidget(self.save_button)
-
         self.undo_button = QPushButton("⬅️")
-        self.undo_button.setFont(QFont("Roboto", 30))
-        self.undo_button.clicked.connect(self.undo)
-        controls_layout.addWidget(self.undo_button)
-
         self.redo_button = QPushButton("➡️")
-        self.redo_button.setFont(QFont("Roboto", 30))
-        self.redo_button.clicked.connect(self.redo)
-        controls_layout.addWidget(self.redo_button)
 
-        self.size_label = QLabel("Brush Size: 5")
-        controls_layout.addWidget(self.size_label)
+        for button in [
+            self.clear_button,
+            self.save_button,
+            self.undo_button,
+            self.redo_button,
+        ]:
+            button.setStyleSheet(action_button_style)
+            actions_layout.addWidget(button)
 
-        self.size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.size_slider.setRange(1, 50)
-        self.size_slider.setValue(5)
+        actions_group.setLayout(actions_layout)
+        control_layout.addWidget(actions_group)
+
+        # Adjustments Group
+        adjustments_group = QGroupBox("Adjustments")
+        adjustments_layout = QVBoxLayout()
+        adjustments_layout.setSpacing(2)  # Reduce spacing between sliders
+        adjustments_layout.setContentsMargins(8, 2, 8, 2)  # Reduce vertical margins
+
+        # Slider style
+        slider_style = """
+            QSlider {
+                max-height: 20px;
+            }
+            QSlider::groove:horizontal {
+                border: none;
+                height: 4px;
+                background: #404040;
+                margin: 0px;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #ff79c6;
+                border: none;
+                width: 16px;
+                margin: -6px 0;
+                border-radius: 8px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #ff92d0;
+            }
+            QLabel {
+                color: white;
+                font-size: 11px;
+                max-height: 15px;
+            }
+        """
+
+        # Create sliders with labels
+        sliders_data = [
+            ("Brush Size", 3, 100, 5),
+            ("Opacity", 0, 100, 100),
+            ("Zoom", 10, 200, 100),
+        ]
+
+        for name, min_val, max_val, default in sliders_data:
+            container = QWidget()
+            container_layout = QVBoxLayout(container)
+            container_layout.setSpacing(1)  # Minimal spacing between label and slider
+            container_layout.setContentsMargins(0, 0, 0, 0)
+
+            label = QLabel(f"{name}: {default}")
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setStyleSheet(slider_style)
+            slider.setRange(min_val, max_val)
+            slider.setValue(default)
+
+            container_layout.addWidget(label)
+            container_layout.addWidget(slider)
+            adjustments_layout.addWidget(container)
+
+            if name == "Brush Size":
+                self.size_slider = slider
+                self.size_label = label
+            elif name == "Opacity":
+                self.opacity_slider = slider
+                self.opacity_label = label
+            else:
+                self.zoom_slider = slider
+                self.zoom_label = label
+
+        adjustments_group.setLayout(adjustments_layout)
+        control_layout.addWidget(adjustments_group)
+
+        # Image Enhancement Controls
+        self.norm_controls = NormalizationControls(self)
+        control_layout.addWidget(self.norm_controls)
+
+        # Add the control panel to the main layout
+        main_layout.addWidget(control_panel)
+
+        # Connect signals
         self.size_slider.valueChanged.connect(self.update_brush_size)
-        controls_layout.addWidget(self.size_slider)
-
-        self.opacity_label = QLabel("Opacity: 100%")
-        controls_layout.addWidget(self.opacity_label)
-        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setRange(0, 100)
-        self.opacity_slider.setValue(0)
         self.opacity_slider.valueChanged.connect(self.update_opacity)
-        controls_layout.addWidget(self.opacity_slider)
-
-        self.zoom_label = QLabel("Zoom: 100%")
-        controls_layout.addWidget(self.zoom_label)
-
-        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self.zoom_slider.setRange(10, 200)
-        self.zoom_slider.setValue(100)
         self.zoom_slider.valueChanged.connect(self.update_zoom)
-        controls_layout.addWidget(self.zoom_slider)
+        self.clear_button.clicked.connect(self.clear_mask)
+        self.save_button.clicked.connect(self.save_mask)
+        self.undo_button.clicked.connect(self.undo)
+        self.redo_button.clicked.connect(self.redo)
+        self.norm_controls.apply_button.clicked.connect(self.apply_normalization)
 
-        main_layout.addLayout(controls_layout)
-        self.setLayout(main_layout)
-
-        # Add shortcuts for undo and redo
+        # Add shortcuts
         self.undo_shortcut = QShortcut(QKeySequence.StandardKey.Undo, self)
         self.undo_shortcut.activated.connect(self.undo)
-
         self.redo_shortcut = QShortcut(QKeySequence.StandardKey.Redo, self)
         self.redo_shortcut.activated.connect(self.redo)
 
-        # Drawing attributes
+        # Set the main layout
+        self.setLayout(main_layout)
+
+        # Initialize drawing attributes
         self.last_point = QPoint()
         self.drawing = False
         self.brush_color = QColor(Qt.GlobalColor.white)
@@ -297,44 +425,6 @@ class MaskTracingInterface(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.drawing = False
             self.last_point = None
-
-    #########################################################
-    # map_to_image for MINIZOTRON CAMERA
-    #########################################################
-
-    # def map_to_image(self, pos):
-    #     # Calculate the offset of the image within the scroll area
-    #     image_rect = self.image_mask_label.rect()
-    #     scroll_rect = self.scroll_area.viewport().rect()
-    #     offset = QPoint(
-    #         max(0, (scroll_rect.width() - image_rect.width()) // 2),
-    #         max(0, (scroll_rect.height() - image_rect.height()) // 2),
-    #     )
-
-    #     # Adjust the position based on scroll area's viewport position and image offset
-    #     adjusted_pos = (
-    #         pos
-    #         - self.image_mask_label.pos()
-    #         - offset
-    #         + self.scroll_area.viewport().pos()
-    #     )
-
-    #     # Scale the position based on zoom factor
-    #     scaled_pos = adjusted_pos / self.zoom_factor
-
-    #     # Ensure the position is within the image bounds
-    #     scaled_pos.setX(max(0, min(scaled_pos.x(), self.mask_pixmap.width() - 1)))
-    #     scaled_pos.setY(max(0, min(scaled_pos.y(), self.mask_pixmap.height() - 1)))
-
-    #     # Adjust for the cursor hotspot
-    #     cursor_offset = QPoint(self.brush_size // 2 - 2, self.brush_size // 2 - 2)
-    #     final_pos = scaled_pos - cursor_offset
-
-    #     return final_pos
-
-    #####################################################
-    # Correct Mapping for new Camera
-    #####################################################
 
     def map_to_image(self, pos):
         """Maps window coordinates to image coordinates accounting for scroll position and widget alignment."""
@@ -625,44 +715,42 @@ class MaskTracingInterface(QWidget):
         buffer = image.bits().asstring(width * height * 4)
         arr = np.frombuffer(buffer, dtype=np.uint8).reshape((height, width, 4)).copy()
 
-        # Define the fill color (white with full opacity)
-        fill_color = QColor(Qt.GlobalColor.white)
-        fill_color.setAlpha(255)  # Ensure full opacity for boundaries
-        fill_color_rgba = fill_color.getRgb()
+        # Convert to grayscale for boundary detection
+        gray = cv2.cvtColor(arr, cv2.COLOR_RGBA2GRAY)
 
-        # Get the color of the clicked pixel
-        target_color = tuple(arr[pos.y(), pos.x()])
+        # Find contours in the image
+        _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(
+            binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
 
-        if target_color == fill_color_rgba:
-            return  # If the target color is already the fill color, return
+        # Find which contour contains the click point
+        point = (pos.x(), pos.y())
+        target_contour = None
+        for contour in contours:
+            if cv2.pointPolygonTest(contour, point, False) >= 0:
+                target_contour = contour
+                break
 
-        # Tolerance threshold for comparing colors to avoid tiny differences (due to anti-aliasing)
-        def color_match(c1, c2, tolerance=10):
-            return all(abs(c1[i] - c2[i]) <= tolerance for i in range(3))
-
-        # Check if the point is in a closed area before filling
-        if not is_point_in_closed_area(arr, pos):
-
+        # If no containing contour found, return
+        if target_contour is None:
             return
 
-        # Stack-based flood fill algorithm with color tolerance check
-        def stack_based_fill(start_x, start_y):
-            stack = [(start_x, start_y)]
-            while stack:
-                x, y = stack.pop()
-                if x < 0 or x >= width or y < 0 or y >= height:
-                    continue
-                # Ensure the pixel matches the target color with a tolerance
-                if color_match(arr[y, x], target_color):
-                    # Protect boundary pixels by checking alpha
-                    if arr[y, x, 3] == 255:
-                        continue  # Skip boundary pixels
-                    arr[y, x] = fill_color_rgba  # Fill the pixel
-                    # Add neighboring pixels to the stack
-                    stack.extend([(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)])
+        # Create a mask for the specific contour
+        mask = np.zeros((height, width), dtype=np.uint8)
+        cv2.drawContours(mask, [target_contour], 0, 255, -1)
 
-        # Start the fill process from the clicked position
-        stack_based_fill(pos.x(), pos.y())
+        # Define the fill color (white with full opacity)
+        fill_color = np.array([255, 255, 255, 255], dtype=np.uint8)
+
+        # Create a mask of existing content within the contour
+        existing_content = (arr[..., 3] > 0) & (mask > 0)
+
+        # Fill only the area within the contour that isn't already filled
+        fill_area = (mask > 0) & ~existing_content
+
+        # Apply the fill
+        arr[fill_area] = fill_color
 
         # Convert the numpy array back to QImage
         bytes_per_line = width * 4
@@ -670,6 +758,36 @@ class MaskTracingInterface(QWidget):
             arr.data, width, height, bytes_per_line, QImage.Format.Format_RGBA8888
         )
 
-        # Update the mask pixmap
+        # Save for undo and update the mask pixmap
+        self.save_for_undo()
         self.mask_pixmap = QPixmap.fromImage(result_image)
+        self.update_display()
+
+    def apply_normalization(self):
+        if not self.current_image_path:
+            return
+
+        method = self.norm_controls.method_combo.currentText()
+        img = cv2.imread(self.current_image_path)
+
+        if method == "CLAHE":
+            clip_limit = self.norm_controls.clip_slider.value() / 10.0
+            tile_size = self.norm_controls.tile_slider.value()
+            enhanced = ImageNormalization.apply_clahe(
+                img, clip_limit=clip_limit, tile_size=(tile_size, tile_size)
+            )
+        else:  # Contrast Stretching
+            lower = self.norm_controls.lower_slider.value()
+            upper = self.norm_controls.upper_slider.value()
+            enhanced = ImageNormalization.apply_contrast_stretching(
+                img, lower_percentile=lower, upper_percentile=upper
+            )
+
+        # Convert to QPixmap and update display
+        rgb_img = cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB)
+        height, width, channel = rgb_img.shape
+        q_img = QImage(
+            rgb_img.data, width, height, width * 3, QImage.Format.Format_RGB888
+        )
+        self.image_pixmap = QPixmap.fromImage(q_img)
         self.update_display()

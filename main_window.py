@@ -288,7 +288,7 @@ class MainWindow(QMainWindow):
             return
 
         base_path = os.path.dirname(first_image_path)
-        if "output/skeletonizer/test_latest" not in base_path:
+        if "output\skeletonizer\test_latest" not in base_path:
             base_path = os.path.join(base_path, "output", "skeletonizer", "test_latest")
         csv_path = os.path.normpath(os.path.join(base_path, "root_lengths.csv"))
         print(f"DEBUG: Constructed csv_path: {csv_path}")
