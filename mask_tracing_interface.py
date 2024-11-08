@@ -5,9 +5,11 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSlider,
     QLabel,
-    QScrollArea,
     QButtonGroup,
     QGroupBox,
+    QGraphicsScene,
+    QGraphicsPixmapItem,
+    QGraphicsView,
 )
 from PyQt6.QtGui import (
     QPixmap,
@@ -21,26 +23,186 @@ from PyQt6.QtGui import (
     QShortcut,
     QWheelEvent,
 )
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRect, QEvent, QPointF
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF, QEvent, QPointF
 import os
 import numpy as np
 import cv2
 from image_normalization_interface import ImageNormalization, NormalizationControls
+from PyQt6.QtGui import QMouseEvent
 
 
-def is_point_in_closed_area(arr, pos):
-    # Convert the image to grayscale and apply thresholding to binary
-    gray = cv2.cvtColor(arr, cv2.COLOR_RGBA2GRAY)
-    _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY)
+class MaskTracingGraphicsView(QGraphicsView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.mask_tracing_interface = parent
+        self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.pan_mode = False
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.drawing = False
+        self.zoom_factor = 1.0
+        self.min_zoom = 0.1
+        self.max_zoom = 10.0
 
-    # Find contours in the binary image
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    def wheelEvent(self, event: QWheelEvent):
+        if self.drawing:
+            event.ignore()
+            return
 
-    # Check if the point is inside any contour
-    for contour in contours:
-        if cv2.pointPolygonTest(contour, (pos.x(), pos.y()), False) >= 0:
-            return True
-    return False
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            # Store the scene pos before zoom
+            old_pos = self.mapToScene(event.position().toPoint())
+
+            # Zoom
+            zoom_in = event.angleDelta().y() > 0
+            if zoom_in and self.zoom_factor < self.max_zoom:
+                factor = 1.25
+                self.zoom_factor *= factor
+            elif not zoom_in and self.zoom_factor > self.min_zoom:
+                factor = 0.8
+                self.zoom_factor *= factor
+            else:
+                event.ignore()
+                return
+
+            if self.pan_mode:
+                # In pan mode, zoom to cursor
+                self.setTransformationAnchor(
+                    QGraphicsView.ViewportAnchor.AnchorUnderMouse
+                )
+                self.scale(factor, factor)
+            else:
+                # In draw mode, zoom to center
+                self.setTransformationAnchor(
+                    QGraphicsView.ViewportAnchor.AnchorViewCenter
+                )
+                self.scale(factor, factor)
+
+            # Update the mask interface zoom slider if it exists - convert to integer
+            if hasattr(self.mask_tracing_interface, "zoom_slider"):
+                zoom_percent = int(round(self.zoom_factor * 100))
+                self.mask_tracing_interface.zoom_slider.setValue(zoom_percent)
+                # Update the zoom label if it exists
+                if hasattr(self.mask_tracing_interface, "zoom_label"):
+                    self.mask_tracing_interface.zoom_label.setText(
+                        f"Zoom: {zoom_percent}%"
+                    )
+
+            event.accept()
+        else:
+            # Allow normal scrolling in pan mode, prevent in draw mode
+            if not self.drawing:
+                super().wheelEvent(event)
+
+    def scrollContentsBy(self, dx: int, dy: int):
+        """Override scroll behavior to prevent scrolling during drawing"""
+        if not self.drawing:
+            super().scrollContentsBy(dx, dy)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if self.pan_mode:
+            # In pan mode, handle only panning
+            if event.button() in [
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.MiddleButton,
+            ]:
+                self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+                super().mousePressEvent(event)
+        else:
+            # In draw mode, handle only drawing
+            if (
+                event.button() == Qt.MouseButton.LeftButton
+                and self.mask_tracing_interface.mask_pixmap
+            ):
+                self.drawing = True
+                self.viewport().setProperty(
+                    "cursor", self.mask_tracing_interface.brush_cursor
+                )
+                self.mask_tracing_interface.drawing = True
+                self.mask_tracing_interface.save_for_undo()
+                pos = self.map_to_image(event.position())
+
+                if self.mask_tracing_interface.fill_button.isChecked():
+                    self.mask_tracing_interface.flood_fill(pos)
+                elif self.mask_tracing_interface.brush_button.isChecked():
+                    self.mask_tracing_interface.draw_point(pos)
+
+                event.accept()
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self.pan_mode:
+            # In pan mode, handle only panning
+            if event.button() in [
+                Qt.MouseButton.LeftButton,
+                Qt.MouseButton.MiddleButton,
+            ]:
+                self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+                super().mouseReleaseEvent(event)
+        else:
+            # In draw mode, handle only drawing
+            if event.button() == Qt.MouseButton.LeftButton:
+                self.drawing = False
+                self.mask_tracing_interface.drawing = False
+                self.mask_tracing_interface.last_point = None
+                event.accept()
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self.pan_mode:
+            # In pan mode, handle only panning
+            super().mouseMoveEvent(event)
+        else:
+            # In draw mode, handle only drawing
+            if (
+                event.buttons() & Qt.MouseButton.LeftButton
+                and self.mask_tracing_interface.drawing
+                and self.mask_tracing_interface.mask_pixmap
+            ):
+                pos = self.map_to_image(event.position())
+                self.mask_tracing_interface.draw_point(pos)
+                event.accept()
+
+    def set_mode(self, pan_mode: bool):
+        """Switch between pan and draw modes"""
+        self.pan_mode = pan_mode
+        self.drawing = False
+        if pan_mode:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+            self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        else:
+            self.setCursor(self.mask_tracing_interface.brush_cursor)
+            self.setDragMode(QGraphicsView.DragMode.NoDrag)
+            self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+
+    def map_to_image(self, pos: QPointF):
+        scene_pos = self.mapToScene(pos.toPoint())
+        image_x = int(scene_pos.x())
+        image_y = int(scene_pos.y())
+
+        final_x = max(
+            0, min(image_x, self.mask_tracing_interface.mask_pixmap.width() - 1)
+        )
+        final_y = max(
+            0, min(image_y, self.mask_tracing_interface.mask_pixmap.height() - 1)
+        )
+
+        return QPoint(final_x, final_y)
+
+    def ensureVisible(self, *args, **kwargs):
+        """Override to prevent automatic scrolling during drawing"""
+        if not self.drawing:
+            super().ensureVisible(*args, **kwargs)
+
+    def set_zoom(self, factor):
+        """Set zoom level directly (called from zoom slider)"""
+        if self.min_zoom <= factor / 100 <= self.max_zoom:
+            scale = (factor / 100) / self.zoom_factor
+            self.zoom_factor = factor / 100
+            self.scale(scale, scale)
 
 
 class MaskTracingInterface(QWidget):
@@ -55,7 +217,6 @@ class MaskTracingInterface(QWidget):
         self.undo_stack = []
         self.redo_stack = []
         self.b_key_pressed = False
-        self.scroll_area = None
         self.size_slider = None
         self.zoom_slider = None
         self.initUI()
@@ -64,16 +225,33 @@ class MaskTracingInterface(QWidget):
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)  # Reduce overall margins
 
-        # Scroll area for image and mask
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scroll_area.viewport().installEventFilter(self)
+        # Graphics View and Scene for image and mask
+        self.graphics_view = MaskTracingGraphicsView(self)  # Use the subclassed view
+        self.graphics_view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.graphics_view.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self.graphics_view.setViewportUpdateMode(
+            QGraphicsView.ViewportUpdateMode.FullViewportUpdate
+        )
+        self.graphics_view.setTransformationAnchor(
+            QGraphicsView.ViewportAnchor.AnchorUnderMouse
+        )
+        self.graphics_view.setResizeAnchor(
+            QGraphicsView.ViewportAnchor.AnchorUnderMouse
+        )
 
-        self.image_mask_label = QLabel()
-        self.image_mask_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scroll_area.setWidget(self.image_mask_label)
-        main_layout.addWidget(self.scroll_area)
+        self.scene = QGraphicsScene()
+        self.graphics_view.setScene(self.scene)
+        main_layout.addWidget(self.graphics_view)
+
+        # Initialize pixmap items for image and mask
+        self.image_item = QGraphicsPixmapItem()
+        self.image_item.setZValue(0)
+        self.scene.addItem(self.image_item)
+
+        self.mask_item = QGraphicsPixmapItem()
+        self.mask_item.setOpacity(1.0)  # Initial opacity
+        self.mask_item.setZValue(1)
+        self.scene.addItem(self.mask_item)
 
         # Bottom control panel with dark background
         control_panel = QWidget()
@@ -226,7 +404,7 @@ class MaskTracingInterface(QWidget):
 
         # Create sliders with labels
         sliders_data = [
-            ("Brush Size", 3, 100, 5),
+            ("Brush Size", 1, 100, 5),
             ("Opacity", 0, 100, 100),
             ("Zoom", 10, 200, 100),
         ]
@@ -264,6 +442,34 @@ class MaskTracingInterface(QWidget):
         self.norm_controls = NormalizationControls(self)
         control_layout.addWidget(self.norm_controls)
 
+        toggle_button_style = """
+            QPushButton {
+                background-color: #2d2d2d;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                color: white;
+                min-width: 40px;
+                max-width: 100px;
+                min-height: 28px;
+                max-height: 28px;
+                font-size: 14px;
+            }
+            QPushButton:checked {
+                background-color: #404040;
+            }
+            QPushButton:hover {
+                background-color: #404040;
+            }
+        """
+
+        self.mode_toggle = QPushButton("🔒 Draw")
+        self.mode_toggle.setStyleSheet(toggle_button_style)
+        self.mode_toggle.setCheckable(True)
+        self.mode_toggle.setChecked(True)  # Start in draw mode
+        self.mode_toggle.clicked.connect(self.toggle_mode)
+        tools_layout.addWidget(self.mode_toggle)
+
         # Add the control panel to the main layout
         main_layout.addWidget(control_panel)
 
@@ -295,10 +501,30 @@ class MaskTracingInterface(QWidget):
         self.mask_pixmap = None
         self.image_pixmap = None
 
-        # Set custom cursor
-        self.setCursor(self.create_cursor(self.brush_size))
+        # Create custom cursors
+        self.create_cursors()
 
-    def create_cursor(self, size):
+        # Set the initial cursor
+        self.setCursor(self.brush_cursor)
+
+    def toggle_mode(self):
+        if self.mode_toggle.isChecked():
+            self.mode_toggle.setText("🔒 Draw")
+            self.graphics_view.set_mode(False)  # Draw mode
+        else:
+            self.mode_toggle.setText("✋ Pan")
+            self.graphics_view.set_mode(True)  # Pan mode
+
+    def create_cursors(self):
+        """Creates custom cursors for drawing and panning."""
+        # Brush Cursor
+        self.brush_cursor = self.create_brush_cursor(self.brush_size)
+
+        # Panning Cursor (Open Hand)
+        self.panning_cursor = QCursor(Qt.CursorShape.OpenHandCursor)
+
+    def create_brush_cursor(self, size):
+        """Creates a custom brush cursor based on the brush size."""
         cursor_size = max(size * 2, 32)  # Ensure the cursor is at least 32x32 pixels
         cursor_pixmap = QPixmap(cursor_size, cursor_size)
         cursor_pixmap.fill(Qt.GlobalColor.transparent)
@@ -334,6 +560,7 @@ class MaskTracingInterface(QWidget):
         return QCursor(cursor_pixmap, hotspot.x(), hotspot.y())
 
     def load_image(self, image_path):
+        """Initialize a new image for editing"""
         # Clear previous image and mask data
         self.current_image_path = image_path
         self.mask_directory = os.path.join(os.path.dirname(image_path), "mask")
@@ -341,6 +568,22 @@ class MaskTracingInterface(QWidget):
         # Clear undo/redo stacks
         self.undo_stack.clear()
         self.redo_stack.clear()
+
+        # Create a new scene and items
+        self.scene = QGraphicsScene()
+        self.graphics_view.setScene(self.scene)
+
+        # Create new graphics items
+        self.image_item = QGraphicsPixmapItem()
+        self.mask_item = QGraphicsPixmapItem()
+
+        # Add items to scene immediately
+        self.scene.addItem(self.image_item)
+        self.scene.addItem(self.mask_item)
+
+        # Set z-order
+        self.image_item.setZValue(0)
+        self.mask_item.setZValue(1)
 
         # Load the new image
         self.image_pixmap = QPixmap(image_path)
@@ -357,115 +600,49 @@ class MaskTracingInterface(QWidget):
         if self.zoom_slider:
             self.zoom_slider.setValue(100)
         if self.opacity_slider:
-            self.opacity_slider.setValue(0)
+            self.opacity_slider.setValue(100)
 
         # Load existing mask if it exists
         mask_path = os.path.join(self.mask_directory, os.path.basename(image_path))
         if os.path.exists(mask_path):
-            self.mask_pixmap = QPixmap(mask_path)
+            # Read the mask using OpenCV
+            mask_cv = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+            if mask_cv is not None:
+                # Create RGBA image with transparency
+                height, width = mask_cv.shape
+                rgba = np.zeros((height, width, 4), dtype=np.uint8)
+                # Set white color only where mask is definitely white (255)
+                mask = mask_cv == 255
+                rgba[mask] = [255, 255, 255, 255]  # White with full opacity
+                # Create QImage from numpy array
+                mask_qimage = QImage(
+                    rgba.data, width, height, width * 4, QImage.Format.Format_RGBA8888
+                )
+                self.mask_pixmap = QPixmap.fromImage(mask_qimage)
 
-        # Force update of the display
+        # Update the display
         self.update_display()
 
     def update_display(self):
-        if self.image_pixmap and self.mask_pixmap:
-            # Create a new pixmap for the combined display
-            combined_pixmap = QPixmap(self.image_pixmap.size())
-            combined_pixmap.fill(Qt.GlobalColor.transparent)
-            painter = QPainter(combined_pixmap)
+        if not self.image_pixmap or not self.mask_pixmap:
+            return
 
-            # Always draw the background image at full opacity
-            painter.drawPixmap(0, 0, self.image_pixmap)
+        # Only recreate items if they're not in the scene
+        if not self.image_item.scene():
+            self.scene.addItem(self.image_item)
+            self.image_item.setZValue(0)
 
-            # Draw the mask with current opacity
-            painter.setOpacity(self.brush_opacity)
+        if not self.mask_item.scene():
+            self.scene.addItem(self.mask_item)
+            self.mask_item.setZValue(1)
 
-            # When erasing, reduce the mask opacity further
-            if self.eraser_button.isChecked():
-                painter.setOpacity(max(0.3, self.brush_opacity))
+        # Update the pixmaps directly
+        self.image_item.setPixmap(self.image_pixmap)
+        self.mask_item.setPixmap(self.mask_pixmap)
 
-            painter.drawPixmap(0, 0, self.mask_pixmap)
-            painter.end()
-
-            # Scale the combined image according to zoom factor
-            scaled_pixmap = combined_pixmap.scaled(
-                combined_pixmap.size() * self.zoom_factor,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-
-            self.image_mask_label.setPixmap(scaled_pixmap)
-            self.image_mask_label.setFixedSize(scaled_pixmap.size())
-            # Remove this line since image_container no longer exists:
-            # self.image_container.setFixedSize(scaled_pixmap.size())
-            self.scroll_area.setWidgetResizable(False)
-            self.scroll_area.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self.mask_pixmap:
-            self.drawing = True
-            self.save_for_undo()
-            pos = self.map_to_image(event.pos())
-
-            if self.fill_button.isChecked():
-                self.flood_fill(pos)
-            elif self.brush_button.isChecked():
-                self.draw_point(pos)
-
-    def mouseMoveEvent(self, event):
-        if (
-            event.buttons() & Qt.MouseButton.LeftButton
-            and self.drawing
-            and self.mask_pixmap
-        ):
-            pos = self.map_to_image(event.pos())
-            self.draw_point(pos)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.drawing = False
-            self.last_point = None
-
-    def map_to_image(self, pos):
-        """Maps window coordinates to image coordinates accounting for scroll position and widget alignment."""
-
-        # Get scroll bar visibility and scroll values
-        h_scroll_visible = self.scroll_area.horizontalScrollBar().isVisible()
-        v_scroll_visible = self.scroll_area.verticalScrollBar().isVisible()
-        h_scroll = self.scroll_area.horizontalScrollBar().value()
-        v_scroll = self.scroll_area.verticalScrollBar().value()
-
-        # Get viewport and widget geometries
-        viewport_rect = self.scroll_area.viewport().rect()
-        label_rect = self.image_mask_label.rect()
-
-        # Calculate centering offsets if the widget is smaller than viewport
-        h_offset = max(0, (viewport_rect.width() - label_rect.width()) // 2)
-        v_offset = max(0, (viewport_rect.height() - label_rect.height()) // 2)
-
-        # Convert input position to viewport coordinates
-        viewport_pos = self.scroll_area.viewport().mapFrom(self, pos)
-
-        # Adjust for scrolling and centering
-        if h_scroll_visible:
-            x = viewport_pos.x() + h_scroll - h_offset
-        else:
-            x = viewport_pos.x() - h_offset
-
-        if v_scroll_visible:
-            y = viewport_pos.y() + v_scroll - v_offset
-        else:
-            y = viewport_pos.y() - v_offset
-
-        # Scale coordinates according to zoom factor
-        image_x = int(x / self.zoom_factor)
-        image_y = int(y / self.zoom_factor)
-
-        # Ensure coordinates are within image boundaries
-        final_x = max(0, min(image_x, self.mask_pixmap.width() - 1))
-        final_y = max(0, min(image_y, self.mask_pixmap.height() - 1))
-
-        return QPoint(final_x, final_y)
+        # Update scene rect only if needed
+        if self.scene.sceneRect() != QRectF(self.image_pixmap.rect()):
+            self.scene.setSceneRect(QRectF(self.image_pixmap.rect()))
 
     def draw_point(self, pos):
         if not self.mask_pixmap:
@@ -473,12 +650,14 @@ class MaskTracingInterface(QWidget):
 
         painter = QPainter(self.mask_pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
         # Create a temporary pixmap for the current stroke
         temp_pixmap = QPixmap(self.mask_pixmap.size())
         temp_pixmap.fill(Qt.GlobalColor.transparent)
         temp_painter = QPainter(temp_pixmap)
         temp_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        temp_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
         # Set up the pen and brush
         pen = QPen(
@@ -529,7 +708,9 @@ class MaskTracingInterface(QWidget):
     def update_brush_size(self, value):
         self.brush_size = value
         self.size_label.setText(f"Brush Size: {value}")
-        self.setCursor(self.create_cursor(self.brush_size))
+        self.brush_cursor = self.create_brush_cursor(self.brush_size)
+        if self.drawing:
+            self.setCursor(self.brush_cursor)
 
     def update_opacity(self, value):
         # Map the 0-100 range to 0.3-1.0 range to maintain minimum visibility
@@ -537,12 +718,13 @@ class MaskTracingInterface(QWidget):
         self.opacity_label.setText(
             f"Opacity: {value}%"
         )  # Display the original 0-100 value
-        self.update_display()
+        self.mask_item.setOpacity(self.brush_opacity)
 
     def update_zoom(self, value):
         self.zoom_factor = value / 100
         self.zoom_label.setText(f"Zoom: {value}%")
-        self.update_display()
+        self.graphics_view.resetTransform()
+        self.graphics_view.scale(self.zoom_factor, self.zoom_factor)
 
     def save_mask(self):
         if self.mask_pixmap and self.current_image_path:
@@ -556,63 +738,14 @@ class MaskTracingInterface(QWidget):
             # Convert QPixmap to QImage
             mask_image = self.mask_pixmap.toImage()
 
-            # Convert QImage to numpy array
-            width = mask_image.width()
-            height = mask_image.height()
-            ptr = mask_image.bits()
-            ptr.setsize(height * width * 4)  # Assuming 4 channels (RGBA)
-            arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 4))
+            # Ensure the image has an alpha channel
+            if mask_image.format() != QImage.Format.Format_ARGB32:
+                mask_image = mask_image.convertToFormat(QImage.Format.Format_ARGB32)
 
-            # Extract RGB and alpha channels
-            rgb = arr[:, :, :3]  # Only RGB channels
-            alpha = arr[:, :, 3].astype(float) / 255.0  # Normalize alpha to 0-1 range
+            # Save the image with high-quality settings
+            mask_image.save(save_path, "PNG", 100)
 
-            # Create a mask for additions (white areas with any level of opacity)
-            additions_mask = np.max(rgb, axis=2) * alpha
-
-            # Create a mask for erasures (dark areas with any level of opacity)
-            erasures_mask = np.max(rgb, axis=2) < 254  # Binary mask for erasures
-
-            # Check if a mask already exists
-            if os.path.exists(save_path):
-                # Load the existing mask in greyscale
-                existing_mask = (
-                    cv2.imread(save_path, cv2.IMREAD_GRAYSCALE).astype(float) / 255.0
-                )
-
-                # Ensure the existing mask has the same dimensions
-                if existing_mask.shape != (height, width):
-                    existing_mask = cv2.resize(existing_mask, (width, height))
-
-                # Merge the existing mask with new additions and erasures
-                merged_mask = existing_mask - erasures_mask + additions_mask
-                merged_mask = np.clip(
-                    merged_mask, 0, 1
-                )  # Ensure values are in 0-1 range
-            else:
-                # If no existing mask, use the additions mask and apply erasures
-                merged_mask = additions_mask - erasures_mask
-                merged_mask = np.clip(
-                    merged_mask, 0, 1
-                )  # Ensure values are in 0-1 range
-
-            # Convert to 8-bit grayscale
-            gray_mask = (merged_mask * 255).astype(np.uint8)
-
-            # Apply morphological operations to clean up the mask
-            kernel = np.ones((3, 3), np.uint8)
-            opened_mask = cv2.morphologyEx(gray_mask, cv2.MORPH_OPEN, kernel)
-            final_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel)
-
-            # Apply threshold to create the final binary mask
-            _, binary_mask = cv2.threshold(final_mask, 127, 255, cv2.THRESH_BINARY)
-
-            # Save the binary mask with high quality
-            cv2.imwrite(save_path, binary_mask, [cv2.IMWRITE_PNG_COMPRESSION, 9])
-
-            print(f"DEBUG: Mask saved to {save_path}")
-
-            # Emit signal indicating the mask has been saved
+            print(f"Mask saved to {save_path}")
             self.mask_saved.emit(self.current_image_path)
 
     def clear_mask(self):
@@ -656,7 +789,7 @@ class MaskTracingInterface(QWidget):
                 print("B KEY UNPRESSED")
         super().keyPressEvent(event)
 
-    def wheelEvent(self, event):
+    def wheelEvent(self, event: QWheelEvent):
         if self.b_key_pressed and event.modifiers() == Qt.KeyboardModifier.NoModifier:
             # Adjust brush size
             delta = event.angleDelta().y()
@@ -678,32 +811,10 @@ class MaskTracingInterface(QWidget):
             event.ignore()
             super().wheelEvent(event)
 
-    def eventFilter(self, obj, event):
-        if obj == self.scroll_area.viewport() and event.type() == QEvent.Type.Wheel:
-            # Convert QEvent to QWheelEvent
-            wheel_event = QWheelEvent(
-                QPointF(event.position()),  # Convert QPoint to QPointF
-                QPointF(event.globalPosition()),  # Convert QPoint to QPointF
-                event.pixelDelta(),
-                event.angleDelta(),
-                event.buttons(),
-                event.modifiers(),
-                Qt.ScrollPhase.NoScrollPhase,  # Default scroll phase
-                False,  # Not inverted
-                Qt.MouseEventSource.MouseEventNotSynthesized,  # Default source
-            )
-
-            # Send the wheel event to our wheelEvent method
-            self.wheelEvent(wheel_event)
-
-            # If the event was accepted by our wheelEvent, we're done
-            if wheel_event.isAccepted():
-                return True
-
-        # For all other cases, including unhandled wheel events
-        return super().eventFilter(obj, event)
-
     def flood_fill(self, pos):
+        """
+        Enhanced flood fill that uses the current brush color.
+        """
         if not self.mask_pixmap:
             return
 
@@ -711,56 +822,80 @@ class MaskTracingInterface(QWidget):
         image = self.mask_pixmap.toImage()
         width, height = image.width(), image.height()
 
-        # Create a numpy array from the image for faster processing
-        buffer = image.bits().asstring(width * height * 4)
-        arr = np.frombuffer(buffer, dtype=np.uint8).reshape((height, width, 4)).copy()
+        # Convert QImage to numpy array
+        image = image.convertToFormat(QImage.Format.Format_ARGB32)
+        ptr = image.bits()
+        ptr.setsize(height * width * 4)
+        arr = np.frombuffer(ptr, dtype=np.uint8).reshape((height, width, 4))
 
-        # Convert to grayscale for boundary detection
-        gray = cv2.cvtColor(arr, cv2.COLOR_RGBA2GRAY)
+        # Get the brush color components
+        brush_color = self.brush_color
+        r, g, b = brush_color.red(), brush_color.green(), brush_color.blue()
 
-        # Find contours in the image
-        _, binary = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+        # Extract the alpha channel
+        alpha_channel = arr[:, :, 3].copy()  # Make a copy to preserve original
+
+        # Create a binary mask from alpha channel
+        binary_mask = (alpha_channel > 0).astype(np.uint8) * 255
+
+        # Find contours in the binary mask
         contours, _ = cv2.findContours(
-            binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
         )
 
-        # Find which contour contains the click point
-        point = (pos.x(), pos.y())
+        # Seed point for flood fill
+        seed_x, seed_y = pos.x(), pos.y()
+
+        # Create a mask for the local region around the clicked point
+        local_mask = np.zeros((height + 2, width + 2), np.uint8)
+
+        # Find which contour contains the seed point (if any)
         target_contour = None
         for contour in contours:
-            if cv2.pointPolygonTest(contour, point, False) >= 0:
+            if cv2.pointPolygonTest(contour, (seed_x, seed_y), False) >= 0:
                 target_contour = contour
                 break
 
-        # If no containing contour found, return
+        # If no contour contains the point, create a new fill region
         if target_contour is None:
-            return
+            # Create a mask for floodFill
+            flood_mask = np.zeros((height + 2, width + 2), np.uint8)
 
-        # Create a mask for the specific contour
-        mask = np.zeros((height, width), dtype=np.uint8)
-        cv2.drawContours(mask, [target_contour], 0, 255, -1)
+            # Perform flood fill on the alpha channel with connectivity=8
+            flags = 8 | cv2.FLOODFILL_FIXED_RANGE | cv2.FLOODFILL_MASK_ONLY
+            _, local_mask, _, _ = cv2.floodFill(
+                alpha_channel.copy(),  # Use a copy to avoid modifying original
+                flood_mask,
+                (seed_x, seed_y),
+                255,
+                loDiff=0,
+                upDiff=0,
+                flags=flags,
+            )
+        else:
+            # Create a mask from the target contour
+            local_mask = np.zeros((height, width), np.uint8)
+            cv2.drawContours(local_mask, [target_contour], -1, 255, -1)
 
-        # Define the fill color (white with full opacity)
-        fill_color = np.array([255, 255, 255, 255], dtype=np.uint8)
-
-        # Create a mask of existing content within the contour
-        existing_content = (arr[..., 3] > 0) & (mask > 0)
-
-        # Fill only the area within the contour that isn't already filled
-        fill_area = (mask > 0) & ~existing_content
-
-        # Apply the fill
-        arr[fill_area] = fill_color
+        # Fill the region with the brush color
+        if self.eraser_button.isChecked():
+            # For eraser, set alpha to 0
+            arr[local_mask == 255, 3] = 0
+        else:
+            # For brush, set the color and alpha
+            arr[local_mask == 255, 0] = b  # Blue component
+            arr[local_mask == 255, 1] = g  # Green component
+            arr[local_mask == 255, 2] = r  # Red component
+            arr[local_mask == 255, 3] = 255  # Alpha
 
         # Convert the numpy array back to QImage
-        bytes_per_line = width * 4
         result_image = QImage(
-            arr.data, width, height, bytes_per_line, QImage.Format.Format_RGBA8888
+            arr.data, width, height, width * 4, QImage.Format.Format_RGBA8888
         )
 
         # Save for undo and update the mask pixmap
         self.save_for_undo()
-        self.mask_pixmap = QPixmap.fromImage(result_image)
+        self.mask_pixmap = QPixmap.fromImage(result_image.copy())
         self.update_display()
 
     def apply_normalization(self):
