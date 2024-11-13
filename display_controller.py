@@ -111,6 +111,17 @@ class DisplayController:
         self.update_display()
 
     def update_display_mode(self):
+        """Handle view mode changes"""
+        view_mode = self.main_window.view_mode_combo.currentText()
+        print(f"DEBUG: View mode changed to {view_mode}")
+
+        # Reload images based on the new view mode
+        self.main_window.image_manager.reload_for_view_mode(view_mode)
+
+        # Refresh the file list in the main window
+        self.main_window.populate_file_list()
+
+        # Update the display
         self.update_display()
 
     def update_display(self):
