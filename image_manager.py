@@ -115,16 +115,16 @@ class ImageLoaderThread(QThread):
 
 class ImageManager:
     def __init__(self, main_window=None):
-        self.images = {}
-        self.fake_images = {}
+        self.images = {}  # Regular image paths
+        self.fake_images = {}  # Processed image paths
+        self.masks = {}  # Mask paths
         self.has_fake_real_pairs = False
         self.html_path = None
-        self.masks = {}
         self.original_folder = None
         self.loader_thread = None
         self.main_window = main_window
         self.current_view_mode = None
-        self.processed_images_loaded = False
+        self.processed_base_path = None  # Path to processed images directory
 
     def load_images(self, folder_path=None):
         """Load initial images without processing fake/real pairs"""
@@ -136,17 +136,18 @@ class ImageManager:
         if folder_path:
             self.original_folder = folder_path
             self._clear_images()
-            self.processed_images_loaded = False  # Reset the processed images flag
+
+            # Find processed images directory path
+            self._find_processed_base_path()
 
             # Cancel any existing loading thread
             if self.loader_thread is not None and self.loader_thread.isRunning():
                 self.loader_thread.terminate()
                 self.loader_thread.wait()
 
-            # Start new loading thread with load_skeletons=False for initial load
+            # Start new loading thread for regular images only
             self.loader_thread = ImageLoaderThread(folder_path, load_skeletons=False)
 
-            # Connect signals to main window methods
             if self.main_window:
                 self.loader_thread.progress.connect(
                     self.main_window.update_loading_progress
@@ -155,60 +156,79 @@ class ImageManager:
 
             self.loader_thread.start()
 
-    def reload_for_view_mode(self, view_mode):
-        """
-        Reload and reorganize images based on the selected view mode
-        Only loads processed images if they haven't been loaded before
-        """
-        print(f"DEBUG: Reloading images for view mode: {view_mode}")
-        self.current_view_mode = view_mode
-
-        if self.original_folder is None:
-            print("DEBUG: No folder loaded yet")
+    def _find_processed_base_path(self):
+        """Find the path to processed images directory"""
+        if not self.original_folder:
             return
 
-        needs_processed_images = view_mode in ["Basic View", "Overlay", "Side by Side"]
+        potential_path = os.path.join(
+            self.original_folder, "output", "skeletonizer", "test_latest", "images"
+        )
+        if os.path.exists(potential_path):
+            self.processed_base_path = potential_path
+            print(f"DEBUG: Found processed images at {potential_path}")
 
-        if needs_processed_images and not self.processed_images_loaded:
-            # Only load processed images if they haven't been loaded before
-            if self.loader_thread is not None and self.loader_thread.isRunning():
-                self.loader_thread.terminate()
-                self.loader_thread.wait()
-
-            # Start new loading thread for processed images
-            self.loader_thread = ImageLoaderThread(
-                self.original_folder, load_skeletons=True
-            )
-
-            # Connect signals to main window methods
-            if self.main_window:
-                self.loader_thread.progress.connect(
-                    self.main_window.update_loading_progress
-                )
-                self.loader_thread.finished.connect(self.on_loading_finished)
-
-            self.loader_thread.start()
-            self.processed_images_loaded = True
+            # Check for HTML file
+            test_latest_dir = os.path.dirname(potential_path)
+            potential_html = os.path.join(test_latest_dir, "index.html")
+            if os.path.exists(potential_html):
+                self.html_path = potential_html
+                print(f"DEBUG: Found HTML file at {potential_html}")
         else:
-            # Just update the display without reloading
-            if self.main_window:
-                self.main_window.populate_file_list()
-                self.main_window.display_controller.update_display()
+            print(f"DEBUG: No processed images found in {potential_path}")
+
+    def get_fake_image_path(self, name):
+        """Get processed image path with lazy loading"""
+        # If already loaded, return from cache
+        if name in self.fake_images:
+            return self.fake_images[name]
+
+        # Only try to load if we need processed images and have the base path
+        if (
+            self.current_view_mode in ["Basic View", "Overlay", "Side by Side"]
+            and self.processed_base_path
+        ):
+
+            # Look for fake image
+            fake_path = os.path.join(self.processed_base_path, f"{name}_fake.png")
+            if os.path.exists(fake_path):
+                self.fake_images[name] = fake_path
+                self.has_fake_real_pairs = True
+                print(f"DEBUG: Lazy loaded processed image: {fake_path}")
+                return fake_path
+
+        return None
+
+    def reload_for_view_mode(self, view_mode):
+        """Update view mode without full reload"""
+        print(f"DEBUG: Switching to view mode: {view_mode}")
+        self.current_view_mode = view_mode
+
+        # Clear processed images cache when switching to single image mode
+        if view_mode == "Single Image":
+            self.fake_images.clear()
+            self.has_fake_real_pairs = False
+
+        # Update the display
+        if self.main_window:
+            self.main_window.populate_file_list()
+            self.main_window.display_controller.update_display()
 
     def on_loading_finished(
         self, images, fake_images, masks, html_path, has_fake_real_pairs
     ):
         """Handle completion of image loading"""
         self.images = images
-        self.fake_images = fake_images
         self.masks = masks
-        self.html_path = html_path
-        self.has_fake_real_pairs = has_fake_real_pairs
 
-        # Update UI through main window
+        # Don't overwrite fake_images as we're handling them with lazy loading
         if self.main_window:
             self.main_window.on_loading_finished(
-                images, fake_images, masks, html_path, has_fake_real_pairs
+                images,
+                self.fake_images,
+                masks,
+                self.html_path,
+                self.has_fake_real_pairs,
             )
 
     def _clear_images(self):
@@ -218,16 +238,13 @@ class ImageManager:
         self.has_fake_real_pairs = False
         self.html_path = None
         self.masks.clear()
-        self.processed_images_loaded = False
+        self.processed_base_path = None
 
     def get_image_names(self):
         return list(self.images.keys())
 
     def get_image_path(self, name):
         return self.images.get(name)
-
-    def get_fake_image_path(self, name):
-        return self.fake_images.get(name)
 
     def has_mask(self, name):
         return name in self.masks

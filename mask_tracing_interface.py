@@ -555,11 +555,33 @@ class MaskTracingInterface(QWidget):
 
         return QCursor(cursor_pixmap, hotspot.x(), hotspot.y())
 
+    def find_mask_path(self, image_path):
+        """Find the corresponding mask file, with enhanced debugging."""
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        # Try these extensions in order of preference
+        extensions = [".png", ".PNG", ".jpg", ".JPG", ".jpeg", ".JPEG"]
+
+        print(f"DEBUG: Looking for mask for image: {image_path}")
+        print(f"DEBUG: Base name: {base_name}")
+        print(f"DEBUG: Mask directory: {self.mask_directory}")
+
+        for ext in extensions:
+            mask_path = os.path.join(self.mask_directory, base_name + ext)
+            print(f"DEBUG: Checking for mask at: {mask_path}")
+            if os.path.exists(mask_path):
+                print(f"DEBUG: Found mask at: {mask_path}")
+                return mask_path
+        print("DEBUG: No mask found")
+        return None
+
     def load_image(self, image_path):
-        """Initialize a new image for editing"""
+        """Initialize a new image for editing with enhanced mask loading."""
+        print(f"\nDEBUG: Loading image: {image_path}")
+
         # Clear previous image and mask data
         self.current_image_path = image_path
         self.mask_directory = os.path.join(os.path.dirname(image_path), "mask")
+        print(f"DEBUG: Set mask directory to: {self.mask_directory}")
 
         # Clear undo/redo stacks
         self.undo_stack.clear()
@@ -583,6 +605,7 @@ class MaskTracingInterface(QWidget):
 
         # Load the new image
         self.image_pixmap = QPixmap(image_path)
+        print(f"DEBUG: Loaded image with size: {self.image_pixmap.size()}")
 
         # Create a fresh transparent mask
         self.mask_pixmap = QPixmap(self.image_pixmap.size())
@@ -599,22 +622,38 @@ class MaskTracingInterface(QWidget):
             self.opacity_slider.setValue(100)
 
         # Load existing mask if it exists
-        mask_path = os.path.join(self.mask_directory, os.path.basename(image_path))
-        if os.path.exists(mask_path):
-            # Read the mask using OpenCV
-            mask_cv = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            if mask_cv is not None:
-                # Create RGBA image with transparency
-                height, width = mask_cv.shape
-                rgba = np.zeros((height, width, 4), dtype=np.uint8)
-                # Set white color only where mask is definitely white (255)
-                mask = mask_cv == 255
-                rgba[mask] = [255, 255, 255, 255]  # White with full opacity
-                # Create QImage from numpy array
-                mask_qimage = QImage(
-                    rgba.data, width, height, width * 4, QImage.Format.Format_RGBA8888
-                )
-                self.mask_pixmap = QPixmap.fromImage(mask_qimage)
+        mask_path = self.find_mask_path(image_path)
+        if mask_path:
+            try:
+                print(f"DEBUG: Loading mask from: {mask_path}")
+                mask_cv = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                if mask_cv is not None:
+                    print(f"DEBUG: Loaded mask with shape: {mask_cv.shape}")
+                    print(
+                        f"DEBUG: Mask value range: {mask_cv.min()} to {mask_cv.max()}"
+                    )
+
+                    # Create RGBA image with transparency
+                    height, width = mask_cv.shape
+                    rgba = np.zeros((height, width, 4), dtype=np.uint8)
+
+                    # More flexible threshold for mask detection
+                    mask = mask_cv > 200  # Use middle value instead of exactly 255
+                    rgba[mask] = [255, 255, 255, 255]  # White with full opacity
+
+                    mask_qimage = QImage(
+                        rgba.data,
+                        width,
+                        height,
+                        width * 4,
+                        QImage.Format.Format_RGBA8888,
+                    )
+                    self.mask_pixmap = QPixmap.fromImage(mask_qimage)
+                    print("DEBUG: Successfully created mask pixmap")
+                else:
+                    print("DEBUG: Failed to load mask with cv2.imread")
+            except Exception as e:
+                print(f"DEBUG: Error loading mask: {str(e)}")
 
         # Update the display
         self.update_display()
@@ -727,7 +766,9 @@ class MaskTracingInterface(QWidget):
             os.makedirs(self.mask_directory, exist_ok=True)
             save_path = os.path.normpath(
                 os.path.join(
-                    self.mask_directory, os.path.basename(self.current_image_path)
+                    self.mask_directory,
+                    os.path.splitext(os.path.basename(self.current_image_path))[0]
+                    + ".png",
                 )
             )
 
@@ -750,11 +791,16 @@ class MaskTracingInterface(QWidget):
             self.mask_pixmap.fill(Qt.GlobalColor.transparent)
             self.update_display()
 
-            mask_path = os.path.join(
-                self.mask_directory, os.path.basename(self.current_image_path)
-            )
-            if os.path.exists(mask_path):
-                os.remove(mask_path)
+            # Get base name without extension
+            base_name = os.path.splitext(os.path.basename(self.current_image_path))[0]
+
+            # Check and remove any mask with common image extensions
+            extensions = [".png", ".PNG", ".jpg", ".JPG", ".jpeg", ".JPEG"]
+            for ext in extensions:
+                mask_path = os.path.join(self.mask_directory, base_name + ext)
+                if os.path.exists(mask_path):
+                    os.remove(mask_path)
+                    break  # Remove first matching mask file found
 
             self.mask_cleared.emit(self.current_image_path)
 

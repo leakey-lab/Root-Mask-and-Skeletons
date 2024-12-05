@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
 )
 from PyQt6.QtGui import QColor
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from image_manager import ImageManager
 from display_controller import DisplayController
 from skeleton_handler import SkeletonHandler
@@ -25,6 +25,7 @@ from mask_tracing_interface import MaskTracingInterface
 from root_length_visulization import RootLengthVisualization
 from mask_generation_handler import MaskGenerationHandler
 import os
+import logging
 
 
 class MainWindow(QMainWindow):
@@ -35,7 +36,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Root Viewer")
         self.setGeometry(100, 100, 1200, 700)
-
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.DEBUG)
         # Initialize components
         self.image_manager = ImageManager(self)
         self.display_controller = DisplayController(self)
@@ -262,7 +264,7 @@ class MainWindow(QMainWindow):
     def load_results(self, results_dir):
         """
         Load results after skeleton generation.
-        This method updates the ImageManager and the UI to reflect the newly generated skeletons.
+        This method updates the skeleton information without reloading all images.
         """
         images_dir = os.path.join(results_dir, "images")
         if not os.path.isdir(images_dir):
@@ -271,8 +273,11 @@ class MainWindow(QMainWindow):
             )
             return
 
-        self.image_manager.load_images(folder_path=images_dir)
-        self.populate_file_list()
+        # Instead of reloading all images, just update the skeleton paths
+        if self.image_manager:
+            self.image_manager._find_processed_base_path()
+            # Update the view mode to trigger skeleton loading
+            self.view_mode_combo.setCurrentText(self.view_mode_combo.currentText())
 
         # Store the path to the index.html file if it exists
         self.image_manager.html_path = os.path.join(results_dir, "index.html")
@@ -382,8 +387,7 @@ class MainWindow(QMainWindow):
 
     def find_test_latest_dir(self, start_path, max_depth=3):
         """
-        Search for 'test_latest' directory both up and down from the starting directory,
-        up to max_depth levels in either direction.
+        Efficiently search for 'test_latest' directory using a focused search strategy.
 
         Args:
             start_path (str): Starting directory path
@@ -395,145 +399,105 @@ class MainWindow(QMainWindow):
         start_path = os.path.abspath(start_path)
         print(f"DEBUG: Starting search from {start_path}")
 
-        def search_down(current_path, current_depth):
-            """Search downstream directories"""
-            if current_depth > max_depth:
+        def search_directory(root_path, depth=0):
+            """Search a directory and its immediate subdirectories for test_latest"""
+            if depth > max_depth:
                 return None
 
-            print(f"DEBUG: Searching down at level {current_depth}: {current_path}")
+            # First check if current directory is test_latest
+            if os.path.basename(root_path) == "test_latest":
+                return root_path
 
-            # Check if current directory is test_latest
-            if os.path.basename(current_path) == "test_latest":
-                return current_path
-
-            # Check subdirectories
             try:
-                for item in os.listdir(current_path):
-                    item_path = os.path.join(current_path, item)
-                    if os.path.isdir(item_path):
-                        result = search_down(item_path, current_depth + 1)
-                        if result:
-                            return result
+                # Get immediate subdirectories, prioritizing likely candidates
+                subdirs = []
+                with os.scandir(root_path) as entries:
+                    for entry in entries:
+                        if entry.is_dir():
+                            # Prioritize directories that are likely to contain our target
+                            name = entry.name.lower()
+                            if name in (
+                                "output",
+                                "results",
+                                "test",
+                                "latest",
+                                "test_latest",
+                            ):
+                                subdirs.insert(0, entry.path)
+                            else:
+                                subdirs.append(entry.path)
+
+                # Search prioritized subdirectories
+                for subdir in subdirs:
+                    result = search_directory(subdir, depth + 1)
+                    if result:
+                        return result
+
             except PermissionError:
-                print(f"DEBUG: Permission denied accessing {current_path}")
+                print(f"DEBUG: Permission denied accessing {root_path}")
             except Exception as e:
-                print(f"DEBUG: Error accessing {current_path}: {str(e)}")
+                print(f"DEBUG: Error accessing {root_path}: {str(e)}")
 
             return None
 
-        def search_up(current_path, current_depth):
-            """Search upstream directories"""
-            if current_depth > max_depth:
-                return None
-
-            print(f"DEBUG: Searching up at level {current_depth}: {current_path}")
-
-            # Check if current directory is test_latest
-            if os.path.basename(current_path) == "test_latest":
-                return current_path
-
-            # Check parent directory if not at root
-            parent_dir = os.path.dirname(current_path)
-            if parent_dir == current_path:  # Reached root directory
+        def search_up(path, depth=0):
+            """Search parent directories and their siblings"""
+            if depth > max_depth:
                 return None
 
             try:
-                # First check siblings of current directory
-                parent = os.path.dirname(current_path)
-                for item in os.listdir(parent):
-                    item_path = os.path.join(parent, item)
-                    if os.path.isdir(item_path) and item_path != current_path:
-                        result = search_down(item_path, 0)  # Start new downward search
-                        if result:
-                            return result
+                # Check current directory
+                if os.path.basename(path) == "test_latest":
+                    return path
 
-                # Then move up to parent
-                return search_up(parent_dir, current_depth + 1)
+                # Get parent directory
+                parent = os.path.dirname(path)
+                if parent == path:  # Reached root
+                    return None
+
+                # Check siblings of current directory
+                sibling_result = None
+                with os.scandir(parent) as entries:
+                    for entry in entries:
+                        if entry.is_dir() and entry.path != path:
+                            # Quick check for the target directory name
+                            if entry.name == "test_latest":
+                                return entry.path
+                            # Only search promising sibling directories
+                            if entry.name.lower() in (
+                                "output",
+                                "results",
+                                "test",
+                                "latest",
+                            ):
+                                sibling_result = search_directory(entry.path, 0)
+                                if sibling_result:
+                                    return sibling_result
+
+                # Move up to parent
+                return search_up(parent, depth + 1)
 
             except PermissionError:
-                print(f"DEBUG: Permission denied accessing parent of {current_path}")
+                print(f"DEBUG: Permission denied accessing parent of {path}")
             except Exception as e:
-                print(f"DEBUG: Error accessing parent of {current_path}: {str(e)}")
+                print(f"DEBUG: Error accessing parent of {path}: {str(e)}")
 
             return None
 
-        # Try searching down first
-        result = search_down(start_path, 0)
+        # Try searching down first with early termination
+        result = search_directory(start_path)
         if result:
             print(f"DEBUG: Found test_latest directory downstream at: {result}")
             return result
 
         # If not found, search up
-        result = search_up(start_path, 0)
+        result = search_up(start_path)
         if result:
             print(f"DEBUG: Found test_latest directory upstream at: {result}")
             return result
 
         print("DEBUG: test_latest directory not found in either direction")
         return None
-
-    def show_root_length_visualization(self):
-        print("DEBUG: Entering show_root_length_visualization method")
-
-        if self.file_list.count() == 0:
-            print("DEBUG: file_list is empty")
-            QMessageBox.warning(
-                self, "Warning", "No images loaded. Please load images first."
-            )
-            return
-
-        first_image_name = self.file_list.item(0).text()
-        first_image_path = self.image_manager.get_image_path(first_image_name)
-        print(f"DEBUG: First image path: {first_image_path}")
-
-        if first_image_path is None:
-            print("DEBUG: Failed to get image path from image_manager")
-            QMessageBox.warning(
-                self, "Warning", "Failed to get image path. Please reload images."
-            )
-            return
-
-        # Get the directory containing the first image
-        start_dir = os.path.dirname(first_image_path)
-
-        # Search for test_latest directory
-        base_path = self.find_test_latest_dir(
-            start_dir
-        )  # Now calling as instance method
-
-        if base_path is None:
-            print(
-                "DEBUG: Could not find test_latest directory, using original directory"
-            )
-            base_path = start_dir
-        else:
-            print(f"DEBUG: Found test_latest directory at {base_path}")
-
-        # The CSV should be directly in the test_latest directory
-        csv_path = os.path.join(base_path, "root_lengths.csv")
-        print(f"DEBUG: Constructed csv_path: {csv_path}")
-
-        if os.path.exists(csv_path):
-            print(f"DEBUG: CSV file found at {csv_path}")
-            try:
-                if self.root_length_viz is None:
-                    self.root_length_viz = RootLengthVisualization(csv_path)
-                    self.right_panel.addWidget(self.root_length_viz)
-                self.right_panel.setCurrentWidget(self.root_length_viz)
-                print("DEBUG: RootLengthVisualization added to right panel")
-                self.visualize_root_length_button.setText("Close Visualization")
-            except Exception as e:
-                print(f"DEBUG: Error creating RootLengthVisualization: {str(e)}")
-                QMessageBox.critical(
-                    self, "Error", f"Failed to create visualization: {str(e)}"
-                )
-        else:
-            print(f"DEBUG: CSV file not found at {csv_path}")
-            QMessageBox.warning(
-                self,
-                "Warning",
-                "No root length data found. Please calculate root lengths first.",
-            )
 
     def switch_right_panel(self, panel):
         if panel == "display":
@@ -543,33 +507,137 @@ class MainWindow(QMainWindow):
         elif panel == "visualization":
             self.right_panel.setCurrentIndex(2)
 
-    def close_root_length_visualization(self):
-        print("DEBUG: Entering close_root_length_visualization method")
-        if self.root_length_viz:
-            print("DEBUG: root_length_viz exists, attempting to close")
-            self.right_panel.removeWidget(self.root_length_viz)
-            self.root_length_viz.deleteLater()
-            self.root_length_viz = None
-            self.visualize_root_length_button.setText("Visualize Root Length")
-            print("DEBUG: Root length visualization closed")
+    def toggle_root_length_visualization(self):
+        """Toggle between showing and hiding the root length visualization."""
+        self.logger.debug("Entering toggle_root_length_visualization")
 
-            # Switch back to the main display area
+        try:
+            # If visualization exists and is currently shown
+            if (
+                self.root_length_viz is not None
+                and self.right_panel.currentWidget() == self.root_length_viz
+            ):
+                self.logger.debug("Closing existing visualization")
+                self.close_root_length_visualization()
+            else:
+                self.logger.debug("Opening new visualization")
+                # Always create a new visualization instance
+                self.show_root_length_visualization()
+        except Exception as e:
+            self.logger.error(f"Error in toggle_root_length_visualization: {str(e)}")
+            QMessageBox.critical(
+                self, "Error", f"Error toggling visualization: {str(e)}"
+            )
+
+    def show_root_length_visualization(self):
+        """Show the root length visualization with proper loading state management."""
+        self.logger.debug("Entering show_root_length_visualization method")
+
+        if self.file_list.count() == 0:
+            self.logger.debug("file_list is empty")
+            QMessageBox.warning(
+                self, "Warning", "No images loaded. Please load images first."
+            )
+            return
+
+        try:
+            # Find the CSV file path
+            first_image_name = self.file_list.item(0).text()
+            first_image_path = self.image_manager.get_image_path(first_image_name)
+
+            if first_image_path is None:
+                raise ValueError("Failed to get image path from image manager")
+
+            # Get the directory containing the first image
+            start_dir = os.path.dirname(first_image_path)
+            base_path = self.find_test_latest_dir(start_dir)
+
+            if base_path is None:
+                self.logger.debug("Using original directory as base path")
+                base_path = start_dir
+
+            csv_path = os.path.join(base_path, "root_lengths.csv")
+            self.logger.debug(f"Looking for CSV at: {csv_path}")
+
+            if not os.path.exists(csv_path):
+                raise FileNotFoundError(f"No root length data found at {csv_path}")
+
+            def create_new_visualization():
+                # Create new visualization with the current CSV path
+                self.logger.debug(
+                    f"Creating new RootLengthVisualization with {csv_path}"
+                )
+                self.root_length_viz = RootLengthVisualization(csv_path)
+                self.root_length_viz.server_closed.connect(
+                    self.on_visualization_server_closed
+                )
+
+                # Add to right panel and show
+                self.right_panel.addWidget(self.root_length_viz)
+                self.right_panel.setCurrentWidget(self.root_length_viz)
+
+                # Update button text
+                self.visualize_root_length_button.setText("Close Visualization")
+                self.logger.debug("Visualization setup completed successfully")
+
+            # Close any existing visualization
+            if self.root_length_viz is not None:
+                self.logger.debug("Cleaning up existing visualization")
+                self.root_length_viz.server_closed.connect(
+                    lambda: QTimer.singleShot(500, create_new_visualization)
+                )
+                self.close_root_length_visualization()
+            else:
+                create_new_visualization()
+
+        except Exception as e:
+            self.logger.error(f"Error in show_root_length_visualization: {str(e)}")
+            QMessageBox.critical(
+                self, "Error", f"Failed to create visualization: {str(e)}"
+            )
+            self.visualize_root_length_button.setText("Visualize Root Length")
+
+    def close_root_length_visualization(self):
+        """Safely close and cleanup the root length visualization component."""
+        self.logger.debug("Entering close_root_length_visualization method")
+
+        if not self.root_length_viz:
+            self.logger.debug("No root length visualization to close")
+            return
+
+        try:
+            self.logger.debug("Beginning cleanup process")
+
+            # Update UI state first
+            self.visualize_root_length_button.setText("Visualize Root Length")
             self.switch_right_panel("display")
 
-            # Update the display to show the current image
-            current_item = self.file_list.currentItem()
-            if current_item:
-                self.on_image_selected(current_item)
+            # Clean up visualization
+            self.root_length_viz.cleanup_server()
 
-            print("DEBUG: Switched back to main display area")
-        else:
-            print("DEBUG: root_length_viz is None, nothing to close")
+            # Remove and schedule deletion after a short delay
+            def finish_cleanup():
+                if self.root_length_viz:
+                    self.right_panel.removeWidget(self.root_length_viz)
+                    self.root_length_viz.deleteLater()
+                    self.root_length_viz = None
 
-    def toggle_root_length_visualization(self):
-        if (
-            self.root_length_viz is None
-            or not self.right_panel.currentWidget() == self.root_length_viz
-        ):
-            self.show_root_length_visualization()
-        else:
-            self.close_root_length_visualization()
+                    # Update current image display if available
+                    current_item = self.file_list.currentItem()
+                    if current_item:
+                        self.on_image_selected(current_item)
+
+            # Use a short timer to allow server cleanup to complete
+            QTimer.singleShot(500, finish_cleanup)
+
+        except Exception as e:
+            self.logger.error(f"Error during visualization cleanup: {str(e)}")
+            self.root_length_viz = None
+            self.switch_right_panel("display")
+            QMessageBox.warning(self, "Warning", f"Error during cleanup: {str(e)}")
+
+        self.logger.debug("Root length visualization cleanup initiated")
+
+    def on_visualization_server_closed(self):
+        """Handle cleanup after visualization server is closed."""
+        self.logger.debug("Visualization server closed successfully")

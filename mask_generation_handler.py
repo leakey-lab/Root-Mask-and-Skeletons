@@ -56,15 +56,20 @@ class MaskGenerationThread(QThread):
                     with torch.no_grad():
                         mask = self.model(image_tensor)
 
-                    # Save mask
-                    mask = mask.squeeze().cpu()
-                    mask_np = (mask.numpy() * 255).astype(np.uint8)
-                    mask_pil = Image.fromarray(mask_np)
+                    # Convert to numpy and threshold
+                    mask_np = mask.squeeze().cpu().numpy()
 
+                    # Properly binarize the mask using a threshold
+                    binary_mask = (mask_np > 0.5).astype(np.uint8) * 255
+
+                    # Convert to PIL Image
+                    mask_pil = Image.fromarray(binary_mask, mode="L")
+
+                    # Save binary mask
                     output_path = os.path.join(
                         self.output_dir, os.path.splitext(filename)[0] + ".png"
                     )
-                    mask_pil.save(output_path)
+                    mask_pil.save(output_path, "PNG")
 
                     # Update progress
                     progress = int((i + 1) / total_images * 100)
@@ -99,9 +104,7 @@ class MaskGenerationHandler:
             )
 
             if os.path.exists(weights_path):
-                self.model = ResNetSkeleton(
-                    num_classes=1, pretrained=False
-                )  # Use imported model
+                self.model = ResNetSkeleton(num_classes=1, pretrained=False)
                 self.model.load_state_dict(
                     torch.load(weights_path, map_location=self.device)
                 )

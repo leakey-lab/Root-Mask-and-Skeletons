@@ -16,6 +16,7 @@ class RootLengthCalculatorThread(QThread):
         super().__init__()
         self.fake_images = fake_images
         self.output_dir = output_dir
+        print(f"Initialized calculator with {len(fake_images)} images")
 
     def parse_image_name(self, name):
         """
@@ -71,9 +72,11 @@ class RootLengthCalculatorThread(QThread):
     def run(self):
         results = []
         total_images = len(self.fake_images)
+        print(f"Processing {total_images} images")
 
-        for i, (name, path) in enumerate(self.fake_images.items()):
+        for i, (name, path) in enumerate(self.fake_images.items(), 1):
             try:
+                print(f"Processing image {i}/{total_images}: {path}")
                 # Calculate root length
                 skeleton = self.preprocess_image(path)
                 total_length = self.calculate_root_length(skeleton)
@@ -91,14 +94,14 @@ class RootLengthCalculatorThread(QThread):
                     "Length (mm)": round(total_length, 2),
                 }
 
+                print(f"Calculated length for {name}: {total_length}mm")
                 results.append(result)
 
                 # Update progress
-                self.progress.emit(int((i + 1) / total_images * 100))
+                self.progress.emit(int((i / total_images) * 100))
 
             except Exception as e:
                 print(f"Error processing image '{name}': {str(e)}")
-                # Add error entry
                 results.append(
                     {
                         "Image": name,
@@ -111,11 +114,11 @@ class RootLengthCalculatorThread(QThread):
                     }
                 )
 
-        # Sort results by Tube, Date, Time, and Position
+        # Sort results
         sorted_results = sorted(
             results,
             key=lambda x: (
-                x["Tube"] or float("inf"),  # Handle None values in sorting
+                x["Tube"] or float("inf"),
                 x["Date"] or "",
                 x["Time"] or "",
                 x["Position"] or float("inf"),
@@ -123,8 +126,10 @@ class RootLengthCalculatorThread(QThread):
         )
 
         # Save to CSV
-        csv_path = os.path.join(os.path.dirname(self.output_dir), "root_lengths.csv")
+        csv_path = os.path.join(self.output_dir, "root_lengths.csv")
+        print(f"Saving results to {csv_path}")
         self.save_to_csv(sorted_results, csv_path)
+        print("CSV saved successfully")
         self.finished.emit(csv_path)
 
     def preprocess_image(self, image_path):
