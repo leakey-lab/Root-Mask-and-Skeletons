@@ -72,11 +72,9 @@ class RootLengthCalculatorThread(QThread):
     def run(self):
         results = []
         total_images = len(self.fake_images)
-        print(f"Processing {total_images} images")
 
         for i, (name, path) in enumerate(self.fake_images.items(), 1):
             try:
-                print(f"Processing image {i}/{total_images}: {path}")
                 # Calculate root length
                 skeleton = self.preprocess_image(path)
                 total_length = self.calculate_root_length(skeleton)
@@ -94,7 +92,6 @@ class RootLengthCalculatorThread(QThread):
                     "Length (mm)": round(total_length, 2),
                 }
 
-                print(f"Calculated length for {name}: {total_length}mm")
                 results.append(result)
 
                 # Update progress
@@ -127,9 +124,7 @@ class RootLengthCalculatorThread(QThread):
 
         # Save to CSV
         csv_path = os.path.join(self.output_dir, "root_lengths.csv")
-        print(f"Saving results to {csv_path}")
         self.save_to_csv(sorted_results, csv_path)
-        print("CSV saved successfully")
         self.finished.emit(csv_path)
 
     def preprocess_image(self, image_path):
