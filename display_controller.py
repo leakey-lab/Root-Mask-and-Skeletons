@@ -6,14 +6,14 @@ from PyQt6.QtWidgets import (
     QWidget,
     QPushButton,
     QSlider,
-    QGraphicsScene,
     QGraphicsPixmapItem,
 )
-from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QWheelEvent
+from PyQt6.QtGui import QPixmap, QImage, QPainter, QWheelEvent
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 import cv2
 import numpy as np
+import os
 
 
 class MagnifyingGraphicsView(QGraphicsView):
@@ -103,14 +103,36 @@ class DisplayController:
         self.basic_view_widget.hide()
 
     def display_selected_image(self, item):
+        """Handle image selection with lazy loading"""
         name = item.text()
         self.current_image = self.main_window.image_manager.get_image_path(name)
-        self.current_fake_image = self.main_window.image_manager.get_fake_image_path(
-            name
-        )
+
+        view_mode = self.main_window.view_mode_combo.currentText()
+        if view_mode in ["Overlay", "Side by Side", "Basic View"]:
+            # Lazy load the processed image when needed
+            self.current_fake_image = (
+                self.main_window.image_manager.get_fake_image_path(name)
+            )
+
+            if not self.current_fake_image:
+                self.main_window.status_bar.showMessage(
+                    f"No processed image found for {name}", 3000
+                )
+
         self.update_display()
 
     def update_display_mode(self):
+        """Handle view mode changes"""
+        view_mode = self.main_window.view_mode_combo.currentText()
+        print(f"DEBUG: View mode changed to {view_mode}")
+
+        # Reload images based on the new view mode
+        self.main_window.image_manager.reload_for_view_mode(view_mode)
+
+        # Refresh the file list in the main window
+        self.main_window.populate_file_list()
+
+        # Update the display
         self.update_display()
 
     def update_display(self):
@@ -153,20 +175,32 @@ class DisplayController:
             self.clear_magnifying_view()
 
     def display_overlay_image(self):
-        if not self.current_image or not self.current_fake_image:
-            print("DEBUG: Missing real or fake image path")
+        """Display overlay with lazy-loaded processed image"""
+        if not self.current_image:
+            print("DEBUG: No image selected")
             return
 
-        # Load the real image as QImage
+        # Load processed image if needed
+        if not self.current_fake_image:
+            base_name = os.path.splitext(os.path.basename(self.current_image))[0]
+            self.current_fake_image = (
+                self.main_window.image_manager.get_fake_image_path(base_name)
+            )
+
+        if not self.current_fake_image:
+            print("DEBUG: No processed image available")
+            self.display_single_image()  # Fallback to single image view
+            return
+
+        # Rest of the overlay display code remains the same
         real_image = QImage(self.current_image)
         if real_image.isNull():
             print("DEBUG: Failed to load real image")
             return
 
-        # Load the fake image as grayscale using OpenCV
         fake_image_gray = cv2.imread(self.current_fake_image, cv2.IMREAD_GRAYSCALE)
         if fake_image_gray is None:
-            print("DEBUG: Failed to load fake image")
+            print("DEBUG: Failed to load processed image")
             return
 
         # Binarize the fake image using OTSU thresholding
@@ -266,38 +300,77 @@ class DisplayController:
         print(f"DEBUG: Overlay image displayed. Size: {result_pixmap.size()}")
 
     def display_side_by_side_images(self):
-        real_pixmap = QPixmap(self.current_image)
-        if self.current_fake_image:
-            fake_pixmap = QPixmap(self.current_fake_image)
+        """Display original and processed images side by side with basic lazy loading."""
+        if not self.current_image:
+            print("DEBUG: No current image selected")
+            return
 
-            # Create a new pixmap to hold both images side by side
+        # Load the original image
+        real_pixmap = QPixmap(self.current_image)
+        if real_pixmap.isNull():
+            print("DEBUG: Failed to load original image")
+            return
+
+        # Try to lazy load the processed image if needed
+        if not self.current_fake_image:
+            base_name = os.path.splitext(os.path.basename(self.current_image))[0]
+            self.current_fake_image = (
+                self.main_window.image_manager.get_fake_image_path(base_name)
+            )
+            print(f"DEBUG: Lazy loading processed image for {base_name}")
+
+        # Create the side-by-side display
+        # Create the side-by-side display
+        if self.current_fake_image:
+            # Convert _fake.png to _real.png for the processed image
+            real_processed_path = self.current_fake_image.replace(
+                "_fake.png", "_real.png"
+            )
+            fake_pixmap = QPixmap(self.current_fake_image)
+            real_pixmap = QPixmap(real_processed_path)
+            if fake_pixmap.isNull():
+                print("DEBUG: Failed to load processed real image")
+                self.main_window.status_bar.showMessage(
+                    "Failed to load processed image", 3000
+                )
+                return
+
+            # Create combined pixmap
             combined_width = real_pixmap.width() + fake_pixmap.width()
             combined_height = max(real_pixmap.height(), fake_pixmap.height())
             combined_pixmap = QPixmap(combined_width, combined_height)
             combined_pixmap.fill(Qt.GlobalColor.white)
 
-            # Draw both images onto the combined pixmap
+            # Draw the images side by side
             painter = QPainter(combined_pixmap)
             painter.drawPixmap(0, 0, real_pixmap)
             painter.drawPixmap(real_pixmap.width(), 0, fake_pixmap)
             painter.end()
-        else:
-            combined_pixmap = real_pixmap
 
-        # Create a new scene and add the combined pixmap to it
+            print(
+                f"DEBUG: Side-by-side images displayed. Size: {combined_pixmap.size()}"
+            )
+        else:
+            # If no processed image, just show original
+            combined_pixmap = real_pixmap
+            print("DEBUG: Only original image displayed (no processed image available)")
+            self.main_window.status_bar.showMessage(
+                "Processed image not available", 3000
+            )
+
+        # Set up the scene and view
         scene = QGraphicsScene()
         pixmap_item = QGraphicsPixmapItem(combined_pixmap)
         scene.addItem(pixmap_item)
-
-        # Set the scene to the magnifying view
         self.magnifying_view.setScene(scene)
 
-        # Fit the view to the scene contents while keeping the aspect ratio
+        # Fit view while maintaining aspect ratio
         self.magnifying_view.fitInView(
             scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio
         )
 
-        print(f"DEBUG: Side-by-side images displayed. Size: {combined_pixmap.size()}")
+        # Reset zoom
+        self.magnifying_view.zoom = 1
 
     def set_magnifying_view_image(self, pixmap):
         scene = QGraphicsScene()

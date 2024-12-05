@@ -3,6 +3,8 @@ import csv
 import cv2
 import numpy as np
 import os
+import re
+from datetime import datetime
 from PyQt6.QtCore import QThread, pyqtSignal
 
 
@@ -14,20 +16,115 @@ class RootLengthCalculatorThread(QThread):
         super().__init__()
         self.fake_images = fake_images
         self.output_dir = output_dir
+        print(f"Initialized calculator with {len(fake_images)} images")
+
+    def parse_image_name(self, name):
+        """
+        Parse image name to extract tube number, length position, date, and time.
+        Expected format: anything_T{XXX}_L{XXX}_YYYY.MM.DD_HHMMSS_anything
+        Returns a dictionary with the parsed information.
+        """
+        try:
+            # Initialize default values
+            info = {
+                "original_name": name,
+                "tube_number": None,
+                "length_position": None,
+                "date": None,
+                "time": None,
+            }
+
+            # Extract tube number (T followed by numbers)
+            tube_match = re.search(r"T(\d+)", name)
+            if tube_match:
+                info["tube_number"] = int(tube_match.group(1))
+
+            # Extract length position (L followed by numbers)
+            length_match = re.search(r"L(\d+)", name)
+            if length_match:
+                info["length_position"] = int(length_match.group(1))
+
+            # Extract date (YYYY.MM.DD format)
+            date_match = re.search(r"(\d{4})\.(\d{2})\.(\d{2})", name)
+            if date_match:
+                year, month, day = date_match.groups()
+                info["date"] = f"{year}.{month}.{day}"
+
+            # Extract time (HHMMSS format)
+            time_match = re.search(r"_(\d{6})(?:_|$)", name)
+            if time_match:
+                time_str = time_match.group(1)
+                formatted_time = f"{time_str[:2]}:{time_str[2:4]}:{time_str[4:]}"
+                info["time"] = formatted_time
+
+            return info
+
+        except Exception as e:
+            print(f"Error parsing image name '{name}': {str(e)}")
+            return {
+                "original_name": name,
+                "tube_number": None,
+                "length_position": None,
+                "date": None,
+                "time": None,
+            }
 
     def run(self):
-        results = {}
+        results = []
         total_images = len(self.fake_images)
 
-        for i, (name, path) in enumerate(self.fake_images.items()):
-            skeleton = self.preprocess_image(path)
-            total_length = self.calculate_root_length(skeleton)
-            results[name] = total_length
-            self.progress.emit(int((i + 1) / total_images * 100))
+        for i, (name, path) in enumerate(self.fake_images.items(), 1):
+            try:
+                # Calculate root length
+                skeleton = self.preprocess_image(path)
+                total_length = self.calculate_root_length(skeleton)
 
-        # Change the CSV path to be in the main directory
-        csv_path = os.path.join(os.path.dirname(self.output_dir), "root_lengths.csv")
-        self.save_to_csv(results, csv_path)
+                # Parse image information
+                info = self.parse_image_name(name)
+
+                # Create result dictionary
+                result = {
+                    "Image": info["original_name"],
+                    "Tube": info["tube_number"],
+                    "Position": info["length_position"],
+                    "Date": info["date"],
+                    "Time": info["time"],
+                    "Length (mm)": round(total_length, 2),
+                }
+
+                results.append(result)
+
+                # Update progress
+                self.progress.emit(int((i / total_images) * 100))
+
+            except Exception as e:
+                print(f"Error processing image '{name}': {str(e)}")
+                results.append(
+                    {
+                        "Image": name,
+                        "Tube": None,
+                        "Position": None,
+                        "Date": None,
+                        "Time": None,
+                        "Length (mm)": 0,
+                        "Error": str(e),
+                    }
+                )
+
+        # Sort results
+        sorted_results = sorted(
+            results,
+            key=lambda x: (
+                x["Tube"] or float("inf"),
+                x["Date"] or "",
+                x["Time"] or "",
+                x["Position"] or float("inf"),
+            ),
+        )
+
+        # Save to CSV
+        csv_path = os.path.join(self.output_dir, "root_lengths.csv")
+        self.save_to_csv(sorted_results, csv_path)
         self.finished.emit(csv_path)
 
     def preprocess_image(self, image_path):
@@ -51,12 +148,9 @@ class RootLengthCalculatorThread(QThread):
         original_width_mm = 18  # mm
         original_height_mm = 13  # mm
 
-        # Scaling factors (while maintaining aspect ratio)
-        scaling_factor_x = processed_width_px / original_width_px  # 341 / 640
-        scaling_factor_y = processed_height_px / original_height_px  # 256 / 480
-
-        # Since aspect ratio is maintained, the scaling factors should be similar
-        # You can take an average scaling factor to simplify calculations
+        # Scaling factors
+        scaling_factor_x = processed_width_px / original_width_px
+        scaling_factor_y = processed_height_px / original_height_px
         scaling_factor = (scaling_factor_x + scaling_factor_y) / 2
 
         inverse_length_scaling_factor = 1 / scaling_factor
@@ -74,8 +168,13 @@ class RootLengthCalculatorThread(QThread):
         return total_length
 
     def save_to_csv(self, results, filename):
+        """Save results to CSV with headers for all fields."""
+        headers = ["Image", "Tube", "Position", "Date", "Time", "Length (mm)"]
+
         with open(filename, mode="w", newline="") as file:
-            writer = csv.writer(file)
-            writer.writerow(["Image", "Length (mm)"])
-            for name, length in results.items():
-                writer.writerow([name, f"{length:.2f}"])
+            writer = csv.DictWriter(file, fieldnames=headers)
+            writer.writeheader()
+            for result in results:
+                # Only write the fields we want (exclude Error if present)
+                row = {header: result.get(header, "") for header in headers}
+                writer.writerow(row)

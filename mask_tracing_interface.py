@@ -51,10 +51,13 @@ class MaskTracingGraphicsView(QGraphicsView):
             event.ignore()
             return
 
-        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            # Store the scene pos before zoom
-            old_pos = self.mapToScene(event.position().toPoint())
+        # Check if B key is pressed in the parent interface
+        if self.mask_tracing_interface.b_key_pressed:
+            # Ignore the wheel event here, let the parent handle brush size
+            event.ignore()
+            return
 
+        if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             # Zoom
             zoom_in = event.angleDelta().y() > 0
             if zoom_in and self.zoom_factor < self.max_zoom:
@@ -67,31 +70,22 @@ class MaskTracingGraphicsView(QGraphicsView):
                 event.ignore()
                 return
 
-            if self.pan_mode:
-                # In pan mode, zoom to cursor
-                self.setTransformationAnchor(
-                    QGraphicsView.ViewportAnchor.AnchorUnderMouse
-                )
-                self.scale(factor, factor)
-            else:
-                # In draw mode, zoom to center
-                self.setTransformationAnchor(
-                    QGraphicsView.ViewportAnchor.AnchorViewCenter
-                )
-                self.scale(factor, factor)
+            self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+            self.scale(factor, factor)
 
-            # Update the mask interface zoom slider if it exists - convert to integer
+            # Update the mask interface zoom slider
             if hasattr(self.mask_tracing_interface, "zoom_slider"):
                 zoom_percent = int(round(self.zoom_factor * 100))
                 self.mask_tracing_interface.zoom_slider.setValue(zoom_percent)
-                # Update the zoom label if it exists
                 if hasattr(self.mask_tracing_interface, "zoom_label"):
                     self.mask_tracing_interface.zoom_label.setText(
                         f"Zoom: {zoom_percent}%"
                     )
 
             event.accept()
-        else:
+        elif (
+            not self.mask_tracing_interface.b_key_pressed
+        ):  # Only allow scrolling when B is not pressed
             # Allow normal scrolling in pan mode, prevent in draw mode
             if not self.drawing:
                 super().wheelEvent(event)
@@ -208,6 +202,7 @@ class MaskTracingGraphicsView(QGraphicsView):
 class MaskTracingInterface(QWidget):
     mask_saved = pyqtSignal(str)
     mask_cleared = pyqtSignal(str)
+    b_key_status_changed = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -216,6 +211,7 @@ class MaskTracingInterface(QWidget):
         self.zoom_factor = 1.0
         self.undo_stack = []
         self.redo_stack = []
+        self.max_stack_size = 25  # Set maximum stack size
         self.b_key_pressed = False
         self.size_slider = None
         self.zoom_slider = None
@@ -530,7 +526,7 @@ class MaskTracingInterface(QWidget):
         cursor_pixmap.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(cursor_pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         # Draw the outer circle (white)
         painter.setPen(QPen(Qt.GlobalColor.white, 2, Qt.PenStyle.SolidLine))
@@ -559,11 +555,33 @@ class MaskTracingInterface(QWidget):
 
         return QCursor(cursor_pixmap, hotspot.x(), hotspot.y())
 
+    def find_mask_path(self, image_path):
+        """Find the corresponding mask file, with enhanced debugging."""
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        # Try these extensions in order of preference
+        extensions = [".png", ".PNG", ".jpg", ".JPG", ".jpeg", ".JPEG"]
+
+        print(f"DEBUG: Looking for mask for image: {image_path}")
+        print(f"DEBUG: Base name: {base_name}")
+        print(f"DEBUG: Mask directory: {self.mask_directory}")
+
+        for ext in extensions:
+            mask_path = os.path.join(self.mask_directory, base_name + ext)
+            print(f"DEBUG: Checking for mask at: {mask_path}")
+            if os.path.exists(mask_path):
+                print(f"DEBUG: Found mask at: {mask_path}")
+                return mask_path
+        print("DEBUG: No mask found")
+        return None
+
     def load_image(self, image_path):
-        """Initialize a new image for editing"""
+        """Initialize a new image for editing with enhanced mask loading."""
+        print(f"\nDEBUG: Loading image: {image_path}")
+
         # Clear previous image and mask data
         self.current_image_path = image_path
         self.mask_directory = os.path.join(os.path.dirname(image_path), "mask")
+        print(f"DEBUG: Set mask directory to: {self.mask_directory}")
 
         # Clear undo/redo stacks
         self.undo_stack.clear()
@@ -587,6 +605,7 @@ class MaskTracingInterface(QWidget):
 
         # Load the new image
         self.image_pixmap = QPixmap(image_path)
+        print(f"DEBUG: Loaded image with size: {self.image_pixmap.size()}")
 
         # Create a fresh transparent mask
         self.mask_pixmap = QPixmap(self.image_pixmap.size())
@@ -603,22 +622,38 @@ class MaskTracingInterface(QWidget):
             self.opacity_slider.setValue(100)
 
         # Load existing mask if it exists
-        mask_path = os.path.join(self.mask_directory, os.path.basename(image_path))
-        if os.path.exists(mask_path):
-            # Read the mask using OpenCV
-            mask_cv = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            if mask_cv is not None:
-                # Create RGBA image with transparency
-                height, width = mask_cv.shape
-                rgba = np.zeros((height, width, 4), dtype=np.uint8)
-                # Set white color only where mask is definitely white (255)
-                mask = mask_cv == 255
-                rgba[mask] = [255, 255, 255, 255]  # White with full opacity
-                # Create QImage from numpy array
-                mask_qimage = QImage(
-                    rgba.data, width, height, width * 4, QImage.Format.Format_RGBA8888
-                )
-                self.mask_pixmap = QPixmap.fromImage(mask_qimage)
+        mask_path = self.find_mask_path(image_path)
+        if mask_path:
+            try:
+                print(f"DEBUG: Loading mask from: {mask_path}")
+                mask_cv = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                if mask_cv is not None:
+                    print(f"DEBUG: Loaded mask with shape: {mask_cv.shape}")
+                    print(
+                        f"DEBUG: Mask value range: {mask_cv.min()} to {mask_cv.max()}"
+                    )
+
+                    # Create RGBA image with transparency
+                    height, width = mask_cv.shape
+                    rgba = np.zeros((height, width, 4), dtype=np.uint8)
+
+                    # More flexible threshold for mask detection
+                    mask = mask_cv > 200  # Use middle value instead of exactly 255
+                    rgba[mask] = [255, 255, 255, 255]  # White with full opacity
+
+                    mask_qimage = QImage(
+                        rgba.data,
+                        width,
+                        height,
+                        width * 4,
+                        QImage.Format.Format_RGBA8888,
+                    )
+                    self.mask_pixmap = QPixmap.fromImage(mask_qimage)
+                    print("DEBUG: Successfully created mask pixmap")
+                else:
+                    print("DEBUG: Failed to load mask with cv2.imread")
+            except Exception as e:
+                print(f"DEBUG: Error loading mask: {str(e)}")
 
         # Update the display
         self.update_display()
@@ -709,8 +744,8 @@ class MaskTracingInterface(QWidget):
         self.brush_size = value
         self.size_label.setText(f"Brush Size: {value}")
         self.brush_cursor = self.create_brush_cursor(self.brush_size)
-        if self.drawing:
-            self.setCursor(self.brush_cursor)
+        if self.mode_toggle.isChecked() or self.b_key_pressed:
+            self.graphics_view.viewport().setCursor(self.brush_cursor)
 
     def update_opacity(self, value):
         # Map the 0-100 range to 0.3-1.0 range to maintain minimum visibility
@@ -731,7 +766,9 @@ class MaskTracingInterface(QWidget):
             os.makedirs(self.mask_directory, exist_ok=True)
             save_path = os.path.normpath(
                 os.path.join(
-                    self.mask_directory, os.path.basename(self.current_image_path)
+                    self.mask_directory,
+                    os.path.splitext(os.path.basename(self.current_image_path))[0]
+                    + ".png",
                 )
             )
 
@@ -754,28 +791,57 @@ class MaskTracingInterface(QWidget):
             self.mask_pixmap.fill(Qt.GlobalColor.transparent)
             self.update_display()
 
-            mask_path = os.path.join(
-                self.mask_directory, os.path.basename(self.current_image_path)
-            )
-            if os.path.exists(mask_path):
-                os.remove(mask_path)
+            # Get base name without extension
+            base_name = os.path.splitext(os.path.basename(self.current_image_path))[0]
+
+            # Check and remove any mask with common image extensions
+            extensions = [".png", ".PNG", ".jpg", ".JPG", ".jpeg", ".JPEG"]
+            for ext in extensions:
+                mask_path = os.path.join(self.mask_directory, base_name + ext)
+                if os.path.exists(mask_path):
+                    os.remove(mask_path)
+                    break  # Remove first matching mask file found
 
             self.mask_cleared.emit(self.current_image_path)
 
     def save_for_undo(self):
+        """Save current state for undo with stack size limit."""
         if self.mask_pixmap:
+            # Add current state to undo stack
             self.undo_stack.append(self.mask_pixmap.copy())
+
+            # Remove oldest state if stack exceeds maximum size
+            if len(self.undo_stack) > self.max_stack_size:
+                self.undo_stack.pop(0)  # Remove oldest item
+
+            # Clear redo stack as new action invalidates redo history
             self.redo_stack.clear()
 
     def undo(self):
+        """Undo last action with stack size limit."""
         if self.undo_stack:
+            # Save current state to redo stack
             self.redo_stack.append(self.mask_pixmap.copy())
+
+            # Remove oldest redo state if stack exceeds maximum size
+            if len(self.redo_stack) > self.max_stack_size:
+                self.redo_stack.pop(0)  # Remove oldest item
+
+            # Restore previous state from undo stack
             self.mask_pixmap = self.undo_stack.pop()
             self.update_display()
 
     def redo(self):
+        """Redo last undone action with stack size limit."""
         if self.redo_stack:
+            # Save current state to undo stack
             self.undo_stack.append(self.mask_pixmap.copy())
+
+            # Remove oldest undo state if stack exceeds maximum size
+            if len(self.undo_stack) > self.max_stack_size:
+                self.undo_stack.pop(0)  # Remove oldest item
+
+            # Restore next state from redo stack
             self.mask_pixmap = self.redo_stack.pop()
             self.update_display()
 
@@ -783,6 +849,8 @@ class MaskTracingInterface(QWidget):
         if event.key() == Qt.Key.Key_B:
             # Toggle the state of b_key_pressed when the B key is pressed
             self.b_key_pressed = not self.b_key_pressed
+            # Emit signal when state changes
+            self.b_key_status_changed.emit(self.b_key_pressed)
             if self.b_key_pressed:
                 print("B KEY PRESSED")
             else:
@@ -790,13 +858,17 @@ class MaskTracingInterface(QWidget):
         super().keyPressEvent(event)
 
     def wheelEvent(self, event: QWheelEvent):
-        if self.b_key_pressed and event.modifiers() == Qt.KeyboardModifier.NoModifier:
-            # Adjust brush size
+        if self.b_key_pressed:
+            # Adjust brush size when B is pressed
             delta = event.angleDelta().y()
             if delta > 0:
-                self.size_slider.setValue(min(self.size_slider.value() + 1, 50))
+                new_value = min(self.size_slider.value() + 1, 50)
             else:
-                self.size_slider.setValue(max(self.size_slider.value() - 1, 1))
+                new_value = max(self.size_slider.value() - 1, 1)
+
+            # Update the slider value and force immediate cursor update
+            self.size_slider.setValue(new_value)
+            self.update_brush_size(new_value)  # This will update the cursor immediately
             event.accept()
         elif event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             # Zoom functionality
