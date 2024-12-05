@@ -580,9 +580,11 @@ class MainWindow(QMainWindow):
                 self.visualize_root_length_button.setText("Close Visualization")
                 self.logger.debug("Visualization setup completed successfully")
 
-            # Close any existing visualization
-            if self.root_length_viz is not None:
-                self.logger.debug("Cleaning up existing visualization")
+            if self.root_length_viz:
+                try:
+                    self.root_length_viz.server_closed.disconnect()
+                except TypeError:
+                    pass
                 self.root_length_viz.server_closed.connect(
                     lambda: QTimer.singleShot(500, create_new_visualization)
                 )
@@ -615,20 +617,15 @@ class MainWindow(QMainWindow):
             # Clean up visualization
             self.root_length_viz.cleanup_server()
 
-            # Remove and schedule deletion after a short delay
-            def finish_cleanup():
-                if self.root_length_viz:
-                    self.right_panel.removeWidget(self.root_length_viz)
-                    self.root_length_viz.deleteLater()
-                    self.root_length_viz = None
+            # Remove the visualization from the right panel
+            self.right_panel.removeWidget(self.root_length_viz)
+            self.root_length_viz.deleteLater()
+            self.root_length_viz = None
 
-                    # Update current image display if available
-                    current_item = self.file_list.currentItem()
-                    if current_item:
-                        self.on_image_selected(current_item)
-
-            # Use a short timer to allow server cleanup to complete
-            QTimer.singleShot(500, finish_cleanup)
+            # Update current image display if available
+            current_item = self.file_list.currentItem()
+            if current_item:
+                self.on_image_selected(current_item)
 
         except Exception as e:
             self.logger.error(f"Error during visualization cleanup: {str(e)}")
@@ -636,7 +633,7 @@ class MainWindow(QMainWindow):
             self.switch_right_panel("display")
             QMessageBox.warning(self, "Warning", f"Error during cleanup: {str(e)}")
 
-        self.logger.debug("Root length visualization cleanup initiated")
+        self.logger.debug("Root length visualization cleanup completed")
 
     def on_visualization_server_closed(self):
         """Handle cleanup after visualization server is closed."""
