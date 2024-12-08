@@ -5,22 +5,107 @@ import plotly.graph_objects as go
 import plotly.express as px
 import dash_bootstrap_components as dbc
 import pandas as pd
+from functools import lru_cache
+from typing import List, Dict, Tuple, Any
+import warnings
 
 
 class DashApp:
     """Manages the Dash application."""
 
-    def __init__(self, data_processor, save_directory):
+    def __init__(self, data_processor: Any, save_directory: str):
         self.data_processor = data_processor
         self.save_directory = save_directory
+
+        # Cache commonly used data
+        self._cache_data()
+
+        # Initialize Dash app with optimized settings
         self.app = Dash(
             __name__,
             external_stylesheets=[dbc.themes.BOOTSTRAP],
             suppress_callback_exceptions=True,
             update_title=None,
+            compress=True,  # Enable response compression
         )
+
+        # Set up layout and callbacks
         self._setup_layout()
         self._setup_callbacks()
+
+    def _cache_data(self) -> None:
+        """Cache frequently used data to improve performance."""
+        self.tubes = tuple(sorted(self.data_processor.get_unique_tubes()))
+        self.dates = tuple(sorted(self.data_processor.get_unique_dates()))
+
+        # Pre-compute grouped data for different views
+        df = self.data_processor.df
+        self.tube_date_groups = df.groupby(["Tube", "Date"])["Length (mm)"].sum()
+        self.position_groups = df.groupby(["Tube", "Position", "Date"])[
+            "Length (mm)"
+        ].agg(["mean", "min", "max", "std", "count"])
+
+    @lru_cache(maxsize=32)
+    def _get_interval_data(
+        self, tube: int, date: pd.Timestamp, interval_size: int = 10
+    ) -> Dict:
+        """
+        Get cached interval data for a specific tube and date with standardized intervals.
+        Returns data in fixed intervals (1-10, 11-20, etc.) regardless of starting position.
+        """
+        tube_data = self.data_processor.df[
+            (self.data_processor.df["Tube"] == tube)
+            & (self.data_processor.df["Date"] == date)
+        ]
+
+        if tube_data.empty:
+            return {}
+
+        # Get actual positions
+        positions = sorted(tube_data["Position"].unique())
+        min_pos = min(positions)
+        max_pos = max(positions)
+
+        # Calculate standardized intervals
+        # Start from the interval that would contain the minimum position
+        first_interval_end = ((min_pos - 1) // interval_size + 1) * interval_size
+        # End at the interval that would contain the maximum position
+        last_interval_end = ((max_pos - 1) // interval_size + 1) * interval_size
+
+        interval_stats = {}
+        for interval_end in range(
+            first_interval_end, last_interval_end + 1, interval_size
+        ):
+            interval_start = interval_end - interval_size + 1
+            interval_data = tube_data[
+                (tube_data["Position"] >= interval_start)
+                & (tube_data["Position"] <= interval_end)
+            ]
+
+            if not interval_data.empty:
+                stats = {
+                    "avg": interval_data["Length (mm)"].mean(),
+                    "min": interval_data["Length (mm)"].min(),
+                    "max": interval_data["Length (mm)"].max(),
+                    "std": interval_data["Length (mm)"].std(),
+                    "count": len(interval_data),
+                    "interval_start": interval_start,
+                    "interval_end": interval_end,
+                }
+                interval_stats[interval_end] = stats
+            else:
+                # Store empty interval information for completeness
+                interval_stats[interval_end] = {
+                    "avg": float("nan"),
+                    "min": float("nan"),
+                    "max": float("nan"),
+                    "std": float("nan"),
+                    "count": 0,
+                    "interval_start": interval_start,
+                    "interval_end": interval_end,
+                }
+
+        return interval_stats
 
     def _setup_layout(self):
         """Define the Dash app layout."""
@@ -228,180 +313,138 @@ class DashApp:
 
             return dash.no_update
 
-    def show_overview(self, view_type):
-        """Generate the overview figure."""
-        df = self.data_processor.df
-        if view_type == "separate":
-            lengths = df.groupby("tube_date")["Length (mm)"].sum().reset_index()
-            x_values = lengths["tube_date"]
-            title = "Root Length Overview by Date"
-        else:
-            lengths = df.groupby("Tube")["Length (mm)"].mean().reset_index()
-            x_values = lengths["Tube"].apply(lambda x: f"Tube {int(x)}")
-            title = "Root Length Overview"
-
-        fig = go.Figure(
-            data=[
-                go.Bar(
-                    x=x_values,
-                    y=lengths["Length (mm)"],
-                    text=lengths["Length (mm)"].round(2),
-                    textposition="auto",
-                )
-            ]
-        )
-
-        fig.update_layout(
-            title=title,
-            xaxis_title="Tube Information",
-            yaxis_title="Total Length (mm)",
-            clickmode="event+select",
-            xaxis_tickangle=-45,
-            autosize=True,
-            margin=dict(l=50, r=50, t=50, b=50),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="white",
-            height=700,
-            width=1000,
-        )
-        return fig
-
-    def show_growth_lines(self, selected_tube):
-        """Generate growth lines figure for a selected tube."""
-        df = self.data_processor.df
+    def show_growth_lines(self, selected_tube: int) -> go.Figure:
+        """Generate optimized growth lines figure with efficient data handling."""
         fig = go.Figure()
+        colors = px.colors.qualitative.Plotly
 
         try:
-            tube_data = df[df["Tube"] == selected_tube].copy()
-            dates = sorted(tube_data["Date"].unique())
-            all_positions = sorted(tube_data["Position"].unique())
-            interval_positions = all_positions[::10]  # Every 10th position
+            interval_size = 10
+            max_length = 0
 
-            colors = px.colors.qualitative.Plotly
-
-            for i, date in enumerate(dates):
-                date_data = tube_data[tube_data["Date"] == date]
-                position_data = (
-                    date_data.groupby("Position")["Length (mm)"].mean().reset_index()
+            # Process each date efficiently
+            for i, date in enumerate(self.dates):
+                interval_data = self._get_interval_data(
+                    selected_tube, date, interval_size
                 )
 
-                if not position_data.empty:
-                    smoothed_lengths = self.smooth_data(
-                        position_data["Position"].values,
-                        position_data["Length (mm)"].values,
-                        interval_positions,
-                    )
+                if not interval_data:
+                    continue
 
-                    hover_info = self.generate_hover_info(date_data, interval_positions)
+                positions = sorted(interval_data.keys())
+                averages = []
+                hover_info = []
 
-                    fig.add_trace(
-                        go.Scatter(
-                            x=smoothed_lengths,
-                            y=interval_positions,
-                            mode="lines+markers",
-                            name=date.strftime("%Y-%m-%d"),
-                            line=dict(
-                                color=colors[i % len(colors)],
-                                width=2,
-                                shape="spline",
-                                smoothing=0.3,
-                            ),
-                            marker=dict(
-                                size=8,
-                                opacity=0.8,
-                                symbol="circle",
-                            ),
-                            hovertemplate=(
-                                "<b>Position: L%{y}</b><br>"
-                                "<b>Smoothed length: %{x:.2f} mm</b><br>"
-                                "%{text}<br>"
-                                "<b>Date: "
-                                + date.strftime("%Y-%m-%d")
-                                + "</b><extra></extra>"
-                            ),
-                            text=hover_info,
+                # Efficiently build data arrays
+                for pos in positions:
+                    stats = interval_data[pos]
+                    if stats:
+                        avg = stats["avg"]
+                        averages.append(avg)
+                        max_length = max(max_length, stats["max"])
+
+                        hover_text = (
+                            f"Interval L{pos-interval_size+1}-L{pos}:<br>"
+                            f"Average: {avg:.2f} mm<br>"
+                            f"Range: {stats['min']:.2f} - {stats['max']:.2f} mm<br>"
+                            f"Std Dev: {stats['std']:.2f}<br>"
+                            f"Measurements: {stats['count']}"
                         )
-                    )
+                    else:
+                        averages.append(float("nan"))
+                        hover_text = (
+                            f"No data for interval L{pos-interval_size+1}-L{pos}"
+                        )
 
-            # Add vertical line representing the tube
+                    hover_info.append(hover_text)
+
+                # Add trace with optimized settings
+                fig.add_trace(
+                    go.Scatter(
+                        x=averages,
+                        y=positions,
+                        mode="lines+markers",
+                        name=date.strftime("%Y-%m-%d"),
+                        line={
+                            "color": colors[i % len(colors)],
+                            "width": 2,
+                            "shape": "spline",
+                            "smoothing": 0.3,
+                        },
+                        marker={"size": 8, "opacity": 0.8},
+                        hovertemplate=(
+                            "<b>Position: L%{y}</b><br>"
+                            "<b>Average: %{x:.2f} mm</b><br>"
+                            "%{text}<br>"
+                            f"<b>Date: {date.strftime('%Y-%m-%d')}</b>"
+                            "<extra></extra>"
+                        ),
+                        text=hover_info,
+                    )
+                )
+
+            # Update layout with optimized settings
+            fig.update_layout(
+                title={
+                    "text": f"Root Growth - Tube {int(selected_tube)}",
+                    "x": 0.5,
+                    "xanchor": "center",
+                    "font": {"size": 20},
+                },
+                xaxis={
+                    "title": "Root Length (mm)",
+                    "showgrid": True,
+                    "gridcolor": "lightgray",
+                    "zeroline": True,
+                    "zerolinecolor": "black",
+                    "zerolinewidth": 2,
+                    "range": [-1, max_length * 1.1],
+                    "tickformat": ".1f",
+                },
+                yaxis={
+                    "title": "Position (L)",
+                    "showgrid": True,
+                    "gridcolor": "lightgray",
+                    "zeroline": False,
+                    "autorange": "reversed",
+                    "tickmode": "array",
+                    "ticktext": [f"L{pos}" for pos in positions],
+                    "tickvals": positions,
+                    "dtick": 10,
+                },
+                plot_bgcolor="white",
+                legend={
+                    "title": {"text": "Measurement Dates", "font": {"size": 12}},
+                    "yanchor": "top",
+                    "y": 0.99,
+                    "xanchor": "left",
+                    "x": 1.02,
+                    "bgcolor": "rgba(255, 255, 255, 0.8)",
+                    "bordercolor": "black",
+                    "borderwidth": 1,
+                    "font": {"size": 10},
+                },
+                hovermode="closest",
+                height=700,
+                width=1000,
+                margin={"t": 80, "b": 60, "l": 80, "r": 120},
+            )
+
+            # Add reference line
             fig.add_shape(
                 type="line",
                 x0=0,
                 x1=0,
-                y0=min(interval_positions),
-                y1=max(interval_positions),
-                line=dict(color="black", width=2, dash="dot"),
+                y0=min(positions),
+                y1=max(positions),
+                line={"color": "black", "width": 2, "dash": "dot"},
             )
 
-            max_length = tube_data["Length (mm)"].max()
-
-            fig.update_layout(
-                title=dict(
-                    text=f"Root Growth - Tube {int(selected_tube)}",
-                    x=0.5,
-                    xanchor="center",
-                    font=dict(size=20),
-                ),
-                xaxis=dict(
-                    title="Root Length (mm)",
-                    showgrid=True,
-                    gridcolor="lightgray",
-                    zeroline=True,
-                    zerolinecolor="black",
-                    zerolinewidth=2,
-                    range=[-1, max_length * 1.1],
-                    tickformat=".1f",
-                ),
-                yaxis=dict(
-                    title="Position (L)",
-                    showgrid=True,
-                    gridcolor="lightgray",
-                    zeroline=False,
-                    autorange="reversed",
-                    tickmode="array",
-                    ticktext=[f"L{pos}" for pos in interval_positions],
-                    tickvals=interval_positions,
-                    dtick=10,
-                ),
-                plot_bgcolor="white",
-                legend=dict(
-                    title=dict(text="Measurement Dates", font=dict(size=12)),
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=1.02,
-                    bgcolor="rgba(255, 255, 255, 0.8)",
-                    bordercolor="black",
-                    borderwidth=1,
-                    font=dict(size=10),
-                ),
-                hovermode="closest",
-                height=700,
-                width=1000,
-                margin=dict(t=80, b=60, l=80, r=120),
-            )
         except Exception as e:
-            print(f"Error generating growth lines: {e}")
+            warnings.warn(f"Error generating growth lines: {e}")
+            fig = go.Figure()
 
         return fig
-
-    def smooth_data(self, positions, lengths, interval_positions, window=5):
-        """Apply moving average smoothing to data."""
-        try:
-            interp_positions = np.arange(min(positions), max(positions) + 1)
-            interp_lengths = np.interp(interp_positions, positions, lengths)
-
-            kernel = np.ones(window) / window
-            smoothed = np.convolve(interp_lengths, kernel, mode="valid")
-            smoothed_positions = interp_positions[
-                window // 2 : -(window // 2) if window // 2 > 0 else None
-            ]
-
-            final_lengths = np.interp(interval_positions, smoothed_positions, smoothed)
-            return final_lengths
-        except Exception as e:
-            print(f"Error smoothing data: {e}")
-            return lengths
 
     def generate_hover_info(self, date_data, interval_positions):
         """Generate hover information for growth lines."""
@@ -430,88 +473,6 @@ class DashApp:
 
             hover_info.append(hover_text)
         return hover_info
-
-    def show_sections(self, tube_info):
-        """Generate sections figure based on tube information."""
-        df = self.data_processor.df
-        try:
-            if "(" in tube_info:
-                tube = int(tube_info.split(" ")[1])
-                date_str = tube_info.split("(")[1].rstrip(")")
-                date = pd.to_datetime(date_str)
-                section_data = df[(df["Tube"] == tube) & (df["Date"] == date)]
-            else:
-                tube = int(tube_info.split(" ")[1])
-                section_data = df[df["Tube"] == tube]
-
-            section_lengths = (
-                section_data.groupby("Position")["Length (mm)"].mean().reset_index()
-            )
-
-            fig = go.Figure(
-                data=[
-                    go.Bar(
-                        x=[f"L{int(pos)}" for pos in section_lengths["Position"]],
-                        y=section_lengths["Length (mm)"],
-                        text=section_lengths["Length (mm)"].round(2),
-                        textposition="auto",
-                    )
-                ]
-            )
-
-            fig.update_layout(
-                title=f"Root Length by Sections in {tube_info}",
-                xaxis_title="Position",
-                yaxis_title="Length (mm)",
-                clickmode="event+select",
-                autosize=True,
-                margin=dict(l=50, r=50, t=50, b=50),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="white",
-                height=700,
-                width=1000,
-            )
-            return fig
-        except Exception as e:
-            print(f"Error generating sections: {e}")
-            return go.Figure()
-
-    def show_time_series(self, tube_info, position):
-        """Generate time series figure for a specific tube and position."""
-        df = self.data_processor.df
-        try:
-            tube = int(tube_info.split(" ")[1])
-            time_series = df[
-                (df["Tube"] == tube) & (df["Position"] == position)
-            ].sort_values("Date")
-
-            fig = go.Figure(
-                data=[
-                    go.Scatter(
-                        x=time_series["Date"],
-                        y=time_series["Length (mm)"],
-                        mode="lines+markers",
-                        text=time_series["Length (mm)"].round(2),
-                        textposition="top center",
-                    )
-                ]
-            )
-
-            fig.update_layout(
-                title=f"Growth Over Time - Tube {tube}, Position L{position}",
-                xaxis_title="Date",
-                yaxis_title="Length (mm)",
-                autosize=True,
-                margin=dict(l=50, r=50, t=50, b=50),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="white",
-                height=700,
-                width=1000,
-            )
-            return fig
-        except Exception as e:
-            print(f"Error generating time series: {e}")
-            return go.Figure()
 
     def show_growth_over_time(self):
         """Generate growth over time figure."""
@@ -550,54 +511,40 @@ class DashApp:
     def run_server(self):
         """Run the Dash server."""
         try:
-            self.app.run_server(debug=False, port=8050, threaded=True)
+            self.app.run_server(debug=False, port=8050, threaded=True, processes=1)
         except Exception as e:
             print(f"Error running Dash server: {e}")
 
-    def create_stacked_bar_chart(self):
-        """Create a stacked bar chart showing root length by tube and date."""
-        df = self.data_processor.df
-
+    def create_stacked_bar_chart(self) -> go.Figure:
+        """Create an optimized stacked bar chart with efficient data handling."""
         try:
-            # Group data by tube and date
-            grouped = df.groupby(["Tube", "Date"])["Length (mm)"].sum().reset_index()
-
-            # Sort dates chronologically
-            grouped["Date"] = pd.to_datetime(grouped["Date"])
-            dates = sorted(grouped["Date"].unique())
-
-            # Prepare data for plotting
-            tubes = sorted(grouped["Tube"].unique())
             traces = []
 
-            # Create a bar trace for each date
-            for date in dates:
-                date_data = grouped[grouped["Date"] == date]
+            # Use pre-computed groups for better performance
+            for date in self.dates:
                 trace_data = []
-
-                for tube in tubes:
-                    value = date_data[date_data["Tube"] == tube]["Length (mm)"].values
-                    trace_data.append(value[0] if len(value) > 0 else 0)
+                for tube in self.tubes:
+                    value = self.tube_date_groups.get((tube, date), 0)
+                    trace_data.append(value)
 
                 traces.append(
                     go.Bar(
                         name=date.strftime("%Y-%m-%d"),
-                        x=[f"Tube {int(tube)}" for tube in tubes],
+                        x=[f"Tube {int(tube)}" for tube in self.tubes],
                         y=trace_data,
                         text=[f"{v:.2f}" for v in trace_data],
                         textposition="auto",
-                        hovertemplate="<b>%{x}</b><br>"
-                        + "Date: "
-                        + date.strftime("%Y-%m-%d")
-                        + "<br>"
-                        + "Length: %{y:.2f} mm<br>"
-                        + "<extra></extra>",
+                        hovertemplate=(
+                            "<b>%{x}</b><br>"
+                            f"Date: {date.strftime('%Y-%m-%d')}<br>"
+                            "Length: %{y:.2f} mm<br>"
+                            "<extra></extra>"
+                        ),
                     )
                 )
 
+            # Create figure with optimized layout
             fig = go.Figure(data=traces)
-
-            # Update layout for stacked bars
             fig.update_layout(
                 barmode="stack",
                 title={
@@ -610,25 +557,25 @@ class DashApp:
                 yaxis_title="Total Length (mm)",
                 legend_title="Measurement Date",
                 height=700,
-                width=1000,
+                width=2000,
                 showlegend=True,
                 hovermode="x unified",
                 plot_bgcolor="white",
-                bargap=0.2,
-                bargroupgap=0.1,
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=1.02,
-                    bgcolor="rgba(255, 255, 255, 0.8)",
-                    bordercolor="black",
-                    borderwidth=1,
-                ),
-                margin=dict(l=50, r=150, t=80, b=50),
+                bargap=0.1,
+                bargroupgap=0.5,
+                legend={
+                    "yanchor": "top",
+                    "y": 0.99,
+                    "xanchor": "left",
+                    "x": 1.02,
+                    "bgcolor": "rgba(255, 255, 255, 0.8)",
+                    "bordercolor": "black",
+                    "borderwidth": 1,
+                },
+                margin={"l": 50, "r": 150, "t": 80, "b": 50},
             )
 
-            # Update axes
+            # Optimize axes appearance
             fig.update_xaxes(
                 showgrid=True,
                 gridwidth=1,
@@ -637,7 +584,6 @@ class DashApp:
                 linewidth=2,
                 linecolor="black",
             )
-
             fig.update_yaxes(
                 showgrid=True,
                 gridwidth=1,
@@ -650,5 +596,5 @@ class DashApp:
             return fig
 
         except Exception as e:
-            print(f"Error generating stacked bar chart: {e}")
+            warnings.warn(f"Error generating stacked bar chart: {e}")
             return go.Figure()

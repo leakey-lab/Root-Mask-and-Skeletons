@@ -199,4 +199,4 @@ class RootLengthVisualization(QMainWindow):
             download_item.accept()
 
         except Exception:
-            QMessageBox.warning(self, "Download Error", f"Failed to save file.")
+            QMessageBox.warning(self, "Download Error", "Failed to save file.")
