@@ -1,4 +1,4 @@
-from dash import Dash, dcc, html, Input, Output
+from dash import Dash, dcc, html, Input, Output, State
 import dash
 import numpy as np
 import plotly.graph_objects as go
@@ -6,27 +6,61 @@ import plotly.express as px
 import dash_bootstrap_components as dbc
 import pandas as pd
 from functools import lru_cache
-from typing import List, Dict, Tuple, Any
+from typing import Any
 import warnings
+import base64
+from PIL import Image
+import io
+import re
+import os
 
 
 class DashApp:
     """Manages the Dash application."""
 
-    def __init__(self, data_processor: Any, save_directory: str):
+    def __init__(self, data_processor: Any, save_directory: str, image_manager=None):
+        print("\n=== Initialization Debug ===")
+        print(f"Save directory: {save_directory}")
+
         self.data_processor = data_processor
         self.save_directory = save_directory
+        self.image_manager = image_manager
+
+        # Store available images info for debugging
+        self.available_images = {}
+        if image_manager and image_manager.images:
+            print(f"\nFound {len(image_manager.images)} total images")
+            for name, path in image_manager.images.items():
+                tube_match = re.search(r"T(\d+)", name)
+                pos_match = re.search(r"L(\d+)", name)
+                date_match = re.search(r"(\d{4})\.(\d{2})\.(\d{2})", name)
+
+                if all([tube_match, pos_match, date_match]):
+                    tube = int(tube_match.group(1))
+                    position = int(pos_match.group(1))
+                    date_str = f"{date_match.group(1)}.{date_match.group(2)}.{date_match.group(3)}"
+
+                    key = (tube, position, date_str)
+                    self.available_images[key] = path
+                    if tube not in self.available_images.get("tubes", set()):
+                        self.available_images.setdefault("tubes", set()).add(tube)
+                    if position not in self.available_images.get("positions", set()):
+                        self.available_images.setdefault("positions", set()).add(
+                            position
+                        )
+                    if date_str not in self.available_images.get("dates", set()):
+                        self.available_images.setdefault("dates", set()).add(date_str)
 
         # Cache commonly used data
         self._cache_data()
 
-        # Initialize Dash app with optimized settings
+        # Initialize Dash app
         self.app = Dash(
             __name__,
             external_stylesheets=[dbc.themes.BOOTSTRAP],
             suppress_callback_exceptions=True,
             update_title=None,
-            compress=True,  # Enable response compression
+            compress=True,
         )
 
         # Set up layout and callbacks
@@ -48,7 +82,7 @@ class DashApp:
     @lru_cache(maxsize=32)
     def _get_interval_data(
         self, tube: int, date: pd.Timestamp, interval_size: int = 10
-    ) -> Dict:
+    ) -> dict:
         """
         Get cached interval data for a specific tube and date with standardized intervals.
         Returns data in fixed intervals (1-10, 11-20, etc.) regardless of starting position.
@@ -67,9 +101,7 @@ class DashApp:
         max_pos = max(positions)
 
         # Calculate standardized intervals
-        # Start from the interval that would contain the minimum position
         first_interval_end = ((min_pos - 1) // interval_size + 1) * interval_size
-        # End at the interval that would contain the maximum position
         last_interval_end = ((max_pos - 1) // interval_size + 1) * interval_size
 
         interval_stats = {}
@@ -94,7 +126,6 @@ class DashApp:
                 }
                 interval_stats[interval_end] = stats
             else:
-                # Store empty interval information for completeness
                 interval_stats[interval_end] = {
                     "avg": float("nan"),
                     "min": float("nan"),
@@ -106,6 +137,59 @@ class DashApp:
                 }
 
         return interval_stats
+
+    def get_encoded_image(self, tube: int, position: int, date: pd.Timestamp) -> str:
+        """Get base64 encoded image with enhanced debugging."""
+        try:
+            date_str = date.strftime("%Y.%m.%d")
+            key = (tube, position, date_str)
+
+            if key in self.available_images:
+                path = self.available_images[key]
+
+                try:
+                    # Check if file exists and is readable
+                    if not os.path.exists(path):
+                        print(f"Error: File does not exist: {path}")
+                        return ""
+
+                    if not os.access(path, os.R_OK):
+                        print(f"Error: No read permission for file: {path}")
+                        return ""
+
+                    with Image.open(path) as img:
+
+                        # Convert to RGB if needed
+                        if img.mode not in ("RGB", "RGBA"):
+                            img = img.convert("RGB")
+
+                        img.thumbnail((200, 150), Image.Resampling.LANCZOS)
+
+                        buffered = io.BytesIO()
+                        img.save(buffered, format="PNG", optimize=True)
+
+                        img_str = base64.b64encode(buffered.getvalue()).decode()
+
+                        return f"data:image/png;base64,{img_str}"
+
+                except Exception as img_error:
+                    print(f"Error processing image: {str(img_error)}")
+                    print(f"Error type: {type(img_error)}")
+                    import traceback
+
+                    print(f"Traceback: {traceback.format_exc()}")
+                    return ""
+            else:
+                print("No matching image found in available_images")
+                return ""
+
+        except Exception as e:
+            print(f"Error in get_encoded_image: {str(e)}")
+            print(f"Error type: {type(e)}")
+            import traceback
+
+            print(f"Traceback: {traceback.format_exc()}")
+            return ""
 
     def _setup_layout(self):
         """Define the Dash app layout."""
@@ -120,7 +204,6 @@ class DashApp:
                 "padding": "20px",
             },
             children=[
-                # Title
                 html.H1(
                     "Root Length Visualization",
                     style={
@@ -130,10 +213,8 @@ class DashApp:
                         "color": "#2c3e50",
                     },
                 ),
-                # Container
                 dbc.Container(
                     [
-                        # Controls
                         dbc.Row(
                             dbc.Col(
                                 dbc.Card(
@@ -176,7 +257,6 @@ class DashApp:
                             ),
                             className="mb-4 justify-content-center",
                         ),
-                        # Graph
                         dbc.Row(
                             dbc.Col(
                                 [
@@ -209,20 +289,21 @@ class DashApp:
                                         className="text-center my-3",
                                         style={"color": "#2c3e50"},
                                     ),
-                                    dbc.Button(
-                                        "Back",
-                                        id="back-button",
-                                        className="mt-3 d-none",
-                                        style={
-                                            "backgroundColor": "#2c3e50",
-                                            "borderColor": "#2c3e50",
-                                        },
-                                    ),
                                 ],
                                 className="d-flex flex-column align-items-center",
                             )
                         ),
-                        # Hidden store for caching
+                        # Container for dynamically displayed images on hover
+                        html.Div(
+                            id="image-container",
+                            style={
+                                "width": "100%",
+                                "display": "flex",
+                                "flexWrap": "wrap",
+                                "justifyContent": "center",
+                                "marginTop": "20px",
+                            },
+                        ),
                         dcc.Store(id="cached-data"),
                     ],
                     fluid=True,
@@ -238,7 +319,6 @@ class DashApp:
             [
                 Output("main-graph", "figure"),
                 Output("click-data", "children"),
-                Output("back-button", "className"),
                 Output("tube-selector", "style"),
                 Output("tube-selector", "options"),
             ],
@@ -246,17 +326,15 @@ class DashApp:
                 Input("view-selector", "value"),
                 Input("tube-selector", "value"),
                 Input("main-graph", "clickData"),
-                Input("back-button", "n_clicks"),
             ],
         )
-        def update_visualization(view_type, selected_tube, click_data, n_clicks):
+        def update_visualization(view_type, selected_tube, click_data):
             ctx = dash.callback_context
             if not ctx.triggered:
                 # Initial load - show stacked view by default
                 return (
-                    self.create_stacked_bar_chart(),  # Changed default view
+                    self.create_stacked_bar_chart(),
                     "",
-                    "mt-2 d-none",
                     {"display": "none"},
                     [],
                 )
@@ -268,7 +346,6 @@ class DashApp:
                     return (
                         self.create_stacked_bar_chart(),
                         "",
-                        "mt-2 d-none",
                         {"display": "none"},
                         [],
                     )
@@ -281,19 +358,19 @@ class DashApp:
 
                     if trigger_id == "view-selector":
                         first_tube = self.data_processor.get_unique_tubes()[0]
+                        fig = self.show_growth_lines(first_tube)
                         return (
-                            self.show_growth_lines(first_tube),
+                            fig,
                             "",
-                            "mt-2",
                             {"display": "block"},
                             tube_options,
                         )
 
                     if trigger_id == "tube-selector" and selected_tube:
+                        fig = self.show_growth_lines(selected_tube)
                         return (
-                            self.show_growth_lines(selected_tube),
+                            fig,
                             "",
-                            "mt-2",
                             {"display": "block"},
                             tube_options,
                         )
@@ -302,7 +379,6 @@ class DashApp:
                     return (
                         self.show_growth_over_time(),
                         "",
-                        "mt-2 d-none",
                         {"display": "none"},
                         [],
                     )
@@ -313,8 +389,95 @@ class DashApp:
 
             return dash.no_update
 
+        # Callback to display the 10 images for hovered interval in Growth Lines view
+        @self.app.callback(
+            Output("image-container", "children"),
+            Input("main-graph", "hoverData"),
+            State("tube-selector", "value"),
+            State("view-selector", "value"),
+        )
+        def display_hover_images(hoverData, selected_tube, view_type):
+            if (
+                view_type != "lines"
+                or not hoverData
+                or "points" not in hoverData
+                or not hoverData["points"]
+                or not selected_tube
+            ):
+                return []
+
+            try:
+                point = hoverData["points"][0]
+                print(point)
+                # Extract the date directly from the hover data
+                date_str = point["text"].split("<br>")[5].split(":")[1].strip()
+                date = pd.to_datetime(date_str, format="%Y.%m.%d")
+
+                hovered_y = int(point["y"])
+
+                interval_start = hovered_y - 9
+                interval_end = hovered_y
+
+                images = []
+                successful_encodings = 0
+
+                for pos in range(interval_start, interval_end + 1):
+                    img_src = self.get_encoded_image(selected_tube, pos, date)
+                    if img_src:
+                        successful_encodings += 1
+                        images.append(
+                            html.Div(
+                                [
+                                    html.Img(
+                                        src=img_src,
+                                        style={
+                                            "width": "100%",
+                                            "height": "auto",
+                                            "objectFit": "contain",
+                                            "border": "1px solid #ddd",
+                                            "borderRadius": "4px",
+                                        },
+                                    ),
+                                    html.P(
+                                        f"Position L{pos}",
+                                        style={
+                                            "textAlign": "center",
+                                            "fontWeight": "bold",
+                                            "margin": "5px 0",
+                                        },
+                                    ),
+                                ],
+                                key=f"image-{pos}-{date_str}",  # Unique key
+                                style={
+                                    "width": "10%",
+                                    "padding": "2px",
+                                    "boxSizing": "border-box",
+                                    "display": "inline-block",
+                                    "verticalAlign": "top",
+                                },
+                            )
+                        )
+
+                if not images:
+                    return [
+                        html.Div(
+                            "No images available for this interval",
+                            style={"textAlign": "center", "padding": "20px"},
+                        )
+                    ]
+
+                return images
+
+            except Exception as e:
+                print(f"Error in display_hover_images: {str(e)}")
+                import traceback
+
+                print(f"Traceback: {traceback.format_exc()}")
+                return []
+
     def show_growth_lines(self, selected_tube: int) -> go.Figure:
-        """Generate optimized growth lines figure with efficient data handling."""
+        """Generate growth lines figure with debug information."""
+        print(f"\n=== Growth Lines Debug for Tube {selected_tube} ===")
         fig = go.Figure()
         colors = px.colors.qualitative.Plotly
 
@@ -322,8 +485,9 @@ class DashApp:
             interval_size = 10
             max_length = 0
 
-            # Process each date efficiently
+            print("\nProcessing dates:")
             for i, date in enumerate(self.dates):
+                print(f"\nDate: {date.strftime('%Y-%m-%d')}")
                 interval_data = self._get_interval_data(
                     selected_tube, date, interval_size
                 )
@@ -332,23 +496,32 @@ class DashApp:
                     continue
 
                 positions = sorted(interval_data.keys())
+                print(f"Positions found: {positions}")
                 averages = []
                 hover_info = []
 
-                # Efficiently build data arrays
                 for pos in positions:
                     stats = interval_data[pos]
+                    print(f"\nPosition {pos}:")
+                    print(f"Stats: {stats}")
+
+                    # Check if we have corresponding image
+                    date_str = date.strftime("%Y.%m.%d")
+                    has_image = (selected_tube, pos, date_str) in self.available_images
+                    print(f"Image available: {has_image}")
+
                     if stats:
                         avg = stats["avg"]
                         averages.append(avg)
                         max_length = max(max_length, stats["max"])
-
                         hover_text = (
                             f"Interval L{pos-interval_size+1}-L{pos}:<br>"
                             f"Average: {avg:.2f} mm<br>"
                             f"Range: {stats['min']:.2f} - {stats['max']:.2f} mm<br>"
                             f"Std Dev: {stats['std']:.2f}<br>"
-                            f"Measurements: {stats['count']}"
+                            f"Measurements: {stats['count']}<br>"
+                            f"Date : {date_str}<br>"
+                            f"{'Image Available' if has_image else 'No Image'}"
                         )
                     else:
                         averages.append(float("nan"))
@@ -358,7 +531,7 @@ class DashApp:
 
                     hover_info.append(hover_text)
 
-                # Add trace with optimized settings
+                # Rest of the function remains the same...
                 fig.add_trace(
                     go.Scatter(
                         x=averages,
@@ -376,8 +549,6 @@ class DashApp:
                             "<b>Position: L%{y}</b><br>"
                             "<b>Average: %{x:.2f} mm</b><br>"
                             "%{text}<br>"
-                            f"<b>Date: {date.strftime('%Y-%m-%d')}</b>"
-                            "<extra></extra>"
                         ),
                         text=hover_info,
                     )
@@ -446,34 +617,6 @@ class DashApp:
 
         return fig
 
-    def generate_hover_info(self, date_data, interval_positions):
-        """Generate hover information for growth lines."""
-        hover_info = []
-        for pos in interval_positions:
-            interval_values = date_data[
-                (date_data["Position"] >= pos - 5) & (date_data["Position"] <= pos + 5)
-            ]["Length (mm)"]
-
-            if not interval_values.empty:
-                avg_length = interval_values.mean()
-                max_length = interval_values.max()
-                min_length = interval_values.min()
-                std_dev = interval_values.std()
-                n_measurements = len(interval_values)
-
-                hover_text = (
-                    f"Interval L{pos-5}-L{pos+5}:<br>"
-                    f"Average: {avg_length:.2f} mm<br>"
-                    f"Range: {min_length:.2f} - {max_length:.2f} mm<br>"
-                    f"Std Dev: {std_dev:.2f}<br>"
-                    f"Measurements: {n_measurements}"
-                )
-            else:
-                hover_text = f"No data for interval L{pos-5}-L{pos+5}"
-
-            hover_info.append(hover_text)
-        return hover_info
-
     def show_growth_over_time(self):
         """Generate growth over time figure."""
         df = self.data_processor.df
@@ -511,16 +654,14 @@ class DashApp:
     def run_server(self):
         """Run the Dash server."""
         try:
-            self.app.run_server(debug=False, port=8050, threaded=True, processes=1)
+            self.app.run_server(debug=True, port=8050, threaded=True, processes=1)
         except Exception as e:
             print(f"Error running Dash server: {e}")
 
     def create_stacked_bar_chart(self) -> go.Figure:
-        """Create an optimized stacked bar chart with efficient data handling."""
+        """Create an optimized stacked bar chart."""
         try:
             traces = []
-
-            # Use pre-computed groups for better performance
             for date in self.dates:
                 trace_data = []
                 for tube in self.tubes:
@@ -543,7 +684,6 @@ class DashApp:
                     )
                 )
 
-            # Create figure with optimized layout
             fig = go.Figure(data=traces)
             fig.update_layout(
                 barmode="stack",
@@ -557,7 +697,7 @@ class DashApp:
                 yaxis_title="Total Length (mm)",
                 legend_title="Measurement Date",
                 height=700,
-                width=2000,
+                width=1600,
                 showlegend=True,
                 hovermode="x unified",
                 plot_bgcolor="white",
@@ -575,7 +715,6 @@ class DashApp:
                 margin={"l": 50, "r": 150, "t": 80, "b": 50},
             )
 
-            # Optimize axes appearance
             fig.update_xaxes(
                 showgrid=True,
                 gridwidth=1,

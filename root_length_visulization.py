@@ -50,9 +50,10 @@ class DashServerThread(QThread):
 class RootLengthVisualization(QMainWindow):
     server_closed = pyqtSignal()
 
-    def __init__(self, csv_path):
+    def __init__(self, csv_path, image_manager):
         super().__init__()
         self.csv_path = csv_path
+        self.image_manager = image_manager
         self.setWindowTitle("Root Length Visualization")
         self.setGeometry(100, 100, 1200, 800)
 
@@ -106,7 +107,9 @@ class RootLengthVisualization(QMainWindow):
             if self.processor.df.empty:
                 raise ValueError("No data found in CSV file")
 
-            self.dash_app = DashApp(self.processor, self.save_directory)
+            self.dash_app = DashApp(
+                self.processor, self.save_directory, self.image_manager
+            )
 
             self.server_thread = DashServerThread(self.dash_app, port=port)
             self.server_thread.error.connect(self._handle_server_error)

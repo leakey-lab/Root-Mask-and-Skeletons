@@ -567,7 +567,9 @@ class MainWindow(QMainWindow):
                 self.logger.debug(
                     f"Creating new RootLengthVisualization with {csv_path}"
                 )
-                self.root_length_viz = RootLengthVisualization(csv_path)
+                self.root_length_viz = RootLengthVisualization(
+                    csv_path, self.image_manager
+                )
                 self.root_length_viz.server_closed.connect(
                     self.on_visualization_server_closed
                 )
