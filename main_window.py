@@ -216,22 +216,9 @@ class MainWindow(QMainWindow):
 
 ### Local Chnage not to be pushed
     def populate_file_list(self):
-        """Populate the file list with image names sorted by first 3 numbers"""
+        """Populate the file list without checking masks"""
         self.file_list.clear()
-        
-        # Custom sort key function to extract first 3 numbers from filename
-        def sort_by_first_3_numbers(filename):
-            import re
-            # Extract first 3 consecutive digits from the filename
-            match = re.search(r'(\d{1,4})', os.path.basename(filename))
-            if match:
-                return int(match.group(1))
-            return float('inf')  # Files without numbers go to the end
-        
-        # Get image names and sort them using the custom key
-        sorted_names = sorted(self.image_manager.get_image_names(), key=sort_by_first_3_numbers)
-        
-        for name in sorted_names:
+        for name in self.image_manager.get_image_names():
             item = QListWidgetItem(os.path.basename(name))
             self.file_list.addItem(item)
 
