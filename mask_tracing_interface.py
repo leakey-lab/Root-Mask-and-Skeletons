@@ -47,7 +47,7 @@ class MaskTracingGraphicsView(QGraphicsView):
         self.min_zoom = 0.1
         self.max_zoom = 10.0
 
-    # ADD THIS METHOD
+
     def setup_high_quality_rendering(self):
         """Configure high-quality rendering settings"""
         # Enable all quality render hints
@@ -216,7 +216,7 @@ class MaskTracingGraphicsView(QGraphicsView):
         if not self.drawing:
             super().ensureVisible(*args, **kwargs)
 
-    # ADD THIS METHOD
+
     def scale_with_quality(self, factor):
         """Apply scaling with high quality settings"""
         # Ensure smooth transformation for all items before scaling
@@ -236,7 +236,6 @@ class MaskTracingGraphicsView(QGraphicsView):
         # Force a high-quality update
         self.viewport().update()
 
-    # ADD THIS METHOD
     def set_zoom(self, factor):
         """Set zoom level directly with high quality (called from zoom slider)"""
         if self.min_zoom <= factor / 100 <= self.max_zoom:
@@ -729,7 +728,7 @@ class MaskTracingInterface(QWidget):
             self.scene.addItem(self.mask_item)
             self.mask_item.setZValue(1)
 
-        # ADD THIS: Configure high quality settings for items
+        # Configure high quality settings for items
         self.image_item.setTransformationMode(
             Qt.TransformationMode.SmoothTransformation
         )
