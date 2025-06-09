@@ -22,6 +22,7 @@ from PyQt6.QtGui import (
     QKeySequence,
     QShortcut,
     QWheelEvent,
+    QTransform,
 )
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF, QEvent, QPointF
 import os
@@ -46,6 +47,28 @@ class MaskTracingGraphicsView(QGraphicsView):
         self.min_zoom = 0.1
         self.max_zoom = 10.0
 
+    # ADD THIS METHOD
+    def setup_high_quality_rendering(self):
+        """Configure high-quality rendering settings"""
+        # Enable all quality render hints
+        self.setRenderHints(
+            QPainter.RenderHint.Antialiasing
+            | QPainter.RenderHint.SmoothPixmapTransform
+            | QPainter.RenderHint.LosslessImageRendering
+            | QPainter.RenderHint.TextAntialiasing
+        )
+
+        # Set transformation anchor for better zoom quality
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+
+        # Enable caching for better performance
+        self.setCacheMode(QGraphicsView.CacheMode.CacheBackground)
+
+        # Optimize for interactive use
+        self.setOptimizationFlags(QGraphicsView.OptimizationFlag.DontSavePainterState)
+
+    # MODIFY YOUR EXISTING wheelEvent method (around line 85)
     def wheelEvent(self, event: QWheelEvent):
         if self.drawing:
             event.ignore()
@@ -58,7 +81,7 @@ class MaskTracingGraphicsView(QGraphicsView):
             return
 
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            # Zoom
+            # Zoom with high quality
             zoom_in = event.angleDelta().y() > 0
             if zoom_in and self.zoom_factor < self.max_zoom:
                 factor = 1.25
@@ -71,7 +94,9 @@ class MaskTracingGraphicsView(QGraphicsView):
                 return
 
             self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-            self.scale(factor, factor)
+
+            # MODIFY THIS: Apply high-quality scaling
+            self.scale_with_quality(factor)
 
             # Update the mask interface zoom slider
             if hasattr(self.mask_tracing_interface, "zoom_slider"):
@@ -191,12 +216,39 @@ class MaskTracingGraphicsView(QGraphicsView):
         if not self.drawing:
             super().ensureVisible(*args, **kwargs)
 
+    # ADD THIS METHOD
+    def scale_with_quality(self, factor):
+        """Apply scaling with high quality settings"""
+        # Ensure smooth transformation for all items before scaling
+        if self.scene():
+            for item in self.scene().items():
+                if isinstance(item, QGraphicsPixmapItem):
+                    item.setTransformationMode(
+                        Qt.TransformationMode.SmoothTransformation
+                    )
+                    item.setCacheMode(
+                        QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache
+                    )
+
+        # Apply the scaling
+        self.scale(factor, factor)
+
+        # Force a high-quality update
+        self.viewport().update()
+
+    # ADD THIS METHOD
     def set_zoom(self, factor):
-        """Set zoom level directly (called from zoom slider)"""
+        """Set zoom level directly with high quality (called from zoom slider)"""
         if self.min_zoom <= factor / 100 <= self.max_zoom:
-            scale = (factor / 100) / self.zoom_factor
-            self.zoom_factor = factor / 100
-            self.scale(scale, scale)
+            # Reset transform first
+            self.resetTransform()
+
+            # Set new zoom factor
+            new_zoom = factor / 100
+            self.zoom_factor = new_zoom
+
+            # Apply high-quality scaling
+            self.scale_with_quality(new_zoom)
 
 
 class MaskTracingInterface(QWidget):
@@ -557,7 +609,11 @@ class MaskTracingInterface(QWidget):
 
     def find_mask_path(self, image_path):
         """Find the corresponding mask file, with enhanced debugging."""
-        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        base_name = os.path.splitext(os.path.basename(os.path.normpath(image_path)))[0]
+
+        # #################### Temp fix for PRMI data #####################
+        # base_name = "GT_"+base_name
+        # #####################################################################
         # Try these extensions in order of preference
         extensions = [".png", ".PNG", ".jpg", ".JPG", ".jpeg", ".JPEG"]
 
@@ -566,7 +622,9 @@ class MaskTracingInterface(QWidget):
         print(f"DEBUG: Mask directory: {self.mask_directory}")
 
         for ext in extensions:
-            mask_path = os.path.join(self.mask_directory, base_name + ext)
+            mask_path = os.path.normpath(
+                os.path.join(self.mask_directory, base_name + ext)
+            )
             print(f"DEBUG: Checking for mask at: {mask_path}")
             if os.path.exists(mask_path):
                 print(f"DEBUG: Found mask at: {mask_path}")
@@ -670,6 +728,17 @@ class MaskTracingInterface(QWidget):
         if not self.mask_item.scene():
             self.scene.addItem(self.mask_item)
             self.mask_item.setZValue(1)
+
+        # ADD THIS: Configure high quality settings for items
+        self.image_item.setTransformationMode(
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.image_item.setCacheMode(
+            QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache
+        )
+
+        self.mask_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+        self.mask_item.setCacheMode(QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache)
 
         # Update the pixmaps directly
         self.image_item.setPixmap(self.image_pixmap)

@@ -20,7 +20,7 @@ def main():
     opt.direction = "AtoB"
     opt.dataset_mode = "single"
     opt.norm = "batch"
-    opt.num_threads = 0
+    opt.num_threads = 20
     opt.batch_size = 1
     opt.serial_batches = True
     opt.no_flip = True
