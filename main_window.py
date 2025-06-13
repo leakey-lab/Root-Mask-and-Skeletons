@@ -24,6 +24,7 @@ from mask_handler import MaskHandler
 from mask_tracing_interface import MaskTracingInterface
 from root_length_visulization import RootLengthVisualization
 from mask_generation_handler import MaskGenerationHandler
+from enhanced_mask_tracing_interface import EnhancedMaskTracingInterface
 import os
 import logging
 
@@ -44,7 +45,7 @@ class MainWindow(QMainWindow):
         self.skeleton_handler = SkeletonHandler(self)
         self.mask_handler = MaskHandler(self)
         self.mask_generation_handler = MaskGenerationHandler(self)
-        self.mask_tracing_interface = MaskTracingInterface()
+        self.mask_tracing_interface = EnhancedMaskTracingInterface()
         self.root_length_viz = None
 
         # Connect the mask_saved and mask_cleared signals
@@ -52,6 +53,7 @@ class MainWindow(QMainWindow):
         self.mask_cleared.connect(self.unhighlight_cleared_mask)
 
         self.init_ui()
+        self.setup_sam2_config()
 
     def init_ui(self):
         main_widget = QWidget()
@@ -214,23 +216,26 @@ class MainWindow(QMainWindow):
         self.populate_file_list()
         self.status_bar.showMessage(f"Loaded {len(images)} images", 5000)
 
-### Local Chnage not to be pushed
+    ### Local Chnage not to be pushed
     def populate_file_list(self):
         """Populate the file list with image names sorted by first 3 numbers"""
         self.file_list.clear()
-        
+
         # Custom sort key function to extract first 3 numbers from filename
         def sort_by_first_3_numbers(filename):
             import re
+
             # Extract first 3 consecutive digits from the filename
-            match = re.search(r'(\d{1,4})', os.path.basename(filename))
+            match = re.search(r"(\d{1,4})", os.path.basename(filename))
             if match:
                 return int(match.group(1))
-            return float('inf')  # Files without numbers go to the end
-        
+            return float("inf")  # Files without numbers go to the end
+
         # Get image names and sort them using the custom key
-        sorted_names = sorted(self.image_manager.get_image_names(), key=sort_by_first_3_numbers)
-        
+        sorted_names = sorted(
+            self.image_manager.get_image_names(), key=sort_by_first_3_numbers
+        )
+
         for name in sorted_names:
             item = QListWidgetItem(os.path.basename(name))
             self.file_list.addItem(item)
@@ -652,3 +657,18 @@ class MainWindow(QMainWindow):
     def on_visualization_server_closed(self):
         """Handle cleanup after visualization server is closed."""
         self.logger.debug("Visualization server closed successfully")
+
+    def setup_sam2_config(self):
+        """Setup SAM2 configuration - add this method"""
+        # Set your actual model paths here
+        self.sam2_model_path = (
+            "checkpoints/SAM2_weights/model_best_new_data.pt"  # Your model path
+        )
+        self.sam2_config_path = "configs/sam2.1/sam2.1_hiera_l.yaml"  # Your config path
+
+        # Apply paths to the interface
+        if hasattr(self.mask_tracing_interface, "sam2_controls"):
+            self.mask_tracing_interface.sam2_controls.model_path = self.sam2_model_path
+            self.mask_tracing_interface.sam2_controls.config_file = (
+                self.sam2_config_path
+            )
