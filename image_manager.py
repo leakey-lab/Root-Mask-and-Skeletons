@@ -3,9 +3,6 @@ from PyQt6.QtCore import QThread, pyqtSignal
 import os
 
 
-from PyQt6.QtCore import QThread, pyqtSignal
-
-
 class ImageLoaderThread(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(dict, dict, dict, str, bool)
