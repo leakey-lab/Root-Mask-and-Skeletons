@@ -24,3 +24,4 @@ dist/
 .idea/
 .pytest_cache/
 .cursorignore
+/field docs ex/
