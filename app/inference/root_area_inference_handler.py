@@ -4,20 +4,20 @@ import numpy as np
 import os
 import re
 from PyQt6.QtCore import QThread, pyqtSignal
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-# Standalone functions for multiprocessing (must be picklable)
+# Standalone functions for parallel processing with thread pool
 
 def load_mask(image_path):
-    """Load mask image as binary (standalone for multiprocessing)."""
+    """Load mask image as binary (standalone for thread pool execution)."""
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     _, binary = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
     return binary
 
 
 def calculate_root_area(mask):
-    """Calculate the total root area from mask image (standalone for multiprocessing)."""
+    """Calculate the total root area from mask image (standalone for thread pool execution)."""
     # Count white pixels (root pixels)
     root_pixels = np.sum(mask == 255)
 
@@ -94,7 +94,7 @@ def parse_image_name(name):
 
 def process_single_mask(name, path):
     """
-    Process a single mask to calculate root area (standalone for multiprocessing).
+    Process a single mask to calculate root area (standalone for thread pool execution).
     
     Args:
         name: Image name
@@ -148,18 +148,27 @@ class RootAreaCalculatorThread(QThread):
         results = []
         total_images = len(self.mask_images)
         
-        # Determine optimal number of workers (use CPU count - 1 to leave one core free)
-        max_workers = max(1, os.cpu_count() - 1) if os.cpu_count() else 4
+        if total_images == 0:
+            self.finished.emit("")
+            return
+        
+        # Determine optimal number of workers for thread pool
+        # For I/O-bound tasks (image reading) and NumPy operations (GIL-releasing),
+        # we can use more workers than CPU count
+        cpu_count = os.cpu_count() or 4
+        # Use 2x CPU count for I/O-bound operations, but cap at reasonable limit
+        max_workers = min(cpu_count * 2, 32, total_images)
 
-        # Use multiprocessing to parallelize mask processing
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Use ThreadPoolExecutor for better performance with I/O-bound operations
+        # Threads have less overhead than processes and work well for image I/O
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
             future_to_name = {
                 executor.submit(process_single_mask, name, path): name
                 for name, path in self.mask_images.items()
             }
             
-            # Process completed tasks
+            # Process completed tasks as they finish
             completed = 0
             for future in as_completed(future_to_name):
                 try:
@@ -179,7 +188,8 @@ class RootAreaCalculatorThread(QThread):
                 
                 # Update progress
                 completed += 1
-                self.progress.emit(int((completed / total_images) * 100))
+                progress_pct = int((completed / total_images) * 100)
+                self.progress.emit(progress_pct)
 
         # Sort results
         sorted_results = sorted(
