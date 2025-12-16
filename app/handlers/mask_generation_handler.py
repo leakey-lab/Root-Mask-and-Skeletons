@@ -7,9 +7,7 @@ from PIL import Image
 import os
 import sys
 import numpy as np
-# Add project root to path for mask_model import
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from mask_model.model import ResNetSkeleton
+from app.mask_model.model import ResNetSkeleton
 from resources.resource_utils import get_resource_path
 
 

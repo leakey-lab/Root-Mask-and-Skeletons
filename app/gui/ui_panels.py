@@ -61,6 +61,13 @@ def create_left_panel(main_window) -> QWidget:
     main_window.generate_button.clicked.connect(main_window.skeleton_handler.generate_skeleton)
     layout.addWidget(main_window.generate_button)
 
+    main_window.toggle_skeleton_correction_button = QPushButton("✏️ Skeleton Correction")
+    main_window.toggle_skeleton_correction_button.setStyleSheet(button_style)
+    main_window.toggle_skeleton_correction_button.clicked.connect(
+        main_window.toggle_skeleton_correction
+    )
+    layout.addWidget(main_window.toggle_skeleton_correction_button)
+
     main_window.load_images_button = QPushButton("📂 Load Images")
     main_window.load_images_button.setStyleSheet(button_style)
     main_window.load_images_button.clicked.connect(main_window.load_images)

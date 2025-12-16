@@ -21,6 +21,7 @@ from .display_controller import DisplayController
 from app.handlers.skeleton_handler import SkeletonHandler
 from app.handlers.mask_handler import MaskHandler
 from .mask_tracing_interface import MaskTracingInterface
+from .skeleton_correction_interface import SkeletonCorrectionInterface
 from app.handlers.mask_generation_handler import MaskGenerationHandler
 from . import ui_panels
 from . import file_tree_manager
@@ -54,6 +55,7 @@ class MainWindow(QMainWindow):
         self.mask_handler = MaskHandler(self)
         self.mask_generation_handler = MaskGenerationHandler(self)
         self.mask_tracing_interface = MaskTracingInterface()
+        self.skeleton_correction_interface = SkeletonCorrectionInterface()
         self.root_length_viz = None
         self.root_area_viz = None
 
@@ -94,6 +96,7 @@ class MainWindow(QMainWindow):
         self.right_panel.addWidget(self.mask_tracing_interface)
         self.visualization_widget = QWidget()  # Placeholder for visualization
         self.right_panel.addWidget(self.visualization_widget)
+        self.right_panel.addWidget(self.skeleton_correction_interface)
         splitter.addWidget(self.right_panel)
 
         splitter.setSizes([400, 800])
@@ -248,6 +251,10 @@ class MainWindow(QMainWindow):
 
         if self.right_panel.currentWidget() == self.mask_tracing_interface:
             self.mask_tracing_interface.load_image(image_path)
+        elif self.right_panel.currentWidget() == self.skeleton_correction_interface:
+            self.skeleton_correction_interface.load_image(
+                image_path, images_base_folder=self.image_manager.original_folder
+            )
         else:
             self.display_controller.display_selected_image_by_name(image_name)
 
@@ -386,6 +393,35 @@ class MainWindow(QMainWindow):
             if item:
                 item.setForeground(0, QColor("white"))
 
+    # ==================== Skeleton Correction (isolated stream) ====================
+    
+    def toggle_skeleton_correction(self):
+        """
+        Toggle the Skeleton Correction editor view.
+
+        Important: This editor is intentionally isolated from the app's existing
+        skeleton generation + main display streams.
+        """
+        # Right panel indexes:
+        # 0 = display, 1 = mask tracing, 2 = visualization, 3 = skeleton correction
+        if self.right_panel.currentIndex() != 3:
+            # If leaving mask tracing, ensure its signals are disconnected cleanly
+            if self.right_panel.currentIndex() == 1:
+                self.toggle_mask_tracing()
+
+            self.switch_right_panel("skeleton_correction")
+            if hasattr(self, "toggle_skeleton_correction_button"):
+                self.toggle_skeleton_correction_button.setText("Return to Main View")
+        else:
+            self.switch_right_panel("display")
+            if hasattr(self, "toggle_skeleton_correction_button"):
+                self.toggle_skeleton_correction_button.setText("✏️ Skeleton Correction")
+
+        # Load the current image into the skeleton correction interface (if any)
+        current_item = self.file_list.currentItem()
+        if current_item:
+            self.on_image_selected(current_item)
+
     # ==================== Panel Switching ====================
     
     def switch_right_panel(self, panel):
@@ -395,3 +431,5 @@ class MainWindow(QMainWindow):
             self.right_panel.setCurrentIndex(1)
         elif panel == "visualization":
             self.right_panel.setCurrentIndex(2)
+        elif panel == "skeleton_correction":
+            self.right_panel.setCurrentIndex(3)
