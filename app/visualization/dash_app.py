@@ -3,7 +3,7 @@ Main Dash application for root length visualization.
 Orchestrates layout, callbacks, and visualization components.
 """
 
-import logging
+
 from dash import Dash, dcc, html, Input, Output, State
 import dash
 import dash_bootstrap_components as dbc
@@ -15,31 +15,25 @@ from .dash_data_cache import DataCache
 from .dash_image_utils import build_available_images_map, get_encoded_image
 from .dash_visualizations import DashVisualizations
 
-logger = logging.getLogger(__name__)
+
 
 
 class DashApp(DashVisualizations):
     """Manages the Dash application."""
 
     def __init__(self, data_processor: Any, save_directory: str, image_manager=None):
-        logger.info(f"DashApp.__init__ called with save_directory={save_directory}")
         try:
             self.data_processor = data_processor
             self.save_directory = save_directory
             self.image_manager = image_manager
 
             # Build available images map for hover display
-            logger.debug("Building available images map")
             self.available_images = build_available_images_map(image_manager)
-            logger.debug(f"Available images map built: {len(self.available_images) if self.available_images else 0} images")
 
             # Initialize data cache
-            logger.debug("Initializing DataCache")
             self.data_cache = DataCache(data_processor)
-            logger.debug("DataCache initialized")
 
             # Initialize Dash app
-            logger.debug("Creating Dash application")
             self.app = Dash(
                 __name__,
                 external_stylesheets=[dbc.themes.BOOTSTRAP],
@@ -47,16 +41,11 @@ class DashApp(DashVisualizations):
                 update_title=None,
                 compress=True,
             )
-            logger.info("Dash application created")
 
             # Set up layout and callbacks
-            logger.debug("Setting up layout")
             self._setup_layout()
-            logger.debug("Setting up callbacks")
             self._setup_callbacks()
-            logger.info("DashApp initialization completed successfully")
         except Exception as e:
-            logger.error(f"Error in DashApp.__init__: {e}", exc_info=True)
             raise
 
     def get_encoded_image(self, tube: int, position: int, date: pd.Timestamp) -> str:
@@ -65,34 +54,13 @@ class DashApp(DashVisualizations):
 
     def _setup_layout(self):
         """Define the Dash app layout."""
-        logger.debug("_setup_layout() called")
         try:
-            # Check if experimental data is available to show extra options
-            has_experiments = "Treatment" in self.data_processor.df.columns
-            logger.debug(f"Experimental data available: {has_experiments}")
-
             options = [
                 {"label": "Stacked Bar View", "value": "stacked"},
                 {"label": "Growth Over Time", "value": "time"},
                 {"label": "Growth Lines", "value": "lines"},
             ]
             
-            if has_experiments:
-                options.extend([
-                    {"label": "Treatment Analysis (Box Plot)", "value": "treatment_box"},
-                    {"label": "Genotype Performance (Bar Chart)", "value": "genotype_bar"},
-                    {"label": "Field Heatmap", "value": "field_heatmap"},
-                    {"label": "Genotype Comparison (Interactive)", "value": "genotype_comparison"},
-                    {"label": "Depth Profile Comparison", "value": "depth_profile"},
-                    {"label": "Growth Trajectory Comparison", "value": "growth_trajectory"},
-                ])
-
-            # Get unique genotypes and treatments for dynamic controls
-            genotypes = self.data_processor.get_unique_genotypes() if has_experiments else []
-            treatments = self.data_processor.get_unique_treatments() if has_experiments else []
-            date_options = [{"label": d.strftime("%Y-%m-%d"), "value": d.strftime("%Y-%m-%d")} for d in self.data_cache.dates]
-            date_options.insert(0, {"label": "Average All Dates", "value": "all"})
-
             self.app.layout = html.Div(
                 style={
                     "display": "flex",
@@ -139,70 +107,6 @@ class DashApp(DashVisualizations):
                                                 placeholder="Select Tube",
                                                 className="mb-3",
                                                 style={"display": "none", "fontSize": "16px"},
-                                            ),
-                                            
-                                            # Dynamic Controls Container for Interactive Views
-                                            html.Div(
-                                                id="dynamic-controls",
-                                                style={"display": "none"},
-                                                children=[
-                                                    # Mode Toggle
-                                                    html.Div([
-                                                        html.Label("Comparison Mode:", style={"fontWeight": "bold", "marginBottom": "5px"}),
-                                                        dcc.RadioItems(
-                                                            id="comparison-mode",
-                                                            options=[
-                                                                {"label": " Compare Genotypes in one Treatment", "value": "genotypes_in_treatment"},
-                                                                {"label": " Compare one Genotype across Treatments", "value": "genotype_across_treatments"},
-                                                            ],
-                                                            value="genotypes_in_treatment",
-                                                            inline=False,
-                                                            style={"marginBottom": "15px"},
-                                                            labelStyle={"display": "block", "marginBottom": "5px"}
-                                                        ),
-                                                    ], className="mb-3"),
-                                                    
-                                                    # Primary Selector (Treatment or Genotype based on mode)
-                                                    html.Div([
-                                                        html.Label(id="primary-selector-label", children="Select Treatment:", style={"fontWeight": "bold"}),
-                                                        dcc.Dropdown(
-                                                            id="primary-selector",
-                                                            options=[{"label": t, "value": t} for t in treatments],
-                                                            value=treatments[0] if treatments else None,
-                                                            className="mb-3",
-                                                        ),
-                                                    ]),
-                                                    
-                                                    # Secondary Selector (Multi-select Genotypes or hidden)
-                                                    html.Div(
-                                                        id="secondary-selector-container",
-                                                        children=[
-                                                            html.Label("Select Genotypes to Compare:", style={"fontWeight": "bold"}),
-                                                            dcc.Dropdown(
-                                                                id="secondary-selector",
-                                                                options=[{"label": g, "value": g} for g in genotypes],
-                                                                value=genotypes[:3] if len(genotypes) >= 3 else genotypes,
-                                                                multi=True,
-                                                                className="mb-3",
-                                                            ),
-                                                        ],
-                                                    ),
-                                                    
-                                                    # Date Selector (for Depth Profile)
-                                                    html.Div(
-                                                        id="date-selector-container",
-                                                        style={"display": "none"},
-                                                        children=[
-                                                            html.Label("Select Date:", style={"fontWeight": "bold"}),
-                                                            dcc.Dropdown(
-                                                                id="date-selector",
-                                                                options=date_options,
-                                                                value="all",
-                                                                className="mb-3",
-                                                            ),
-                                                        ],
-                                                    ),
-                                                ],
                                             ),
                                         ]
                                     ),
@@ -260,80 +164,11 @@ class DashApp(DashVisualizations):
                 ),
             ],
         )
-            logger.info("Layout setup completed")
         except Exception as e:
-            logger.error(f"Error in _setup_layout: {e}", exc_info=True)
             raise
 
     def _setup_callbacks(self):
         """Define Dash callbacks."""
-        logger.debug("_setup_callbacks() called")
-        try:
-            has_experiments = "Treatment" in self.data_processor.df.columns
-            logger.debug(f"Setting up callbacks, has_experiments={has_experiments}")
-        except Exception as e:
-            logger.error(f"Error in _setup_callbacks: {e}", exc_info=True)
-            raise
-
-        genotypes = self.data_processor.get_unique_genotypes() if has_experiments else []
-        treatments = self.data_processor.get_unique_treatments() if has_experiments else []
-
-        # Callback to update dynamic controls based on view and mode
-        @self.app.callback(
-            [
-                Output("dynamic-controls", "style"),
-                Output("primary-selector-label", "children"),
-                Output("primary-selector", "options"),
-                Output("primary-selector", "value"),
-                Output("secondary-selector-container", "style"),
-                Output("secondary-selector", "options"),
-                Output("secondary-selector", "value"),
-                Output("date-selector-container", "style"),
-            ],
-            [
-                Input("view-selector", "value"),
-                Input("comparison-mode", "value"),
-            ],
-        )
-        def update_dynamic_controls(view_type, mode):
-            interactive_views = ["genotype_comparison", "depth_profile", "growth_trajectory"]
-            
-            if view_type not in interactive_views:
-                return (
-                    {"display": "none"},
-                    "Select Treatment:",
-                    [{"label": t, "value": t} for t in treatments],
-                    treatments[0] if treatments else None,
-                    {"display": "block"},
-                    [{"label": g, "value": g} for g in genotypes],
-                    genotypes[:3] if len(genotypes) >= 3 else genotypes,
-                    {"display": "none"},
-                )
-            
-            show_date = view_type == "depth_profile"
-            
-            if mode == "genotypes_in_treatment":
-                return (
-                    {"display": "block"},
-                    "Select Treatment:",
-                    [{"label": t, "value": t} for t in treatments],
-                    treatments[0] if treatments else None,
-                    {"display": "block"},
-                    [{"label": g, "value": g} for g in genotypes],
-                    genotypes[:3] if len(genotypes) >= 3 else genotypes,
-                    {"display": "block"} if show_date else {"display": "none"},
-                )
-            else:  # genotype_across_treatments
-                return (
-                    {"display": "block"},
-                    "Select Genotype:",
-                    [{"label": g, "value": g} for g in genotypes],
-                    genotypes[0] if genotypes else None,
-                    {"display": "none"},
-                    [],
-                    [],
-                    {"display": "block"} if show_date else {"display": "none"},
-                )
 
         # Main visualization callback
         @self.app.callback(
@@ -349,14 +184,9 @@ class DashApp(DashVisualizations):
                 Input("view-selector", "value"),
                 Input("tube-selector", "value"),
                 Input("main-graph", "clickData"),
-                Input("comparison-mode", "value"),
-                Input("primary-selector", "value"),
-                Input("secondary-selector", "value"),
-                Input("date-selector", "value"),
             ],
         )
-        def update_visualization(view_type, selected_tube, click_data, 
-                                 comparison_mode, primary_selection, secondary_selection, date_selection):
+        def update_visualization(view_type, selected_tube, click_data):
             ctx = dash.callback_context
             default_style = {
                 "backgroundColor": "white",
@@ -458,77 +288,6 @@ class DashApp(DashVisualizations):
                         hidden_images_style,
                     )
 
-                # Experimental Views (Static)
-                elif view_type == "treatment_box":
-                    return (
-                        self.show_treatment_comparison(),
-                        "",
-                        {"display": "none"},
-                        [],
-                        default_style,
-                        hidden_images_style,
-                    )
-
-                elif view_type == "genotype_bar":
-                    return (
-                        self.show_genotype_ranking(),
-                        "",
-                        {"display": "none"},
-                        [],
-                        default_style,
-                        hidden_images_style,
-                    )
-
-                elif view_type == "field_heatmap":
-                    return (
-                        self.show_field_heatmap(),
-                        "",
-                        {"display": "none"},
-                        [],
-                        default_style,
-                        hidden_images_style,
-                    )
-
-                # Interactive Views
-                elif view_type == "genotype_comparison":
-                    fig = self.show_genotype_comparison(
-                        comparison_mode, primary_selection, secondary_selection
-                    )
-                    return (
-                        fig,
-                        "",
-                        {"display": "none"},
-                        [],
-                        default_style,
-                        hidden_images_style,
-                    )
-
-                elif view_type == "depth_profile":
-                    fig = self.show_depth_profile_comparison(
-                        comparison_mode, primary_selection, secondary_selection, date_selection
-                    )
-                    return (
-                        fig,
-                        "",
-                        {"display": "none"},
-                        [],
-                        default_style,
-                        hidden_images_style,
-                    )
-
-                elif view_type == "growth_trajectory":
-                    fig = self.show_growth_trajectory(
-                        comparison_mode, primary_selection, secondary_selection
-                    )
-                    return (
-                        fig,
-                        "",
-                        {"display": "none"},
-                        [],
-                        default_style,
-                        hidden_images_style,
-                    )
-
             except Exception as e:
                 warnings.warn(f"Error in visualization: {e}")
                 return dash.no_update
@@ -622,7 +381,6 @@ class DashApp(DashVisualizations):
                 return images
 
             except Exception as e:
-                logger.error(f"Error in display_hover_images callback: {e}", exc_info=True)
                 return []
 
     def run_server(self):

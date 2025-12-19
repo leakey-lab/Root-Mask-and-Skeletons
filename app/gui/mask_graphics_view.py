@@ -3,9 +3,28 @@ Graphics view for the mask tracing interface.
 Handles zooming, panning, and drawing event routing.
 """
 
-from PyQt6.QtWidgets import QGraphicsView, QGraphicsPixmapItem
+from PyQt6.QtWidgets import QGraphicsView, QGraphicsPixmapItem, QWidget
 from PyQt6.QtGui import QPainter, QWheelEvent, QMouseEvent
 from PyQt6.QtCore import Qt, QPointF, QPoint
+import os
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    v = os.environ.get(name, None)
+    if v is None:
+        return bool(default)
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
+# Enabled by default; temporarily disabled when showing QtWebEngine visualizations.
+DEFAULT_OPENGL_VIEWPORT_ENABLED = _env_bool(
+    "ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT", default=True
+)
+
+try:
+    from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+    HAS_OPENGL = True
+except ImportError:
+    HAS_OPENGL = False
 
 
 class MaskTracingGraphicsView(QGraphicsView):
@@ -16,6 +35,10 @@ class MaskTracingGraphicsView(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.mask_tracing_interface = parent
+
+        self._opengl_viewport_enabled = False
+        self.set_opengl_viewport_enabled(DEFAULT_OPENGL_VIEWPORT_ENABLED)
+
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
         self.pan_mode = False
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
@@ -26,6 +49,26 @@ class MaskTracingGraphicsView(QGraphicsView):
         self.zoom_factor = 1.0
         self.min_zoom = 0.1
         self.max_zoom = 10.0
+
+    def set_opengl_viewport_enabled(self, enabled: bool) -> None:
+        """Enable/disable QOpenGLWidget viewport at runtime (QtWebEngine compatibility)."""
+        enabled = bool(enabled)
+
+        if enabled and self._opengl_viewport_enabled:
+            return
+        if (not enabled) and (not self._opengl_viewport_enabled):
+            return
+
+        if enabled and HAS_OPENGL:
+            try:
+                self.setViewport(QOpenGLWidget())
+                self._opengl_viewport_enabled = True
+                return
+            except Exception as e:
+                print(f"Failed to set OpenGL viewport: {e}")
+
+        self.setViewport(QWidget())
+        self._opengl_viewport_enabled = False
 
     def setup_high_quality_rendering(self):
         """Configure high-quality rendering settings"""

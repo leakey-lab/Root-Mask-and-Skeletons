@@ -27,7 +27,6 @@ from . import ui_panels
 from . import file_tree_manager
 from . import visualization_manager
 import os
-import logging
 
 
 class MainWindow(QMainWindow):
@@ -44,9 +43,6 @@ class MainWindow(QMainWindow):
         if os.path.exists(icon_path):
             icon = QIcon(icon_path)
             self.setWindowIcon(icon)
-        
-        self.logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
         
         # Initialize components
         self.image_manager = ImageManager(self)
@@ -113,6 +109,40 @@ class MainWindow(QMainWindow):
         self.loading_progress_bar.hide()
         self.status_bar.addPermanentWidget(self.loading_progress_bar)
 
+    def set_opengl_viewports_enabled(self, enabled: bool) -> None:
+        """Enable/disable QOpenGLWidget-based viewports across the app.
+
+        Qt6 limitation: QtWebEngine (used for Dash visualizations via QWebEngineView)
+        cannot render in a top-level window that contains any QOpenGLWidget.
+        We disable OpenGL viewports only while visualizations are shown, and
+        re-enable them afterwards for performance elsewhere.
+        """
+        enabled = bool(enabled)
+
+        # Main image display view
+        try:
+            gv = getattr(self.display_controller, "magnifying_view", None)
+            if gv is not None and hasattr(gv, "set_opengl_viewport_enabled"):
+                gv.set_opengl_viewport_enabled(enabled)
+        except Exception:
+            pass
+
+        # Mask tracing view
+        try:
+            gv = getattr(self.mask_tracing_interface, "graphics_view", None)
+            if gv is not None and hasattr(gv, "set_opengl_viewport_enabled"):
+                gv.set_opengl_viewport_enabled(enabled)
+        except Exception:
+            pass
+
+        # Skeleton correction view
+        try:
+            gv = getattr(self.skeleton_correction_interface, "graphics_view", None)
+            if gv is not None and hasattr(gv, "set_opengl_viewport_enabled"):
+                gv.set_opengl_viewport_enabled(enabled)
+        except Exception:
+            pass
+
     # ==================== File Tree Methods (delegated) ====================
     
     def find_tree_item_by_image_name(self, image_name):
@@ -168,12 +198,14 @@ class MainWindow(QMainWindow):
         return visualization_manager.find_test_latest_dir(start_path, max_depth)
 
     def on_visualization_server_closed(self):
-        """Handle cleanup after visualization server is closed."""
-        self.logger.debug("Visualization server closed successfully")
+        """Handle root length visualization server closed event."""
+        if self.root_length_viz:
+            visualization_manager.close_root_length_visualization(self)
 
     def on_area_visualization_server_closed(self):
-        """Handle cleanup after area visualization server is closed."""
-        self.logger.debug("Area visualization server closed successfully")
+        """Handle root area visualization server closed event."""
+        if self.root_area_viz:
+            visualization_manager.close_root_area_visualization(self)
 
     # ==================== Image Loading ====================
     

@@ -1,4 +1,4 @@
-import logging
+
 from dash import Dash, dcc, html, Input, Output
 import dash
 import plotly.graph_objects as go
@@ -6,39 +6,30 @@ import plotly.express as px
 import dash_bootstrap_components as dbc
 import pandas as pd
 
-logger = logging.getLogger(__name__)
 
 
 class DashAppArea:
     """Manages the Dash application for root area visualization."""
 
     def __init__(self, data_processor, save_directory):
-        logger.info(f"DashAppArea.__init__ called with save_directory={save_directory}")
         try:
             self.data_processor = data_processor
             self.save_directory = save_directory
             
-            logger.debug("Creating Dash application")
             self.app = Dash(
                 __name__,
                 external_stylesheets=[dbc.themes.BOOTSTRAP],
                 suppress_callback_exceptions=True,
                 update_title=None,
             )
-            logger.info("Dash application created")
             
-            logger.debug("Setting up layout")
             self._setup_layout()
-            logger.debug("Setting up callbacks")
             self._setup_callbacks()
-            logger.info("DashAppArea initialization completed successfully")
         except Exception as e:
-            logger.error(f"Error in DashAppArea.__init__: {e}", exc_info=True)
             raise
 
     def _setup_layout(self):
         """Define the Dash app layout."""
-        logger.debug("_setup_layout() called")
         try:
             self.app.layout = html.Div(
             style={
@@ -149,14 +140,11 @@ class DashAppArea:
                 ),
             ],
         )
-            logger.info("Layout setup completed")
         except Exception as e:
-            logger.error(f"Error in _setup_layout: {e}", exc_info=True)
             raise
 
     def _setup_callbacks(self):
         """Define Dash callbacks."""
-        logger.debug("_setup_callbacks() called")
         try:
             @self.app.callback(
                 [
@@ -271,12 +259,10 @@ class DashAppArea:
                         )
 
                 except Exception as e:
-                    logger.error(f"Error in update_visualization callback: {e}", exc_info=True)
                     return dash.no_update
 
                 return dash.no_update
         except Exception as e:
-            logger.error(f"Error in _setup_callbacks: {e}", exc_info=True)
             raise
 
     def create_stacked_bar_chart(self):

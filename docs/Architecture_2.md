@@ -686,7 +686,6 @@ class MaskGenerationHandler(QObject):
 ### Error Handling
 - **Graceful Degradation**: Fall back to CPU if GPU unavailable
 - **Recovery Mechanisms**: Auto-save and recovery for long operations
-- **Detailed Logging**: Comprehensive error logs for debugging
 - **User Feedback**: Clear error messages and suggested actions
 
 ---

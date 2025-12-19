@@ -1,19 +1,29 @@
-import sys
-import logging
-from PyQt6.QtWidgets import QApplication
-from app.gui.main_window import MainWindow
-from PyQt6.QtGui import QPalette, QColor, QIcon
 import os
+import sys
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('visualization_debug.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# NOTE (Qt6 / Windows):
+# - QWebEngineView is backed by a QQuickWidget internally.
+# - QQuickWidget requires a QRhi-backed composition path (D3D11 by default on Windows).
+# - Forcing Qt to use OpenGL (e.g. via QT_OPENGL=software) or mixing in QOpenGLWidget
+#   in the same top-level window can lead to a black WebEngine surface and warnings like:
+#   "OpenGL is not compatible with this QQuickWidget" / "Failed to get a QRhi".
+#
+# We prefer the default D3D11 RHI path for stability.
+os.environ.setdefault("QSG_RHI_BACKEND", "d3d11")
+
+# If the user hasn't configured Chromium flags, add a conservative GPU-disable set.
+# (This helps on some Windows GPU driver combos without forcing OpenGL.)
+_chromium_flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "").strip()
+for _flag in ("--disable-gpu", "--disable-gpu-compositing"):
+    if _flag not in _chromium_flags:
+        _chromium_flags = f"{_chromium_flags} {_flag}".strip()
+if _chromium_flags:
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _chromium_flags
+
+from PyQt6.QtGui import QColor, QIcon, QPalette  # noqa: E402
+from PyQt6.QtWidgets import QApplication  # noqa: E402
+
+from app.gui.main_window import MainWindow  # noqa: E402
 
 
 def resource_path(relative_path):
@@ -54,7 +64,6 @@ def apply_stylesheet(app):
 
 
 if __name__ == "__main__":
-    os.environ["QT_ENABLE_DIRECTWRITE"] = "0"
     app = QApplication(sys.argv)
     
     # Set application icon

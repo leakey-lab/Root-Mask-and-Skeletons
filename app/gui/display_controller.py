@@ -3,12 +3,34 @@ from PyQt6.QtWidgets import (
     QGraphicsView,
     QGraphicsScene,
     QGraphicsPixmapItem,
+    QWidget,
 )
-from PyQt6.QtGui import QPixmap, QImage, QPainter, QWheelEvent
+from PyQt6.QtGui import QPixmap, QImage, QPainter, QWheelEvent, QColor
 from PyQt6.QtCore import Qt
 import cv2
 import numpy as np
 import os
+
+def _env_bool(name: str, *, default: bool) -> bool:
+    v = os.environ.get(name, None)
+    if v is None:
+        return bool(default)
+    return v.strip().lower() in ("1", "true", "yes", "on")
+
+
+# OpenGL viewports are enabled by default for smooth/fast QGraphicsView rendering.
+# NOTE (Qt6): QtWebEngine (QWebEngineView) uses a QQuickWidget internally and cannot
+# share a top-level window with any QOpenGLWidget. We temporarily disable these
+# viewports when opening the embedded visualizations.
+DEFAULT_OPENGL_VIEWPORT_ENABLED = _env_bool(
+    "ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT", default=True
+)
+
+try:
+    from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+    HAS_OPENGL = True
+except ImportError:
+    HAS_OPENGL = False
 
 
 class MagnifyingGraphicsView(QGraphicsView):
@@ -18,6 +40,9 @@ class MagnifyingGraphicsView(QGraphicsView):
         
         # Set up high-quality rendering
         self.setup_high_quality_rendering()
+
+        self._opengl_viewport_enabled = False
+        self.set_opengl_viewport_enabled(DEFAULT_OPENGL_VIEWPORT_ENABLED)
         
         # Zoom control
         self.zoom = 1.0
@@ -27,6 +52,32 @@ class MagnifyingGraphicsView(QGraphicsView):
         # Set transformation anchor for better zoom quality
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+
+    def set_opengl_viewport_enabled(self, enabled: bool) -> None:
+        """Enable/disable QOpenGLWidget viewport at runtime.
+
+        This is used to temporarily disable OpenGL while QtWebEngine visualizations
+        are shown (Qt6 limitation: QQuickWidget + QOpenGLWidget in same window).
+        """
+        enabled = bool(enabled)
+
+        if enabled and self._opengl_viewport_enabled:
+            return
+        if (not enabled) and (not self._opengl_viewport_enabled):
+            return
+
+        if enabled and HAS_OPENGL:
+            try:
+                self.setViewport(QOpenGLWidget())
+                self._opengl_viewport_enabled = True
+                return
+            except Exception as e:
+                print(f"Failed to set OpenGL viewport: {e}")
+                # Fall through to non-OpenGL viewport
+
+        # Replace with a standard QWidget viewport (removes any existing QOpenGLWidget).
+        self.setViewport(QWidget())
+        self._opengl_viewport_enabled = False
 
     def setup_high_quality_rendering(self):
         """Configure high-quality rendering settings to reduce noise during zoom"""
@@ -198,7 +249,7 @@ class DisplayController:
             self.clear_magnifying_view()
 
     def display_overlay_image(self):
-        """Display overlay with lazy-loaded processed image"""
+        """Display overlay with lazy-loaded processed image using layered items"""
         if not self.current_image:
             return
 
@@ -209,107 +260,68 @@ class DisplayController:
                 self.main_window.image_manager.get_fake_image_path(base_name)
             )
 
-        if not self.current_fake_image:
-            # Show single image with notification that fake image is missing
-            self.display_single_image()
+        # 1. Base Image
+        real_pixmap = QPixmap(self.current_image)
+        if real_pixmap.isNull():
+            return
+            
+        real_item = QGraphicsPixmapItem(real_pixmap)
+        real_item.setZValue(0)
+        
+        items = [real_item]
+
+        # 2. Overlay Image (if available)
+        if self.current_fake_image:
+            fake_image_gray = cv2.imread(self.current_fake_image, cv2.IMREAD_GRAYSCALE)
+            if fake_image_gray is not None:
+                # Binarize
+                _, binary_mask = cv2.threshold(
+                    fake_image_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+                )
+                
+                # Resize if needed
+                if (real_pixmap.width(), real_pixmap.height()) != (binary_mask.shape[1], binary_mask.shape[0]):
+                    binary_mask = cv2.resize(
+                        binary_mask,
+                        (real_pixmap.width(), real_pixmap.height()),
+                        interpolation=cv2.INTER_NEAREST,
+                    )
+
+                # Ensure mask is contiguous for QImage
+                if not binary_mask.flags['C_CONTIGUOUS']:
+                    binary_mask = np.ascontiguousarray(binary_mask)
+
+                height, width = binary_mask.shape
+                
+                # Create QImage pointing directly to the numpy buffer
+                # Format_Indexed8: 1 byte per pixel
+                overlay_image = QImage(binary_mask.data, width, height, width, QImage.Format.Format_Indexed8)
+                
+                # Define color table
+                # Index 0-49 = Transparent (threshold was 50)
+                # Index 50-255 = Neon Green (R=20, G=255, B=57, A=128)
+                color_table = [0] * 256
+                
+                # Fill the active range with the color
+                neon_green = QColor(20, 255, 57, 128).rgba()
+                for i in range(50, 256):
+                    color_table[i] = neon_green
+                    
+                overlay_image.setColorTable(color_table)
+                
+                overlay_pixmap = QPixmap.fromImage(overlay_image)
+                overlay_item = QGraphicsPixmapItem(overlay_pixmap)
+                overlay_item.setZValue(1)
+                items.append(overlay_item)
+            else:
+                 print(f"⚠️ Failed to load fake image data for {os.path.basename(self.current_image)}")
+        else:
             print(f"⚠️ No fake image found for {os.path.basename(self.current_image)} - showing single image view")
-            return
 
-        # Rest of the overlay display code remains the same
-        real_image = QImage(self.current_image)
-        if real_image.isNull():
-            return
-
-        fake_image_gray = cv2.imread(self.current_fake_image, cv2.IMREAD_GRAYSCALE)
-        if fake_image_gray is None:
-            return
-
-        # Binarize the fake image using OTSU thresholding
-        _, binary_mask = cv2.threshold(
-            fake_image_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-        )
-
-        # Resize the binary mask to match the real image size if necessary
-        if (real_image.width(), real_image.height()) != (
-            binary_mask.shape[1],
-            binary_mask.shape[0],
-        ):
-            binary_mask = cv2.resize(
-                binary_mask,
-                (real_image.width(), real_image.height()),
-                interpolation=cv2.INTER_NEAREST,
-            )
-
-        # Ensure the QImage format is ARGB32_Premultiplied for consistent handling
-        if real_image.format() != QImage.Format.Format_ARGB32_Premultiplied:
-            real_image = real_image.convertToFormat(
-                QImage.Format.Format_ARGB32_Premultiplied
-            )
-
-        # Convert QImage to NumPy array
-        ptr = real_image.bits()
-        ptr.setsize(real_image.sizeInBytes())
-        real_array = np.array(ptr).reshape(
-            real_image.height(), real_image.width(), 4
-        )  # BGRA
-
-        # Create a boolean mask where the binary mask is active
-        mask = binary_mask >= 50  # Adjust threshold as needed
-
-        # Define semi-transparent neon green in BGRA format
-        neon_green = np.array([57, 255, 20, 128], dtype=np.uint8)  # B, G, R, A
-        # Breakdown:
-        # B (Blue)   = 57
-        # G (Green)  = 255
-        # R (Red)    = 20
-        # A (Alpha)  = 128 (semi-transparent)
-
-        # Ensure neon_green is broadcastable to the real_array
-        neon_green = neon_green.reshape(1, 1, 4)
-
-        # Extract the mask indices
-        mask_indices = np.where(mask)
-
-        # Perform alpha blending only on the RGB channels
-        alpha = neon_green[0, 0, 3] / 255.0  # Normalize alpha to [0, 1]
-        inv_alpha = 1.0 - alpha
-
-        # Blend the neon green with the original image
-        # Only modify the RGB channels; preserve the original alpha channel
-        real_array[mask_indices[0], mask_indices[1], 0] = (
-            neon_green[0, 0, 0] * alpha
-            + real_array[mask_indices[0], mask_indices[1], 0] * inv_alpha
-        ).astype(np.uint8)  # Blue channel
-
-        real_array[mask_indices[0], mask_indices[1], 1] = (
-            neon_green[0, 0, 1] * alpha
-            + real_array[mask_indices[0], mask_indices[1], 1] * inv_alpha
-        ).astype(np.uint8)  # Green channel
-
-        real_array[mask_indices[0], mask_indices[1], 2] = (
-            neon_green[0, 0, 2] * alpha
-            + real_array[mask_indices[0], mask_indices[1], 2] * inv_alpha
-        ).astype(np.uint8)  # Red channel
-
-        # Optionally, adjust the alpha channel if you want to modify it
-        # For example, keep it as is or set to maximum
-        # real_array[mask_indices[0], mask_indices[1], 3] = 255  # Full opacity
-
-        # Convert the modified NumPy array back to QImage
-        result_image = QImage(
-            real_array.data,
-            real_image.width(),
-            real_image.height(),
-            real_image.bytesPerLine(),
-            QImage.Format.Format_ARGB32_Premultiplied,
-        ).copy()  # Use .copy() to ensure the data is owned by QImage
-
-        # Convert QImage to QPixmap and set it to the view
-        result_pixmap = QPixmap.fromImage(result_image)
-        self.set_magnifying_view_image(result_pixmap)
+        self.update_scene_items(items)
 
     def display_side_by_side_images(self):
-        """Display original and processed images side by side with basic lazy loading."""
+        """Display original and processed images side by side using positioned items."""
         if not self.current_image:
             return
 
@@ -317,6 +329,11 @@ class DisplayController:
         real_pixmap = QPixmap(self.current_image)
         if real_pixmap.isNull():
             return
+            
+        real_item = QGraphicsPixmapItem(real_pixmap)
+        real_item.setZValue(0)
+        
+        items = [real_item]
 
         # Try to lazy load the processed image if needed
         if not self.current_fake_image:
@@ -325,73 +342,80 @@ class DisplayController:
                 self.main_window.image_manager.get_fake_image_path(base_name)
             )
 
-        # Create the side-by-side display
-        # Create the side-by-side display
+        # Processed Image
         if self.current_fake_image:
             # Convert _fake.png to _real.png for the processed image
             real_processed_path = self.current_fake_image.replace(
                 "_fake.png", "_real.png"
             )
-            fake_pixmap = QPixmap(self.current_fake_image)
-            real_pixmap = QPixmap(real_processed_path)
-            if fake_pixmap.isNull():
-                self.main_window.status_bar.showMessage(
-                    "Failed to load processed image", 3000
-                )
-                return
-
-            # Create combined pixmap
-            combined_width = real_pixmap.width() + fake_pixmap.width()
-            combined_height = max(real_pixmap.height(), fake_pixmap.height())
-            combined_pixmap = QPixmap(combined_width, combined_height)
-            combined_pixmap.fill(Qt.GlobalColor.white)
-
-            # Draw the images side by side
-            painter = QPainter(combined_pixmap)
-            painter.drawPixmap(0, 0, real_pixmap)
-            painter.drawPixmap(real_pixmap.width(), 0, fake_pixmap)
-            painter.end()
+            
+            # Note: The original code loaded 'real_processed_path' as 'real_pixmap' for the right side?
+            # Re-reading original logic: "painter.drawPixmap(0, 0, real_pixmap); painter.drawPixmap(width, 0, fake_pixmap)"
+            # Wait, the original code loaded `real_pixmap = QPixmap(real_processed_path)` which overrode the variable.
+            # So left image = processed_real, right image = processed_fake.
+            
+            # Let's verify exactly what "Side by Side" usually means in this context.
+            # Usually it's Real vs Fake.
+            # The previous code did:
+            # real_pixmap = QPixmap(real_processed_path)  <-- This is the "real" input to the model
+            # fake_pixmap = QPixmap(self.current_fake_image) <-- This is the output
+            
+            right_pixmap = QPixmap(self.current_fake_image)
+            left_pixmap = QPixmap(real_processed_path)
+            
+            if not left_pixmap.isNull():
+                left_item = QGraphicsPixmapItem(left_pixmap)
+                left_item.setPos(0, 0)
+                items = [left_item] # Replace the original real_item since we are showing the specific pair
+            
+            if not right_pixmap.isNull():
+                right_item = QGraphicsPixmapItem(right_pixmap)
+                # Position it to the right of the first image
+                width = left_pixmap.width() if not left_pixmap.isNull() else real_pixmap.width()
+                right_item.setPos(width, 0)
+                items.append(right_item)
+                
         else:
-            # If no processed image, just show original
-            combined_pixmap = real_pixmap
             self.main_window.status_bar.showMessage(
                 "Processed image not available", 3000
             )
 
-        # Set up the scene and view with high-quality settings
-        scene = QGraphicsScene()
-        pixmap_item = QGraphicsPixmapItem(combined_pixmap)
-        
-        # Set high-quality transformation mode for the pixmap item
-        pixmap_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
-        pixmap_item.setCacheMode(QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache)
-        
-        scene.addItem(pixmap_item)
-        self.magnifying_view.setScene(scene)
-
-        # Fit view while maintaining aspect ratio
-        self.magnifying_view.fitInView(
-            scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio
-        )
-
-        # Reset zoom
-        self.magnifying_view.zoom = 1.0
+        self.update_scene_items(items)
 
     def set_magnifying_view_image(self, pixmap):
+        """Legacy wrapper for single image display"""
+        item = QGraphicsPixmapItem(pixmap)
+        self.update_scene_items([item])
+
+    def update_scene_items(self, items):
+        """Update the scene with a list of graphics items"""
         scene = QGraphicsScene()
-        pixmap_item = QGraphicsPixmapItem(pixmap)
         
-        # Set high-quality transformation mode for the pixmap item
-        pixmap_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
-        pixmap_item.setCacheMode(QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache)
+        # Calculate bounding rect for all items to fit view
+        total_rect = None
         
-        scene.addItem(pixmap_item)
+        for item in items:
+            # Set high-quality transformation mode
+            if isinstance(item, QGraphicsPixmapItem):
+                item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+                item.setCacheMode(QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache)
+            
+            scene.addItem(item)
+            
+            # Expand bounding rect
+            item_rect = item.sceneBoundingRect()
+            if total_rect is None:
+                total_rect = item_rect
+            else:
+                total_rect = total_rect.united(item_rect)
+        
         self.magnifying_view.setScene(scene)
         
         # Fit view while maintaining aspect ratio
-        self.magnifying_view.fitInView(
-            scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio
-        )
+        if total_rect:
+            self.magnifying_view.fitInView(
+                total_rect, Qt.AspectRatioMode.KeepAspectRatio
+            )
         
         # Reset zoom level when setting new image
         self.magnifying_view.zoom = 1.0

@@ -27,6 +27,7 @@ class MaskDrawingMixin:
     def draw_point(self, pos):
         """
         Draw a point or line segment on the mask.
+        Optimized to draw directly on the mask pixmap.
         
         Args:
             pos: QPoint position to draw at
@@ -38,44 +39,7 @@ class MaskDrawingMixin:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
-        # Create a temporary pixmap for the current stroke
-        temp_pixmap = QPixmap(self.mask_pixmap.size())
-        temp_pixmap.fill(Qt.GlobalColor.transparent)
-        temp_painter = QPainter(temp_pixmap)
-        temp_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        temp_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-
-        # Set up the pen and brush
-        pen = QPen(
-            self.brush_color,
-            1,
-            Qt.PenStyle.SolidLine,
-            Qt.PenCapStyle.RoundCap,
-            Qt.PenJoinStyle.RoundJoin,
-        )
-        temp_painter.setPen(pen)
-        temp_painter.setBrush(QBrush(self.brush_color))
-
-        # Draw the stroke
-        if self.last_point:
-            temp_painter.setPen(
-                QPen(
-                    self.brush_color,
-                    self.brush_size,
-                    Qt.PenStyle.SolidLine,
-                    Qt.PenCapStyle.RoundCap,
-                    Qt.PenJoinStyle.RoundJoin,
-                )
-            )
-            temp_painter.drawLine(self.last_point, pos)
-        else:
-            diameter = self.brush_size
-            top_left = QPoint(pos.x() - diameter // 2, pos.y() - diameter // 2)
-            temp_painter.drawEllipse(top_left.x(), top_left.y(), diameter, diameter)
-
-        temp_painter.end()
-
-        # Apply the stroke to the mask
+        # Set composition mode
         if self.eraser_button.isChecked():
             painter.setCompositionMode(
                 QPainter.CompositionMode.CompositionMode_DestinationOut
@@ -85,7 +49,35 @@ class MaskDrawingMixin:
                 QPainter.CompositionMode.CompositionMode_SourceOver
             )
 
-        painter.drawPixmap(0, 0, temp_pixmap)
+        # Set up the pen and brush
+        pen = QPen(
+            self.brush_color,
+            self.brush_size if self.last_point else 1, # Use brush size for line, 1 for ellipse outline (filled)
+            Qt.PenStyle.SolidLine,
+            Qt.PenCapStyle.RoundCap,
+            Qt.PenJoinStyle.RoundJoin,
+        )
+        
+        # For dots (no last point), we draw a filled ellipse
+        # For lines, the Pen width handles the filling
+        painter.setPen(pen)
+        painter.setBrush(QBrush(self.brush_color))
+
+        # Draw the stroke
+        if self.last_point:
+            # Drawing a line segment with a thick pen
+            painter.drawLine(self.last_point, pos)
+        else:
+            # Drawing a single dot
+            diameter = self.brush_size
+            # We need to turn off the pen for the ellipse fill if we want exact size, 
+            # or just use the pen width?
+            # Original code used a 1px pen and filled ellipse.
+            # Let's match original appearance.
+            painter.setPen(Qt.PenStyle.NoPen)
+            top_left = QPoint(pos.x() - diameter // 2, pos.y() - diameter // 2)
+            painter.drawEllipse(top_left.x(), top_left.y(), diameter, diameter)
+
         painter.end()
 
         self.last_point = pos
