@@ -1,16 +1,10 @@
 import pandas as pd
-from .field_map_handler import FieldMapHandler
 
 class DataProcessor:
     """Handles data loading and preprocessing."""
 
-    def __init__(self, csv_path, field_map_path=None, tube_ids_path=None):
+    def __init__(self, csv_path):
         self.csv_path = csv_path
-        self.field_map_handler = None
-        if field_map_path and tube_ids_path:
-            self.field_map_handler = FieldMapHandler(field_map_path, tube_ids_path)
-            self.field_map_handler.load_data()
-            
         self.df = self._load_and_prepare_data()
 
     def _load_and_prepare_data(self):
@@ -41,16 +35,6 @@ class DataProcessor:
                 lambda x: f"Tube {int(x['Tube'])}_L{int(x['Position'])}", axis=1
             )
             
-            # Merge Experimental Data if handler is available
-            if self.field_map_handler:
-                def get_meta(tube, field):
-                    return self.field_map_handler.get_tube_metadata(tube).get(field, "Unknown")
-
-                df["Treatment"] = df["Tube"].apply(lambda t: get_meta(t, "Treatment"))
-                df["Genotype"] = df["Tube"].apply(lambda t: get_meta(t, "Genotype"))
-                df["Rng"] = df["Tube"].apply(lambda t: get_meta(t, "Rng"))
-                df["Col"] = df["Tube"].apply(lambda t: get_meta(t, "Col"))
-                
             return df
         except Exception:
             return pd.DataFrame()

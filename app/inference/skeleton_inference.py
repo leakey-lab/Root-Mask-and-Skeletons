@@ -37,16 +37,27 @@ PREPROCESS = "resize_and_crop"
 EPOCH = "latest"
 
 IMG_EXTENSIONS = [
-    ".jpg", ".JPG", ".jpeg", ".JPEG",
-    ".png", ".PNG", ".ppm", ".PPM",
-    ".bmp", ".BMP", ".tif", ".TIF",
-    ".tiff", ".TIFF",
+    ".jpg",
+    ".JPG",
+    ".jpeg",
+    ".JPEG",
+    ".png",
+    ".PNG",
+    ".ppm",
+    ".PPM",
+    ".bmp",
+    ".BMP",
+    ".tif",
+    ".TIF",
+    ".tiff",
+    ".TIFF",
 ]
 
 
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+
 
 def is_image_file(filename):
     """Check if a file is an image based on extension."""
@@ -67,30 +78,30 @@ def make_dataset(directory):
 class ImageDataset(Dataset):
     """
     Dataset class for batch loading images during inference.
-    
+
     Args:
         image_paths: List of image file paths
         transform: Transform to apply to each image
         grayscale: Whether to convert images to grayscale
     """
-    
+
     def __init__(self, image_paths, transform, grayscale=False):
         self.image_paths = image_paths
         self.transform = transform
         self.grayscale = grayscale
-    
+
     def __len__(self):
         return len(self.image_paths)
-    
+
     def __getitem__(self, idx):
         img_path = self.image_paths[idx]
-        img = Image.open(img_path).convert('RGB')
-        
+        img = Image.open(img_path).convert("RGB")
+
         if self.transform:
             img_tensor = self.transform(img)
         else:
             img_tensor = img
-        
+
         # Return tensor and path for saving later
         return img_tensor, img_path
 
@@ -128,24 +139,27 @@ def get_transform(grayscale=False):
     transform_list = []
     if grayscale:
         transform_list.append(transforms.Grayscale(1))
-    
+
     # Resize
     osize = [LOAD_SIZE, LOAD_SIZE]
-    transform_list.append(transforms.Resize(osize, transforms.InterpolationMode.BICUBIC))
-    
+    transform_list.append(
+        transforms.Resize(osize, transforms.InterpolationMode.BICUBIC)
+    )
+
     # Convert to tensor and normalize
     transform_list.append(transforms.ToTensor())
     if grayscale:
         transform_list.append(transforms.Normalize((0.5,), (0.5,)))
     else:
         transform_list.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))
-    
+
     return transforms.Compose(transform_list)
 
 
 # =============================================================================
 # NETWORK ARCHITECTURE
 # =============================================================================
+
 
 class Identity(nn.Module):
     def forward(self, x):
@@ -155,10 +169,15 @@ class Identity(nn.Module):
 def get_norm_layer(norm_type="instance"):
     """Return a normalization layer."""
     if norm_type == "batch":
-        norm_layer = functools.partial(nn.BatchNorm2d, affine=True, track_running_stats=True)
+        norm_layer = functools.partial(
+            nn.BatchNorm2d, affine=True, track_running_stats=True
+        )
     elif norm_type == "instance":
-        norm_layer = functools.partial(nn.InstanceNorm2d, affine=False, track_running_stats=False)
+        norm_layer = functools.partial(
+            nn.InstanceNorm2d, affine=False, track_running_stats=False
+        )
     elif norm_type == "none":
+
         def norm_layer(x):
             return Identity()
     else:
@@ -177,10 +196,12 @@ def move_net_to_device(net, gpu_ids=[]):
 
 class ResnetBlock(nn.Module):
     """ResNet block with skip connections."""
-    
+
     def __init__(self, dim, padding_type, norm_layer, use_dropout, use_bias):
         super(ResnetBlock, self).__init__()
-        self.conv_block = self.build_conv_block(dim, padding_type, norm_layer, use_dropout, use_bias)
+        self.conv_block = self.build_conv_block(
+            dim, padding_type, norm_layer, use_dropout, use_bias
+        )
 
     def build_conv_block(self, dim, padding_type, norm_layer, use_dropout, use_bias):
         conv_block = []
@@ -225,7 +246,7 @@ class ResnetBlock(nn.Module):
 
 class SELayer(nn.Module):
     """Squeeze-and-Excitation layer."""
-    
+
     def __init__(self, channel, reduction=16):
         super(SELayer, self).__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
@@ -245,23 +266,46 @@ class SELayer(nn.Module):
 
 class DilatedConvBlock(nn.Module):
     """Dilated convolution block."""
-    
+
     def __init__(self, in_channels, out_channels, norm_layer, stride=1):
         super(DilatedConvBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride,
-                               padding=1, dilation=1, bias=False)
+        self.conv1 = nn.Conv2d(
+            in_channels,
+            out_channels,
+            kernel_size=3,
+            stride=stride,
+            padding=1,
+            dilation=1,
+            bias=False,
+        )
         self.bn1 = norm_layer(out_channels)
         self.relu = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1,
-                               padding=2, dilation=2, bias=False)
+        self.conv2 = nn.Conv2d(
+            out_channels,
+            out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=2,
+            dilation=2,
+            bias=False,
+        )
         self.bn2 = norm_layer(out_channels)
-        self.conv3 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1,
-                               padding=4, dilation=4, bias=False)
+        self.conv3 = nn.Conv2d(
+            out_channels,
+            out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=4,
+            dilation=4,
+            bias=False,
+        )
         self.bn3 = norm_layer(out_channels)
 
         if stride != 1 or in_channels != out_channels:
             self.downsample = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=stride, bias=False
+                ),
                 norm_layer(out_channels),
             )
         else:
@@ -288,9 +332,18 @@ class DilatedConvBlock(nn.Module):
 
 class EnhancedResnetGenerator(nn.Module):
     """Enhanced ResNet-based generator with dilated convolutions and SE attention."""
-    
-    def __init__(self, input_nc, output_nc, ngf=64, norm_layer=nn.BatchNorm2d,
-                 use_dropout=False, n_blocks=9, padding_type="reflect", use_attention=True):
+
+    def __init__(
+        self,
+        input_nc,
+        output_nc,
+        ngf=64,
+        norm_layer=nn.BatchNorm2d,
+        use_dropout=False,
+        n_blocks=9,
+        padding_type="reflect",
+        use_attention=True,
+    ):
         super(EnhancedResnetGenerator, self).__init__()
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
@@ -312,15 +365,22 @@ class EnhancedResnetGenerator(nn.Module):
         # Downsampling with dilated convolutions
         n_downsampling = 2
         for i in range(n_downsampling):
-            mult = 2 ** i
-            model += [DilatedConvBlock(ngf * mult, ngf * mult * 2, norm_layer, stride=2)]
+            mult = 2**i
+            model += [
+                DilatedConvBlock(ngf * mult, ngf * mult * 2, norm_layer, stride=2)
+            ]
 
         # ResNet blocks with SE attention
-        mult = 2 ** n_downsampling
+        mult = 2**n_downsampling
         for i in range(n_blocks):
             model += [
-                ResnetBlock(ngf * mult, padding_type=padding_type, norm_layer=norm_layer,
-                           use_dropout=use_dropout, use_bias=use_bias)
+                ResnetBlock(
+                    ngf * mult,
+                    padding_type=padding_type,
+                    norm_layer=norm_layer,
+                    use_dropout=use_dropout,
+                    use_bias=use_bias,
+                )
             ]
             if use_attention and i == n_blocks // 2:
                 model += [SELayer(ngf * mult)]
@@ -329,8 +389,15 @@ class EnhancedResnetGenerator(nn.Module):
         for i in range(n_downsampling):
             mult = 2 ** (n_downsampling - i)
             model += [
-                nn.ConvTranspose2d(ngf * mult, int(ngf * mult / 2), kernel_size=3, stride=2,
-                                   padding=1, output_padding=1, bias=use_bias),
+                nn.ConvTranspose2d(
+                    ngf * mult,
+                    int(ngf * mult / 2),
+                    kernel_size=3,
+                    stride=2,
+                    padding=1,
+                    output_padding=1,
+                    bias=use_bias,
+                ),
                 norm_layer(int(ngf * mult / 2)),
                 nn.ReLU(True),
             ]
@@ -350,77 +417,88 @@ class EnhancedResnetGenerator(nn.Module):
 # INFERENCE MODEL
 # =============================================================================
 
+
 class SkeletonModel:
     """Skeleton inference model wrapper."""
-    
+
     def __init__(self, gpu_ids=[]):
         self.gpu_ids = gpu_ids
-        self.device = torch.device(f'cuda:{gpu_ids[0]}') if gpu_ids else torch.device('cpu')
-        
+        self.device = (
+            torch.device(f"cuda:{gpu_ids[0]}") if gpu_ids else torch.device("cpu")
+        )
+
         # Create generator network
         norm_layer = get_norm_layer(norm_type=NORM)
         self.netG = EnhancedResnetGenerator(
-            INPUT_NC, OUTPUT_NC, NGF, norm_layer=norm_layer,
-            use_dropout=USE_DROPOUT, n_blocks=9
+            INPUT_NC,
+            OUTPUT_NC,
+            NGF,
+            norm_layer=norm_layer,
+            use_dropout=USE_DROPOUT,
+            n_blocks=9,
         )
         # Move to GPU without initializing weights (weights will be loaded from checkpoint)
         self.netG = move_net_to_device(self.netG, gpu_ids)
-        
+
         # Load pretrained weights from checkpoint
         self._load_network()
-        
+
         # Set to eval mode
         self.netG.eval()
-    
+
     def _load_network(self):
         """Load pretrained weights."""
         load_filename = f"{EPOCH}_net_G.pth"
         load_path = os.path.join(CHECKPOINTS_DIR, MODEL_NAME, load_filename)
-        
+
         net = self.netG
         if isinstance(net, torch.nn.DataParallel):
             net = net.module
-        
+
         print(f"loading the model from {load_path}")
         state_dict = torch.load(load_path, map_location=str(self.device))
-        
-        if hasattr(state_dict, '_metadata'):
+
+        if hasattr(state_dict, "_metadata"):
             del state_dict._metadata
-        
+
         # Patch InstanceNorm checkpoints
         for key in list(state_dict.keys()):
-            self._patch_instance_norm_state_dict(state_dict, net, key.split('.'))
-        
+            self._patch_instance_norm_state_dict(state_dict, net, key.split("."))
+
         net.load_state_dict(state_dict)
-    
+
     def _patch_instance_norm_state_dict(self, state_dict, module, keys, i=0):
         """Fix InstanceNorm checkpoints incompatibility."""
         key = keys[i]
         if i + 1 == len(keys):
-            if module.__class__.__name__.startswith('InstanceNorm') and \
-                    (key == 'running_mean' or key == 'running_var'):
+            if module.__class__.__name__.startswith("InstanceNorm") and (
+                key == "running_mean" or key == "running_var"
+            ):
                 if getattr(module, key) is None:
-                    state_dict.pop('.'.join(keys))
-            if module.__class__.__name__.startswith('InstanceNorm') and \
-               (key == 'num_batches_tracked'):
-                state_dict.pop('.'.join(keys))
+                    state_dict.pop(".".join(keys))
+            if module.__class__.__name__.startswith("InstanceNorm") and (
+                key == "num_batches_tracked"
+            ):
+                state_dict.pop(".".join(keys))
         else:
-            self._patch_instance_norm_state_dict(state_dict, getattr(module, key), keys, i + 1)
-    
+            self._patch_instance_norm_state_dict(
+                state_dict, getattr(module, key), keys, i + 1
+            )
+
     def run(self, input_tensor):
         """Run inference on input tensor."""
         input_tensor = input_tensor.to(self.device)
         with torch.no_grad():
             output = self.netG(input_tensor)
         return output
-    
+
     def run_batch(self, input_batch):
         """
         Run inference on a batch of input tensors.
-        
+
         Args:
             input_batch: Batch of input tensors [batch_size, channels, height, width]
-            
+
         Returns:
             Batch of output tensors
         """
@@ -434,20 +512,23 @@ class SkeletonModel:
 # MAIN INFERENCE FUNCTION
 # =============================================================================
 
-def run_inference(input_dir: str, output_dir: str, progress_callback=None, batch_size=8):
+
+def run_inference(
+    input_dir: str, output_dir: str, progress_callback=None, batch_size=8
+):
     """
     Run skeleton inference on all images in input_dir using batch processing.
-    
+
     Args:
         input_dir: Directory containing input images
         output_dir: Directory to save output images
         progress_callback: Optional callback function(current, total) for progress updates
         batch_size: Number of images to process in each batch (default: 4)
-    
+
     Returns:
         Path to the results directory
     """
-    
+
     # Setup GPU
     gpu_ids = []
     if torch.cuda.is_available():
@@ -455,29 +536,29 @@ def run_inference(input_dir: str, output_dir: str, progress_callback=None, batch
         print("Debug: Using CUDA")
     else:
         print("Debug: Using CPU")
-    
+
     # Create output directory structure - save directly to skeletons folder
     images_dir = output_dir
     os.makedirs(images_dir, exist_ok=True)
-    
+
     # Load model
     model = SkeletonModel(gpu_ids=gpu_ids)
-    
+
     # Get image paths
     image_paths = make_dataset(input_dir)
     total_images = len(image_paths)
     print(f"Debug: Found {total_images} images")
-    
+
     if total_images == 0:
         print("Debug: No images found in input directory")
         return images_dir
-    
+
     # Create transform
     transform = get_transform(grayscale=(INPUT_NC == 1))
-    
+
     # Create dataset and dataloader
     dataset = ImageDataset(image_paths, transform, grayscale=(INPUT_NC == 1))
-    
+
     # Use num_workers=2 for parallel data loading, pin_memory for faster GPU transfer
     num_workers = 8 if len(image_paths) > batch_size else 0
     dataloader = DataLoader(
@@ -485,34 +566,34 @@ def run_inference(input_dir: str, output_dir: str, progress_callback=None, batch
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=torch.cuda.is_available()
+        pin_memory=torch.cuda.is_available(),
     )
-    
+
     # Process batches
     processed_count = 0
     for batch_idx, (input_batch, img_paths) in enumerate(dataloader):
         current_batch_size = input_batch.size(0)
         # Run inference on batch
         output_batch = model.run_batch(input_batch)
-        
+
         # Process each image in the batch
         for i in range(current_batch_size):
-            output_tensor = output_batch[i:i+1]
+            output_tensor = output_batch[i : i + 1]
             img_path = img_paths[i]
-            
+
             # Convert to numpy and save
             output_numpy = tensor2im(output_tensor)
-            
+
             # Get output filename
             img_name = os.path.splitext(os.path.basename(img_path))[0]
             output_path = os.path.join(images_dir, f"{img_name}_fake.png")
-            
+
             save_image(output_numpy, output_path, aspect_ratio=ASPECT_RATIO)
-            
+
             processed_count += 1
-            
+
             # Progress update after each image for smoother UI updates
             if progress_callback:
                 progress_callback(processed_count, total_images)
-    
+
     return images_dir

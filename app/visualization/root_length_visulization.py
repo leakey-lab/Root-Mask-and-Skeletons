@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLabel, QMessageBox, QFileDialog
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLabel, QMessageBox
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl, QThread, pyqtSignal, Qt, QTimer
 import socket
@@ -16,20 +16,15 @@ class VisualizationInitWorker(QThread):
     finished = pyqtSignal(object, object)  # processor, dash_app
     error = pyqtSignal(str)
     
-    def __init__(self, csv_path, save_directory, image_manager, field_map_path=None, tube_ids_path=None):
+    def __init__(self, csv_path, save_directory, image_manager):
         super().__init__()
         self.csv_path = csv_path
         self.save_directory = save_directory
         self.image_manager = image_manager
-        self.field_map_path = field_map_path
-        self.tube_ids_path = tube_ids_path
     
     def run(self):
         try:
-            if self.field_map_path and os.path.exists(self.field_map_path) and self.tube_ids_path and os.path.exists(self.tube_ids_path):
-                processor = DataProcessor(self.csv_path, self.field_map_path, self.tube_ids_path)
-            else:
-                processor = DataProcessor(self.csv_path)
+            processor = DataProcessor(self.csv_path)
             
             if processor.df.empty:
                 raise ValueError("No data found in CSV file")
@@ -104,7 +99,7 @@ class RootLengthVisualization(QMainWindow):
         try:
             self._init_ui()
             QTimer.singleShot(100, self._start_visualization)
-        except Exception as e:
+        except Exception:
             raise
 
     def _init_ui(self):
@@ -125,7 +120,7 @@ class RootLengthVisualization(QMainWindow):
             except Exception as e:
                 self.loading_label.setText(f"Error initializing WebEngine: {str(e)}")
                 self.web_view = None
-        except Exception as e:
+        except Exception:
             raise
 
     def _is_port_available(self, port):
@@ -148,19 +143,13 @@ class RootLengthVisualization(QMainWindow):
                 return
 
         try:
-            # Locate Experimental Data Files
-            base_dir = os.path.dirname(self.csv_path)
-            field_map_path = os.path.join(base_dir, "FieldMap.xlsx")
-            tube_ids_path = os.path.join(base_dir, "TubeIDS.csv")
-            
+           
             # Update loading message
             self.loading_label.setText("Loading data...\nThis may take a moment...")
             
             # Start worker thread to do heavy initialization
             self.init_worker = VisualizationInitWorker(
-                self.csv_path, self.save_directory, self.image_manager, 
-                field_map_path if os.path.exists(field_map_path) else None,
-                tube_ids_path if os.path.exists(tube_ids_path) else None
+                self.csv_path, self.save_directory, self.image_manager,
             )
             self.init_worker.finished.connect(self._on_init_finished)
             self.init_worker.error.connect(self._handle_initialization_error)
@@ -213,9 +202,9 @@ class RootLengthVisualization(QMainWindow):
                 self._show_visualization()
             else:
                 pass
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             pass
-        except Exception as e:
+        except Exception:
             pass
 
     def _show_visualization(self):
@@ -259,7 +248,7 @@ class RootLengthVisualization(QMainWindow):
         try:
             self.cleanup_server()
             event.accept()
-        except Exception as e:
+        except Exception:
             event.accept()
 
     def handle_download(self, download_item):

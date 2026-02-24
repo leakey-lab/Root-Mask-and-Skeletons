@@ -5,6 +5,7 @@ from app.inference.skeleton_inference import run_inference
 
 BATCH_SIZE = 64
 
+
 class SkeletonGeneratorThread(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
@@ -24,13 +25,13 @@ class SkeletonGeneratorThread(QThread):
                 if total > 0:
                     progress_percentage = int((current / total) * 100)
                     self.progress.emit(progress_percentage)
-            
+
             # Run inference directly
             results_dir = run_inference(
                 input_dir=self.input_dir,
                 output_dir=self.output_dir,
                 progress_callback=progress_callback,
-                batch_size=BATCH_SIZE
+                batch_size=BATCH_SIZE,
             )
 
             self.progress.emit(100)  # Ensure we reach 100% at the end
