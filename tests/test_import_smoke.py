@@ -15,12 +15,6 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-# Known pre-existing circular import (mask_handler -> mask_tracing_interface ->
-# main_window -> mask_handler). Works at runtime only because main.py imports
-# main_window first. To be fixed in R5 (decouple handlers from the view); the
-# xfail below is removed then.
-CIRCULAR_MODULES = {"app.handlers.mask_handler"}
-
 APP_MODULES = [
     "app.mask_model.model",
     "app.inference.skeleton_inference",
@@ -57,8 +51,8 @@ APP_MODULES = [
 
 
 @pytest.mark.parametrize("modname", APP_MODULES)
-def test_module_imports(modname, request):
-    if modname in CIRCULAR_MODULES:
-        request.applymarker(pytest.mark.xfail(
-            reason="pre-existing circular import; fixed in R5", strict=False))
+def test_module_imports(modname):
+    # The mask_handler -> mask_tracing_interface -> main_window -> mask_handler
+    # cycle was broken in R5 (handlers imported lazily in MainWindow.__init__),
+    # so every module now imports cleanly standalone.
     importlib.import_module(modname)
