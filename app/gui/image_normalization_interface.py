@@ -10,8 +10,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 import cv2
+import logging
 import numpy as np
 from resources.resource_utils import get_resource_path
+
+logger = logging.getLogger(__name__)
 
 
 class ImageNormalization:
@@ -97,8 +100,8 @@ class NormalizationControls(QGroupBox):
         try:
             with open(save_path, "w") as f:
                 json.dump(self.default_values, f)
-        except Exception:
-            pass
+        except OSError as e:
+            logger.warning("Failed to save normalization defaults to %s: %s", save_path, e)
 
     def load_defaults(self):
         """Load saved defaults if they exist"""
@@ -111,8 +114,9 @@ class NormalizationControls(QGroupBox):
                 with open(save_path, "r") as f:
                     loaded_defaults = json.load(f)
                     self.default_values.update(loaded_defaults)
-        except Exception:
-            pass
+        except (OSError, ValueError) as e:
+            # ValueError covers json.JSONDecodeError (corrupt config file).
+            logger.warning("Failed to load normalization defaults from %s: %s", save_path, e)
 
     def init_ui(self):
         layout = QVBoxLayout()

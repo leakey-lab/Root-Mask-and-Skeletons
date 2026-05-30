@@ -25,9 +25,13 @@ from PyQt6.QtGui import (
     QWheelEvent,
 )
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF
+from collections import deque
+import logging
 import os
 import numpy as np
 import cv2
+
+logger = logging.getLogger(__name__)
 
 from .mask_graphics_view import MaskTracingGraphicsView
 from .mask_cursor_utils import create_brush_cursor, create_panning_cursor
@@ -50,9 +54,11 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         self.current_image_path = ""
         self.mask_directory = ""
         self.zoom_factor = 1.0
-        self.undo_stack = []
-        self.redo_stack = []
+        # Bounded undo/redo history. deque(maxlen=...) auto-evicts the oldest
+        # entry on append in O(1), replacing the previous O(n) list.pop(0) trim.
         self.max_stack_size = 25
+        self.undo_stack = deque(maxlen=self.max_stack_size)
+        self.redo_stack = deque(maxlen=self.max_stack_size)
         self.b_key_pressed = False
         self.size_slider = None
         self.zoom_slider = None
@@ -444,6 +450,10 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
                     mask = mask_cv > 200
                     rgba[mask] = [255, 255, 255, 255]
 
+                    # QImage wraps the rgba buffer without copying; the very
+                    # next line (QPixmap.fromImage) deep-copies the pixels, so
+                    # rgba stays alive for the QImage's entire lifetime (cf.
+                    # F-018).
                     mask_qimage = QImage(
                         rgba.data,
                         width,
@@ -452,8 +462,8 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
                         QImage.Format.Format_RGBA8888,
                     )
                     self.mask_pixmap = QPixmap.fromImage(mask_qimage)
-            except Exception:
-                pass
+            except (cv2.error, ValueError) as e:
+                logger.warning("Failed to load existing mask %s: %s", mask_path, e)
 
         # Update the display
         self.update_display()

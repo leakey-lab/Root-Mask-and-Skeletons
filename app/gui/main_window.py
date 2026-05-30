@@ -18,15 +18,15 @@ from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtCore import Qt, pyqtSignal
 from .image_manager import ImageManager
 from .display_controller import DisplayController
-from app.handlers.skeleton_handler import SkeletonHandler
-from app.handlers.mask_handler import MaskHandler
 from .mask_tracing_interface import MaskTracingInterface
 from .skeleton_correction_interface import SkeletonCorrectionInterface
-from app.handlers.mask_generation_handler import MaskGenerationHandler
 from . import ui_panels
 from . import file_tree_manager
 from . import visualization_manager
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -44,7 +44,17 @@ class MainWindow(QMainWindow):
             icon = QIcon(icon_path)
             self.setWindowIcon(icon)
         
-        # Initialize components
+        # Initialize components.
+        #
+        # Handlers are imported lazily here rather than at module top to break a
+        # circular import (F: mask_handler -> app.gui (package init) ->
+        # main_window -> mask_handler). By the time __init__ runs, the app.gui
+        # package is fully initialized, so these imports resolve cleanly and
+        # `import app.handlers.mask_handler` succeeds standalone.
+        from app.handlers.skeleton_handler import SkeletonHandler
+        from app.handlers.mask_handler import MaskHandler
+        from app.handlers.mask_generation_handler import MaskGenerationHandler
+
         self.image_manager = ImageManager(self)
         self.display_controller = DisplayController(self)
         self.skeleton_handler = SkeletonHandler(self)
@@ -54,6 +64,11 @@ class MainWindow(QMainWindow):
         self.skeleton_correction_interface = SkeletonCorrectionInterface()
         self.root_length_viz = None
         self.root_area_viz = None
+
+        # Tracks whether the mask-tracing interface signals are currently
+        # connected, so repeated toggles do not stack duplicate connections
+        # (F-015).
+        self._mask_tracing_signals_connected = False
 
         # Connect the mask_saved and mask_cleared signals
         self.mask_saved.connect(self.highlight_saved_mask)
@@ -124,24 +139,24 @@ class MainWindow(QMainWindow):
             gv = getattr(self.display_controller, "magnifying_view", None)
             if gv is not None and hasattr(gv, "set_opengl_viewport_enabled"):
                 gv.set_opengl_viewport_enabled(enabled)
-        except Exception:
-            pass
+        except RuntimeError as e:
+            logger.warning("Failed to toggle OpenGL on display view: %s", e)
 
         # Mask tracing view
         try:
             gv = getattr(self.mask_tracing_interface, "graphics_view", None)
             if gv is not None and hasattr(gv, "set_opengl_viewport_enabled"):
                 gv.set_opengl_viewport_enabled(enabled)
-        except Exception:
-            pass
+        except RuntimeError as e:
+            logger.warning("Failed to toggle OpenGL on mask tracing view: %s", e)
 
         # Skeleton correction view
         try:
             gv = getattr(self.skeleton_correction_interface, "graphics_view", None)
             if gv is not None and hasattr(gv, "set_opengl_viewport_enabled"):
                 gv.set_opengl_viewport_enabled(enabled)
-        except Exception:
-            pass
+        except RuntimeError as e:
+            logger.warning("Failed to toggle OpenGL on skeleton correction view: %s", e)
 
     # ==================== File Tree Methods (delegated) ====================
     
@@ -255,6 +270,21 @@ class MainWindow(QMainWindow):
         exists = os.path.exists(mask_path)
         return exists
 
+    def _image_has_mask(self, stored_name):
+        """Return True if the image has a saved mask.
+
+        Checks both the on-disk ``mask`` directory and the image manager's
+        in-memory state. Used to drive the green/white tree-item coloring so it
+        can be re-evaluated (rather than blindly reset) when leaving the
+        mask-tracing view (F-016).
+        """
+        image_path = self.image_manager.get_image_path(stored_name)
+        if not image_path:
+            return False
+        mask_dir = os.path.join(os.path.dirname(image_path), "mask")
+        mask_path = os.path.join(mask_dir, os.path.basename(image_path))
+        return os.path.exists(mask_path) or self.image_manager.has_mask(stored_name)
+
     def on_tree_item_clicked(self, item, column):
         """Handle tree item clicks - expand/collapse folders, load images"""
         # Get the stored image name from the item's user data
@@ -328,28 +358,27 @@ class MainWindow(QMainWindow):
             self.switch_right_panel("mask_tracing")
             self.toggle_mask_tracing_button.setText("Return to Main View")
 
-            # Connect signals for mask tracing interface
-            self.mask_tracing_interface.mask_saved.connect(self.on_mask_saved)
-            self.mask_tracing_interface.mask_cleared.connect(self.on_mask_cleared)
-            self.mask_tracing_interface.b_key_status_changed.connect(
-                self.on_b_key_status_changed
-            )
+            # Connect signals for mask tracing interface.
+            # Guarded so repeated enter->exit->enter cycles do not stack up
+            # duplicate connections (F-015): each slot would otherwise fire
+            # multiple times per signal because the exit branch removes only one
+            # connection per disconnect call.
+            if not self._mask_tracing_signals_connected:
+                self.mask_tracing_interface.mask_saved.connect(self.on_mask_saved)
+                self.mask_tracing_interface.mask_cleared.connect(self.on_mask_cleared)
+                self.mask_tracing_interface.b_key_status_changed.connect(
+                    self.on_b_key_status_changed
+                )
+                self._mask_tracing_signals_connected = True
 
             # Update mask status colors when entering mask tracing view
             def update_mask_colors(item):
                 stored_name = item.data(0, Qt.ItemDataRole.UserRole)
                 if stored_name:  # Only update leaf items (images)
-                    # Check both the mask directory and image manager for mask status
-                    image_path = self.image_manager.get_image_path(stored_name)
-                    if image_path:
-                        mask_dir = os.path.join(os.path.dirname(image_path), "mask")
-                        mask_path = os.path.join(mask_dir, os.path.basename(image_path))
-                        if os.path.exists(mask_path) or self.image_manager.has_mask(
-                            stored_name
-                        ):
-                            item.setForeground(0, QColor("green"))
-                        else:
-                            item.setForeground(0, QColor("white"))
+                    if self._image_has_mask(stored_name):
+                        item.setForeground(0, QColor("green"))
+                    else:
+                        item.setForeground(0, QColor("white"))
 
                 # Recursively update children
                 for i in range(item.childCount()):
@@ -363,18 +392,28 @@ class MainWindow(QMainWindow):
             self.switch_right_panel("display")
             self.toggle_mask_tracing_button.setText("✏️ Toggle Mask Tracing")
 
-            # Disconnect signals
-            self.mask_tracing_interface.mask_saved.disconnect(self.on_mask_saved)
-            self.mask_tracing_interface.mask_cleared.disconnect(self.on_mask_cleared)
-            self.mask_tracing_interface.b_key_status_changed.disconnect(
-                self.on_b_key_status_changed
-            )
+            # Disconnect signals (mirrors the guarded connect above, F-015).
+            if self._mask_tracing_signals_connected:
+                self.mask_tracing_interface.mask_saved.disconnect(self.on_mask_saved)
+                self.mask_tracing_interface.mask_cleared.disconnect(
+                    self.on_mask_cleared
+                )
+                self.mask_tracing_interface.b_key_status_changed.disconnect(
+                    self.on_b_key_status_changed
+                )
+                self._mask_tracing_signals_connected = False
 
-            # Reset all items to white when leaving mask tracing view
+            # Re-evaluate mask status colors when leaving mask tracing view.
+            # F-016: do NOT blindly reset every item to white — that wiped the
+            # green markers on legitimately saved masks. Items with a saved mask
+            # stay green; only items without a mask are reset to white.
             def reset_colors(item):
                 stored_name = item.data(0, Qt.ItemDataRole.UserRole)
-                if stored_name:  # Only reset leaf items (images)
-                    item.setForeground(0, QColor("white"))
+                if stored_name:  # Only update leaf items (images)
+                    if self._image_has_mask(stored_name):
+                        item.setForeground(0, QColor("green"))
+                    else:
+                        item.setForeground(0, QColor("white"))
 
                 # Recursively reset children
                 for i in range(item.childCount()):

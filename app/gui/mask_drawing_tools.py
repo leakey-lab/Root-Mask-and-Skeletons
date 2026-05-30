@@ -18,8 +18,8 @@ class MaskDrawingMixin:
     - self.brush_size: int for brush diameter
     - self.eraser_button: QPushButton for eraser mode
     - self.last_point: QPoint or None for last drawn point
-    - self.undo_stack: list for undo history
-    - self.redo_stack: list for redo history
+    - self.undo_stack: bounded deque(maxlen=max_stack_size) for undo history
+    - self.redo_stack: bounded deque(maxlen=max_stack_size) for redo history
     - self.max_stack_size: int for maximum undo/redo stack size
     - self.update_display(): method to refresh the display
     """
@@ -176,12 +176,9 @@ class MaskDrawingMixin:
     def save_for_undo(self):
         """Save current state for undo with stack size limit."""
         if self.mask_pixmap:
-            # Add current state to undo stack
+            # Add current state to undo stack. undo_stack is a bounded deque,
+            # so appending past max_stack_size auto-evicts the oldest entry.
             self.undo_stack.append(self.mask_pixmap.copy())
-
-            # Remove oldest state if stack exceeds maximum size
-            if len(self.undo_stack) > self.max_stack_size:
-                self.undo_stack.pop(0)
 
             # Clear redo stack as new action invalidates redo history
             self.redo_stack.clear()
@@ -189,12 +186,8 @@ class MaskDrawingMixin:
     def undo(self):
         """Undo last action with stack size limit."""
         if self.undo_stack:
-            # Save current state to redo stack
+            # Save current state to redo stack (bounded deque auto-evicts).
             self.redo_stack.append(self.mask_pixmap.copy())
-
-            # Remove oldest redo state if stack exceeds maximum size
-            if len(self.redo_stack) > self.max_stack_size:
-                self.redo_stack.pop(0)
 
             # Restore previous state from undo stack
             self.mask_pixmap = self.undo_stack.pop()
@@ -203,12 +196,8 @@ class MaskDrawingMixin:
     def redo(self):
         """Redo last undone action with stack size limit."""
         if self.redo_stack:
-            # Save current state to undo stack
+            # Save current state to undo stack (bounded deque auto-evicts).
             self.undo_stack.append(self.mask_pixmap.copy())
-
-            # Remove oldest undo state if stack exceeds maximum size
-            if len(self.undo_stack) > self.max_stack_size:
-                self.undo_stack.pop(0)
 
             # Restore next state from redo stack
             self.mask_pixmap = self.redo_stack.pop()

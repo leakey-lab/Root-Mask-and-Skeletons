@@ -1,7 +1,10 @@
 from PyQt6.QtWidgets import QFileDialog
 from PyQt6.QtCore import QThread, pyqtSignal
+import logging
 import os
 import re
+
+logger = logging.getLogger(__name__)
 
 
 class ImageLoaderThread(QThread):
@@ -36,7 +39,8 @@ class ImageLoaderThread(QThread):
             self.progress.emit(100)
             self.finished.emit(images, {}, masks, False)
 
-        except Exception:
+        except OSError as e:
+            logger.exception("Failed to scan image folder %s", self.folder_path)
             self.progress.emit(100)
             self.finished.emit({}, {}, {}, False)
 
@@ -198,7 +202,8 @@ class ImageManager:
 
             return info
 
-        except Exception:
+        except (AttributeError, TypeError, re.error) as e:
+            logger.debug("Failed to parse image name %r: %s", name, e)
             return {
                 "original_name": name,
                 "field": name,  # Fallback to using full name as field
