@@ -11,6 +11,7 @@ Key properties:
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
@@ -43,6 +44,59 @@ from .skeleton_correction_graphics_view import SkeletonCorrectionGraphicsView
 from .skeleton_graph_model import SkeletonCorrectionModel
 from .image_normalization_interface import ImageNormalization, NormalizationControls
 from .mask_cursor_utils import create_brush_cursor
+
+
+logger = logging.getLogger(__name__)
+
+
+def _imread_unicode(path: str, flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
+    """Unicode-safe replacement for ``cv2.imread`` (F-007).
+
+    ``cv2.imread`` cannot open paths containing non-ASCII characters on Windows
+    (localized usernames, accented dataset folders, CJK names) and returns
+    ``None`` silently. Reading the raw bytes ourselves and decoding via
+    ``cv2.imdecode`` sidesteps OpenCV's ANSI path handling entirely.
+
+    Returns the decoded image, or ``None`` if the file is missing/unreadable or
+    cannot be decoded as an image.
+    """
+    try:
+        data = np.fromfile(path, dtype=np.uint8)
+    except (OSError, ValueError) as exc:
+        logger.warning("Failed to read image bytes from %s: %s", path, exc)
+        return None
+    if data.size == 0:
+        logger.warning("Image file is empty or missing: %s", path)
+        return None
+    img = cv2.imdecode(data, flags)
+    if img is None:
+        logger.warning("cv2.imdecode could not decode image: %s", path)
+    return img
+
+
+def _imwrite_unicode(path: str, img: np.ndarray) -> bool:
+    """Unicode-safe replacement for ``cv2.imwrite`` (F-007).
+
+    Encodes in-memory with ``cv2.imencode`` and writes the bytes with
+    ``ndarray.tofile``, which honors Unicode paths on Windows where
+    ``cv2.imwrite`` fails. Returns ``True`` on success, ``False`` otherwise
+    (so callers can surface failures instead of falsely reporting success).
+    """
+    ext = os.path.splitext(path)[1] or ".png"
+    try:
+        ok, buf = cv2.imencode(ext, img)
+    except cv2.error as exc:
+        logger.warning("cv2.imencode failed for %s: %s", path, exc)
+        return False
+    if not ok:
+        logger.warning("cv2.imencode returned no data for %s", path)
+        return False
+    try:
+        buf.tofile(path)
+    except (OSError, ValueError) as exc:
+        logger.warning("Failed to write image bytes to %s: %s", path, exc)
+        return False
+    return True
 
 
 class SkeletonCorrectionInterface(QWidget):
@@ -118,6 +172,15 @@ class SkeletonCorrectionInterface(QWidget):
         self._last_display_update_time: float = 0.0
         self._display_update_interval: float = 0.030  # 30ms throttle
         self._endpoints_hidden: bool = False
+
+        # Display-overlay buffers reused across (throttled) eraser-move updates to
+        # avoid per-event reallocations. The color table is built once; the
+        # contiguous mask buffer that backs the QImage is retained for the
+        # lifetime of the displayed pixmap to avoid a use-after-free on the
+        # raw numpy pointer handed to QImage.
+        self._overlay_color_table = [0] * 256
+        self._overlay_color_table[255] = QColor(57, 255, 20).rgba()  # neon green
+        self._overlay_qimage_buffer: Optional[np.ndarray] = None
 
         self._build_ui()
 
@@ -384,7 +447,8 @@ class SkeletonCorrectionInterface(QWidget):
         # Keep the eraser cursor footprint accurate while zooming.
         try:
             self._zoom_factor = float(_zoom_factor)
-        except Exception:
+        except (TypeError, ValueError) as exc:
+            logger.warning("Invalid zoom factor %r, defaulting to 1.0: %s", _zoom_factor, exc)
             self._zoom_factor = 1.0
         self._rebuild_brush_cursor()
 
@@ -573,7 +637,7 @@ class SkeletonCorrectionInterface(QWidget):
             QMessageBox.warning(self, "Warning", "Load an image first.")
             return
 
-        img_gray = cv2.imread(skeleton_path, cv2.IMREAD_GRAYSCALE)
+        img_gray = _imread_unicode(skeleton_path, cv2.IMREAD_GRAYSCALE)
         if img_gray is None:
             QMessageBox.critical(self, "Error", f"Failed to load skeleton: {skeleton_path}")
             return
@@ -586,35 +650,42 @@ class SkeletonCorrectionInterface(QWidget):
         self.model.load_from_raster(img_gray, target_size=target_size)
         self._update_skeleton_display()
 
+    def _build_overlay_pixmap(self, mask: np.ndarray) -> QPixmap:
+        """Build the neon-green overlay QPixmap from the 1-channel mask.
+
+        Uses ``Format_Indexed8`` (1 byte/pixel) with a pre-built color table to
+        avoid expensive RGBA allocations. The contiguous buffer that backs the
+        QImage is retained on ``self`` so it cannot be garbage-collected while
+        QImage still references the raw pointer (use-after-free guard, F-072).
+        """
+        h, w = mask.shape
+
+        # Ensure mask is contiguous for QImage and hold a reference to the exact
+        # buffer the QImage points at until the pixmap copy has been made.
+        if not mask.flags["C_CONTIGUOUS"]:
+            mask = np.ascontiguousarray(mask)
+        self._overlay_qimage_buffer = mask
+
+        # Create QImage pointing directly to the numpy buffer, with the cached
+        # color table (index 0 transparent, index 255 neon green) — no per-call
+        # list reallocation.
+        qimg = QImage(mask.data, w, h, w, QImage.Format.Format_Indexed8)
+        qimg.setColorTable(self._overlay_color_table)
+
+        # Convert to QPixmap (deep-copies into display format in C++); after this
+        # the QImage/numpy buffer is no longer aliased by the pixmap.
+        return QPixmap.fromImage(qimg)
+
     def _update_skeleton_display(self, force_endpoints: bool = True) -> None:
         """Render current mask to overlay pixmap and optionally refresh endpoint markers.
         Optimized to use QImage.Format_Indexed8 to avoid expensive RGBA allocations.
         """
         if self.model.mask is None:
             self.skeleton_item.setPixmap(QPixmap())
+            self._overlay_qimage_buffer = None
             return
 
-        mask = self.model.mask
-        h, w = mask.shape
-        
-        # Ensure mask is contiguous for QImage
-        if not mask.flags['C_CONTIGUOUS']:
-            mask = np.ascontiguousarray(mask)
-
-        # Create QImage pointing directly to the numpy buffer
-        # Format_Indexed8: 1 byte per pixel
-        qimg = QImage(mask.data, w, h, w, QImage.Format.Format_Indexed8)
-        
-        # Define color table
-        # Index 0 = Transparent
-        # Index 255 = Neon Green (R=57, G=255, B=20)
-        color_table = [0] * 256
-        color_table[255] = QColor(57, 255, 20).rgba()
-        qimg.setColorTable(color_table)
-
-        # Convert to QPixmap (converts to display format efficiently in C++)
-        pix = QPixmap.fromImage(qimg)
-        self.skeleton_item.setPixmap(pix)
+        self.skeleton_item.setPixmap(self._build_overlay_pixmap(self.model.mask))
         self.skeleton_item.setOpacity(self.overlay_opacity)
 
         if force_endpoints:
@@ -782,8 +853,15 @@ class SkeletonCorrectionInterface(QWidget):
         save_size = self._save_size or (341, 256)
         rendered = self.model.render_to_size(save_size)
 
-        # Save white-on-black
-        cv2.imwrite(out_path, rendered)
+        # Save white-on-black via a Unicode-safe path (F-007) and only report
+        # success if the bytes were actually written (F-051): cv2.imwrite/encode
+        # can fail on permissions, disk-full, read-only or Unicode paths.
+        if not _imwrite_unicode(out_path, rendered):
+            QMessageBox.critical(
+                self, "Error", f"Failed to save skeleton to:\n{out_path}"
+            )
+            return
+        self.status_label.setText(f"Saved skeleton: {out_path}")
         self.skeleton_saved.emit(out_path)
 
     # -------------------- event delegation from view --------------------
@@ -1228,9 +1306,9 @@ class SkeletonCorrectionInterface(QWidget):
                 erase_pts = np.array(self._edit_original_polyline, dtype=np.int32).reshape((-1, 1, 2))
                 erase_thickness = max(5, int(self.draw_thickness) + 6)
                 cv2.polylines(self.model.mask, [erase_pts], isClosed=False, color=0, thickness=erase_thickness)
-            except Exception:
+            except (ValueError, cv2.error) as exc:
                 # Best-effort erase; if it fails we still draw the new polyline.
-                pass
+                logger.warning("Failed to erase original polyline before re-draw: %s", exc)
             self._edit_original_polyline = None
 
         self.model.draw_polyline(pts, thickness=self.draw_thickness)
@@ -1348,7 +1426,7 @@ class SkeletonCorrectionInterface(QWidget):
         if not self.current_image_path:
             return
         method = self.norm_controls.method_combo.currentText()
-        img = cv2.imread(self.current_image_path)
+        img = _imread_unicode(self.current_image_path)
         if img is None:
             return
 
