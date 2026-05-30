@@ -14,12 +14,17 @@ The editor keeps an internal binary skeleton mask (uint8 0/255) and provides:
 
 from __future__ import annotations
 
+import logging
+from collections import deque
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Deque, Iterable, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
+from scipy.ndimage import convolve
 from skimage.morphology import skeletonize
+
+logger = logging.getLogger(__name__)
 
 Point = Tuple[int, int]  # (x, y)
 
@@ -63,18 +68,38 @@ def _skeletonize_uint8(mask: np.ndarray) -> np.ndarray:
     return (skel_bool.astype(np.uint8) * 255)
 
 
+# 3x3 kernel that sums all 8 neighbors (center weight = 0) -- used by
+# _compute_degree_map to count the 8-connected neighbor degree in one
+# scipy convolution instead of eight array-slicing iterations (F-096 / Perf).
+_NEIGHBOR_KERNEL = np.array(
+    [[1, 1, 1],
+     [1, 0, 1],
+     [1, 1, 1]],
+    dtype=np.uint8,
+)
+
+
 def _compute_degree_map(skel_bool: np.ndarray) -> np.ndarray:
-    """Degree (# of 8-neighbors) for each skeleton pixel."""
-    h, w = skel_bool.shape
-    padded = np.pad(skel_bool, 1, constant_values=False)
-    deg = np.zeros((h, w), dtype=np.uint8)
-    for dy, dx in _neighbors8():
-        deg += padded[1 + dy : 1 + dy + h, 1 + dx : 1 + dx + w]
-    return deg
+    """Degree (# of 8-neighbors) for each skeleton pixel.
+
+    Vectorized via a single scipy.ndimage.convolve with a 3x3 all-ones
+    kernel (center = 0), replacing the previous 8-iteration Python loop
+    (fixes F-096 / Perf).  Output is identical: uint8 degree map over
+    the foreground pixels of *skel_bool*.
+    """
+    # convolve expects float or int input; use uint8 directly.
+    # mode='constant', cval=0 gives zero-padding equivalent to the old np.pad.
+    deg = convolve(
+        skel_bool.astype(np.uint8),
+        _NEIGHBOR_KERNEL,
+        mode="constant",
+        cval=0,
+    )
+    return deg.astype(np.uint8)
 
 
 def _rdp_simplify(points: Sequence[Point], epsilon: float) -> List[Point]:
-    """Ramer–Douglas–Peucker polyline simplification."""
+    """Ramer-Douglas-Peucker polyline simplification."""
     if len(points) < 3:
         return list(points)
 
@@ -206,19 +231,20 @@ class SkeletonCorrectionModel:
 
     def __init__(self):
         self.mask: Optional[np.ndarray] = None
-        self._undo_stack: List[np.ndarray] = []
-        self._redo_stack: List[np.ndarray] = []
         self.max_stack_size = 25
+        # F-019: Use deque(maxlen=...) for O(1) bounded push -- replaces list.pop(0).
+        self._undo_stack: Deque[np.ndarray] = deque(maxlen=self.max_stack_size)
+        self._redo_stack: Deque[np.ndarray] = deque(maxlen=self.max_stack_size)
 
     # -------------------- undo/redo --------------------
     def push_undo(self) -> None:
         if self.mask is None:
             return
-        # Deep copy to ensure we capture the exact state
+        # Deep copy to ensure we capture the exact state.
+        # deque(maxlen=...) automatically discards the oldest entry when full,
+        # preserving max_stack_size semantics without an explicit pop(0).
         state = self.mask.copy()
         self._undo_stack.append(state)
-        if len(self._undo_stack) > self.max_stack_size:
-            self._undo_stack.pop(0)
         self._redo_stack.clear()
 
     def undo(self) -> bool:
@@ -227,8 +253,6 @@ class SkeletonCorrectionModel:
         # Save current state to redo stack
         current = self.mask.copy()
         self._redo_stack.append(current)
-        if len(self._redo_stack) > self.max_stack_size:
-            self._redo_stack.pop(0)
         # Restore previous state
         self.mask = self._undo_stack.pop().copy()
         return True
@@ -239,8 +263,6 @@ class SkeletonCorrectionModel:
         # Save current state to undo stack
         current = self.mask.copy()
         self._undo_stack.append(current)
-        if len(self._undo_stack) > self.max_stack_size:
-            self._undo_stack.pop(0)
         # Restore next state
         self.mask = self._redo_stack.pop().copy()
         return True
@@ -319,5 +341,3 @@ class SkeletonCorrectionModel:
         out = cv2.resize(self.mask, (w, h), interpolation=cv2.INTER_NEAREST)
         out = _skeletonize_uint8(out)
         return out
-
-

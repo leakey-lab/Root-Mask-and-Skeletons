@@ -10,8 +10,10 @@ This script contains all necessary components for running skeleton inference:
 All constants are hardcoded for the skeletonizer model.
 """
 
+import logging
 import os
 import functools
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -19,11 +21,16 @@ from torch.utils.data import Dataset, DataLoader
 from PIL import Image
 import torchvision.transforms as transforms
 
+from app.config import SKELETONIZER_DIR, SKELETON_BATCH_SIZE
+
+logger = logging.getLogger(__name__)
+
 # =============================================================================
 # CONSTANTS - Hardcoded configuration for skeletonizer model
 # =============================================================================
 
-CHECKPOINTS_DIR = "./checkpoints"
+# CHECKPOINTS_DIR / SKELETONIZER_DIR are now resolved from app.config (F-005):
+# absolute path relative to the project root, so CWD no longer matters.
 MODEL_NAME = "skeletonizer"
 NORM = "batch"
 INPUT_NC = 3
@@ -60,14 +67,16 @@ IMG_EXTENSIONS = [
 
 
 def is_image_file(filename):
-    """Check if a file is an image based on extension."""
-    return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
+    """Check if a file is an image based on extension (case-insensitive)."""
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in {e.lower() for e in IMG_EXTENSIONS}
 
 
 def make_dataset(directory):
     """Find all image files in a directory."""
     images = []
-    assert os.path.isdir(directory), f"{directory} is not a valid directory"
+    if not os.path.isdir(directory):
+        raise ValueError(f"{directory} is not a valid directory")
     for fname in sorted(os.listdir(directory)):
         if is_image_file(fname):
             path = os.path.join(directory, fname)
@@ -95,7 +104,10 @@ class ImageDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path = self.image_paths[idx]
-        img = Image.open(img_path).convert("RGB")
+        try:
+            img = Image.open(img_path).convert("RGB")
+        except (OSError, IOError) as exc:
+            raise RuntimeError(f"Cannot open image {img_path!r}: {exc}") from exc
 
         if self.transform:
             img_tensor = self.transform(img)
@@ -123,14 +135,22 @@ def tensor2im(input_image, imtype=np.uint8):
 
 
 def save_image(image_numpy, image_path, aspect_ratio=1.0):
-    """Save a numpy image to disk."""
+    """Save a numpy image to disk.
+
+    F-004 fix: PIL.Image.resize takes (width, height); the original code
+    passed (h, int(w * aspect_ratio)) which swapped the axes and distorted
+    the skeleton geometry.  Corrected to (int(w * aspect_ratio), h) and
+    (w, int(h / aspect_ratio)) respectively so the resize is aspect-correct.
+    """
     image_pil = Image.fromarray(image_numpy)
     h, w, _ = image_numpy.shape
 
     if aspect_ratio > 1.0:
-        image_pil = image_pil.resize((h, int(w * aspect_ratio)), Image.BICUBIC)
+        # Widen: scale width up, keep height
+        image_pil = image_pil.resize((int(w * aspect_ratio), h), Image.BICUBIC)
     if aspect_ratio < 1.0:
-        image_pil = image_pil.resize((int(h / aspect_ratio), w), Image.BICUBIC)
+        # Narrow: scale height up, keep width
+        image_pil = image_pil.resize((w, int(h / aspect_ratio)), Image.BICUBIC)
     image_pil.save(image_path)
 
 
@@ -443,20 +463,32 @@ class SkeletonModel:
         # Load pretrained weights from checkpoint
         self._load_network()
 
-        # Set to eval mode
+        # Ensure the model is in eval mode (ML correctness: no BatchNorm train-mode noise)
         self.netG.eval()
 
     def _load_network(self):
-        """Load pretrained weights."""
+        """Load pretrained weights.
+
+        ML correctness: weights_only=True guards against arbitrary-code execution
+        via pickle (F-023 / SS-01).  SKELETONIZER_DIR from app.config provides an
+        absolute path independent of CWD (F-005).
+        """
         load_filename = f"{EPOCH}_net_G.pth"
-        load_path = os.path.join(CHECKPOINTS_DIR, MODEL_NAME, load_filename)
+        load_path = os.path.join(SKELETONIZER_DIR, load_filename)
 
         net = self.netG
         if isinstance(net, torch.nn.DataParallel):
             net = net.module
 
-        print(f"loading the model from {load_path}")
-        state_dict = torch.load(load_path, map_location=str(self.device))
+        logger.info("Loading skeleton model from %s", load_path)
+        try:
+            state_dict = torch.load(
+                load_path, map_location=str(self.device), weights_only=True
+            )
+        except (FileNotFoundError, RuntimeError) as exc:
+            raise RuntimeError(
+                f"Failed to load skeleton model weights from {load_path!r}: {exc}"
+            ) from exc
 
         if hasattr(state_dict, "_metadata"):
             del state_dict._metadata
@@ -488,7 +520,7 @@ class SkeletonModel:
     def run(self, input_tensor):
         """Run inference on input tensor."""
         input_tensor = input_tensor.to(self.device)
-        with torch.no_grad():
+        with torch.inference_mode():
             output = self.netG(input_tensor)
         return output
 
@@ -503,7 +535,7 @@ class SkeletonModel:
             Batch of output tensors
         """
         input_batch = input_batch.to(self.device)
-        with torch.no_grad():
+        with torch.inference_mode():
             output_batch = self.netG(input_batch)
         return output_batch
 
@@ -514,7 +546,7 @@ class SkeletonModel:
 
 
 def run_inference(
-    input_dir: str, output_dir: str, progress_callback=None, batch_size=8
+    input_dir: str, output_dir: str, progress_callback=None, batch_size=None
 ):
     """
     Run skeleton inference on all images in input_dir using batch processing.
@@ -523,19 +555,22 @@ def run_inference(
         input_dir: Directory containing input images
         output_dir: Directory to save output images
         progress_callback: Optional callback function(current, total) for progress updates
-        batch_size: Number of images to process in each batch (default: 4)
+        batch_size: Number of images to process in each batch (default: SKELETON_BATCH_SIZE
+                    from app.config)
 
     Returns:
         Path to the results directory
     """
+    if batch_size is None:
+        batch_size = SKELETON_BATCH_SIZE
 
     # Setup GPU
     gpu_ids = []
     if torch.cuda.is_available():
         gpu_ids = [0]
-        print("Debug: Using CUDA")
+        logger.debug("Using CUDA")
     else:
-        print("Debug: Using CPU")
+        logger.debug("Using CPU")
 
     # Create output directory structure - save directly to skeletons folder
     images_dir = output_dir
@@ -547,33 +582,33 @@ def run_inference(
     # Get image paths
     image_paths = make_dataset(input_dir)
     total_images = len(image_paths)
-    print(f"Debug: Found {total_images} images")
+    logger.debug("Found %d images in %s", total_images, input_dir)
 
     if total_images == 0:
-        print("Debug: No images found in input directory")
+        logger.warning("No images found in input directory: %s", input_dir)
         return images_dir
 
     # Create transform
     transform = get_transform(grayscale=(INPUT_NC == 1))
 
-    # Create dataset and dataloader
+    # Create dataset (no pre-loading of all images into RAM -- streaming via DataLoader)
     dataset = ImageDataset(image_paths, transform, grayscale=(INPUT_NC == 1))
 
-    # Use num_workers=2 for parallel data loading, pin_memory for faster GPU transfer
-    num_workers = 8 if len(image_paths) > batch_size else 0
+    # num_workers=0 avoids deadlocks on Windows inside QThread (F-022).
+    # DataLoader streams batches on demand; images are not all loaded into RAM at once.
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=num_workers,
+        num_workers=0,
         pin_memory=torch.cuda.is_available(),
     )
 
-    # Process batches
+    # Process batches -- CUDA tensors are freed after each batch (no accumulation)
     processed_count = 0
     for batch_idx, (input_batch, img_paths) in enumerate(dataloader):
         current_batch_size = input_batch.size(0)
-        # Run inference on batch
+        # Run inference on batch; tensors move to device inside run_batch
         output_batch = model.run_batch(input_batch)
 
         # Process each image in the batch
@@ -595,5 +630,10 @@ def run_inference(
             # Progress update after each image for smoother UI updates
             if progress_callback:
                 progress_callback(processed_count, total_images)
+
+        # Explicitly free GPU tensors after each batch to avoid accumulation
+        del output_batch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     return images_dir
