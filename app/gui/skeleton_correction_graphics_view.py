@@ -10,10 +10,13 @@ This mirrors the interaction patterns used in the existing mask tracing view:
 
 from __future__ import annotations
 
+import logging
 import os
 from PyQt6.QtCore import Qt, QPointF, QPoint
 from PyQt6.QtGui import QPainter, QWheelEvent, QMouseEvent, QKeyEvent
 from PyQt6.QtWidgets import QGraphicsView, QWidget
+
+logger = logging.getLogger(__name__)
 
 # See notes in other views: enabling QOpenGLWidget can break embedded QtWebEngine.
 def _env_bool(name: str, *, default: bool) -> bool:
@@ -80,8 +83,11 @@ class SkeletonCorrectionGraphicsView(QGraphicsView):
                 self.setViewport(QOpenGLWidget())
                 self._opengl_viewport_enabled = True
                 return
-            except Exception as e:
-                print(f"Failed to set OpenGL viewport: {e}")
+            except (RuntimeError, OSError) as e:
+                # OpenGL viewport creation can fail on systems without a usable
+                # GL context; fall back to a plain QWidget viewport instead of
+                # silently swallowing the error.
+                logger.warning("Failed to set OpenGL viewport, falling back to software: %s", e)
 
         self.setViewport(QWidget())
         self._opengl_viewport_enabled = False
