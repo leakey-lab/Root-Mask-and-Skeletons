@@ -4,18 +4,22 @@ Orchestrates layout, callbacks, and visualization components.
 """
 
 
+import logging
+import re
+from typing import Any
+
 from dash import Dash, dcc, html, Input, Output, State
 import dash
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
-import warnings
-import re
-from typing import Any
 
+from app.config import DASH_LENGTH_PORT
 from .dash_data_cache import DataCache
 from .dash_image_utils import build_available_images_map, get_encoded_image
 from .dash_visualizations import DashVisualizations
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -24,31 +28,28 @@ class DashApp(DashVisualizations):
     """Manages the Dash application."""
 
     def __init__(self, data_processor: Any, save_directory: str, image_manager=None):
-        try:
-            self.data_processor = data_processor
-            self.save_directory = save_directory
-            self.image_manager = image_manager
+        self.data_processor = data_processor
+        self.save_directory = save_directory
+        self.image_manager = image_manager
 
-            # Build available images map for hover display
-            self.available_images = build_available_images_map(image_manager)
+        # Build available images map for hover display
+        self.available_images = build_available_images_map(image_manager)
 
-            # Initialize data cache
-            self.data_cache = DataCache(data_processor)
+        # Initialize data cache
+        self.data_cache = DataCache(data_processor)
 
-            # Initialize Dash app
-            self.app = Dash(
-                __name__,
-                external_stylesheets=[dbc.themes.BOOTSTRAP],
-                suppress_callback_exceptions=True,
-                update_title=None,
-                compress=True,
-            )
+        # Initialize Dash app
+        self.app = Dash(
+            __name__,
+            external_stylesheets=[dbc.themes.BOOTSTRAP],
+            suppress_callback_exceptions=True,
+            update_title=None,
+            compress=True,
+        )
 
-            # Set up layout and callbacks
-            self._setup_layout()
-            self._setup_callbacks()
-        except Exception as e:
-            raise
+        # Set up layout and callbacks
+        self._setup_layout()
+        self._setup_callbacks()
 
     def get_encoded_image(self, tube: int, position: int, date: pd.Timestamp) -> str:
         """Get base64 encoded image for hover display."""
@@ -411,7 +412,8 @@ class DashApp(DashVisualizations):
                 ),
             ],
         )
-        except Exception as e:
+        except Exception:
+            logger.exception("Failed to build Dash length-visualization layout")
             raise
 
     def _setup_callbacks(self):
@@ -788,7 +790,19 @@ class DashApp(DashVisualizations):
                     }
 
                     if trigger_id == "view-selector":
-                        first_tube = self.data_processor.get_unique_tubes()[0]
+                        # Guard against empty/failed datasets so switching to the
+                        # lines view does not raise IndexError (F-009).
+                        tubes = self.data_processor.get_unique_tubes()
+                        if len(tubes) == 0:
+                            return (
+                                go.Figure(),
+                                "No tube data available",
+                                {"display": "none"},
+                                [],
+                                lines_graph_style,
+                                hidden_images_style,
+                            )
+                        first_tube = tubes[0]
                         fig = self.show_growth_lines(first_tube)
                         return (
                             fig,
@@ -884,8 +898,31 @@ class DashApp(DashVisualizations):
                     )
 
             except Exception as e:
-                warnings.warn(f"Error in visualization: {e}")
-                return dash.no_update
+                # Surface the failure to the user instead of silently swallowing
+                # it with no feedback (F-032); also log with traceback.
+                logger.exception("Error in visualization callback")
+                error_fig = go.Figure()
+                error_fig.add_annotation(
+                    text=f"Error generating visualization: {e}",
+                    xref="paper",
+                    yref="paper",
+                    x=0.5,
+                    y=0.5,
+                    showarrow=False,
+                    font=dict(size=16, color="red"),
+                    align="center",
+                )
+                error_fig.update_layout(
+                    plot_bgcolor="white", paper_bgcolor="white", height=600
+                )
+                return (
+                    error_fig,
+                    "An error occurred while rendering this view.",
+                    {"display": "none"},
+                    [],
+                    default_style,
+                    hidden_images_style,
+                )
 
             return dash.no_update
 
@@ -985,12 +1022,20 @@ class DashApp(DashVisualizations):
 
                 return images
 
-            except Exception as e:
+            except (KeyError, ValueError, TypeError, AttributeError):
+                # Malformed hover payload / unparseable date: show nothing rather
+                # than crashing the callback.
+                logger.exception("Error rendering hover images")
                 return []
 
     def run_server(self):
-        """Run the Dash server."""
+        """Run the Dash server.
+
+        Errors are logged (with traceback) and re-raised so the caller is not
+        left silently without a running server (F-008).
+        """
         try:
-            self.app.run(debug=False, port=8050, threaded=True)
+            self.app.run(debug=False, port=DASH_LENGTH_PORT, threaded=True)
         except Exception:
-            pass
+            logger.exception("Dash length-visualization server failed to run")
+            raise
