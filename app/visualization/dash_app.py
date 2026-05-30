@@ -991,6 +991,6 @@ class DashApp(DashVisualizations):
     def run_server(self):
         """Run the Dash server."""
         try:
-            self.app.run_server(debug=False, port=8050, threaded=True)
+            self.app.run(debug=False, port=8050, threaded=True)
         except Exception:
             pass
