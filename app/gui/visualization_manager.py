@@ -3,11 +3,15 @@ Visualization management for the main window.
 Handles root length and root area visualization toggling and cleanup.
 """
 
+import logging
 import os
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import Qt, QTimer
+from app.config import ROOT_AREAS_CSV, ROOT_LENGTHS_CSV
 from app.visualization.root_length_visulization import RootLengthVisualization
 from app.visualization.root_area_visualization import RootAreaVisualization
+
+logger = logging.getLogger(__name__)
 
 
 def find_test_latest_dir(start_path, max_depth=3):
@@ -57,10 +61,10 @@ def find_test_latest_dir(start_path, max_depth=3):
                 if result:
                     return result
 
-        except PermissionError:
-            pass
-        except Exception:
-            pass
+        except OSError as e:
+            # Unreadable/inaccessible directory (permissions, vanished path);
+            # skip it and continue the search elsewhere.
+            logger.debug("Skipping directory %s during search: %s", root_path, e)
 
         return None
 
@@ -100,10 +104,9 @@ def find_test_latest_dir(start_path, max_depth=3):
             # Move up to parent
             return search_up(parent, depth + 1)
 
-        except PermissionError:
-            pass
-        except Exception:
-            pass
+        except OSError as e:
+            # Unreadable/inaccessible directory; stop ascending this branch.
+            logger.debug("Skipping parent %s during search: %s", path, e)
 
         return None
 
@@ -133,6 +136,8 @@ def toggle_root_length_visualization(main_window):
             # Always create a new visualization instance
             show_root_length_visualization(main_window)
     except Exception as e:
+        # Top-level UI guard: log with traceback, then surface to the user.
+        logger.exception("Error toggling root length visualization")
         QMessageBox.critical(
             main_window, "Error", f"Error toggling visualization: {str(e)}"
         )
@@ -155,8 +160,9 @@ def show_root_length_visualization(main_window):
             main_window.set_opengl_viewports_enabled(False)
             try:
                 QApplication.processEvents()
-            except Exception:
-                pass
+            except RuntimeError as e:
+                # Event loop may be unavailable mid-teardown; non-fatal.
+                logger.debug("processEvents failed: %s", e)
 
         # Find the CSV file path - get the first actual image from the tree
         first_image_name = None
@@ -195,14 +201,14 @@ def show_root_length_visualization(main_window):
         
         # Search for CSV in multiple locations (prioritize skeletons folder)
         potential_csv_paths = [
-            os.path.join(base_folder, "skeletons", "root_lengths.csv"),  # New format
-            os.path.join(base_folder, "root_lengths.csv"),  # Base folder
+            os.path.join(base_folder, "skeletons", ROOT_LENGTHS_CSV),  # New format
+            os.path.join(base_folder, ROOT_LENGTHS_CSV),  # Base folder
         ]
-        
+
         # Add legacy paths
         base_path = find_test_latest_dir(start_dir)
         if base_path:
-            potential_csv_paths.append(os.path.join(base_path, "root_lengths.csv"))
+            potential_csv_paths.append(os.path.join(base_path, ROOT_LENGTHS_CSV))
         
         # Try each path until we find the CSV
         csv_path = None
@@ -217,23 +223,22 @@ def show_root_length_visualization(main_window):
 
 
         def create_new_visualization():
-            # Create new visualization with the current CSV path
-            try:
-                main_window.root_length_viz = RootLengthVisualization(
-                    csv_path, main_window.image_manager
-                )
-                main_window.root_length_viz.server_closed.connect(
-                    main_window.on_visualization_server_closed
-                )
+            # Create new visualization with the current CSV path.
+            # Errors propagate to the outer handler in
+            # show_root_length_visualization, which logs and notifies the user.
+            main_window.root_length_viz = RootLengthVisualization(
+                csv_path, main_window.image_manager
+            )
+            main_window.root_length_viz.server_closed.connect(
+                main_window.on_visualization_server_closed
+            )
 
-                # Add to right panel and show
-                main_window.right_panel.addWidget(main_window.root_length_viz)
-                main_window.right_panel.setCurrentWidget(main_window.root_length_viz)
+            # Add to right panel and show
+            main_window.right_panel.addWidget(main_window.root_length_viz)
+            main_window.right_panel.setCurrentWidget(main_window.root_length_viz)
 
-                # Update button text
-                main_window.visualize_root_length_button.setText("Close Visualization")
-            except Exception as e:
-                raise
+            # Update button text
+            main_window.visualize_root_length_button.setText("Close Visualization")
 
         if main_window.root_length_viz:
             try:
@@ -248,6 +253,7 @@ def show_root_length_visualization(main_window):
             create_new_visualization()
 
     except Exception as e:
+        logger.exception("Failed to create root length visualization")
         QMessageBox.critical(
             main_window, "Error", f"Failed to create visualization: {str(e)}"
         )
@@ -274,8 +280,9 @@ def close_root_length_visualization(main_window):
         if main_window.root_length_viz:
             try:
                 main_window.right_panel.removeWidget(main_window.root_length_viz)
-            except Exception:
-                pass
+            except RuntimeError as e:
+                # Widget may already be detached/deleted; safe to ignore.
+                logger.debug("removeWidget (length viz) failed: %s", e)
             main_window.root_length_viz.deleteLater()
         main_window.root_length_viz = None
 
@@ -284,8 +291,9 @@ def close_root_length_visualization(main_window):
             main_window.set_opengl_viewports_enabled(True)
             try:
                 QApplication.processEvents()
-            except Exception:
-                pass
+            except RuntimeError as e:
+                # Event loop may be unavailable mid-teardown; non-fatal.
+                logger.debug("processEvents failed: %s", e)
 
         # Update current image display if available
         current_item = main_window.file_list.currentItem()
@@ -293,6 +301,7 @@ def close_root_length_visualization(main_window):
             main_window.on_image_selected(current_item)
 
     except Exception as e:
+        logger.exception("Error during root length visualization cleanup")
         main_window.root_length_viz = None
         main_window.switch_right_panel("display")
         QMessageBox.warning(main_window, "Warning", f"Error during cleanup: {str(e)}")
@@ -312,6 +321,8 @@ def toggle_root_area_visualization(main_window):
             # Always create a new visualization instance
             show_root_area_visualization(main_window)
     except Exception as e:
+        # Top-level UI guard: log with traceback, then surface to the user.
+        logger.exception("Error toggling root area visualization")
         QMessageBox.critical(
             main_window, "Error", f"Error toggling visualization: {str(e)}"
         )
@@ -334,8 +345,9 @@ def show_root_area_visualization(main_window):
             main_window.set_opengl_viewports_enabled(False)
             try:
                 QApplication.processEvents()
-            except Exception:
-                pass
+            except RuntimeError as e:
+                # Event loop may be unavailable mid-teardown; non-fatal.
+                logger.debug("processEvents failed: %s", e)
 
         # Find the CSV file path - get the first actual image from the tree
         first_image_name = None
@@ -387,27 +399,26 @@ def show_root_area_visualization(main_window):
         if not masks_dir:
             raise FileNotFoundError("No masks directory found")
 
-        csv_path = os.path.join(masks_dir, "root_areas.csv")
+        csv_path = os.path.join(masks_dir, ROOT_AREAS_CSV)
 
         if not os.path.exists(csv_path):
             raise FileNotFoundError(f"No root area data found at {csv_path}")
 
         def create_new_visualization():
-            # Create new visualization with the current CSV path
-            try:
-                main_window.root_area_viz = RootAreaVisualization(csv_path)
-                main_window.root_area_viz.server_closed.connect(
-                    main_window.on_area_visualization_server_closed
-                )
+            # Create new visualization with the current CSV path.
+            # Errors propagate to the outer handler in
+            # show_root_area_visualization, which logs and notifies the user.
+            main_window.root_area_viz = RootAreaVisualization(csv_path)
+            main_window.root_area_viz.server_closed.connect(
+                main_window.on_area_visualization_server_closed
+            )
 
-                # Add to right panel and show
-                main_window.right_panel.addWidget(main_window.root_area_viz)
-                main_window.right_panel.setCurrentWidget(main_window.root_area_viz)
+            # Add to right panel and show
+            main_window.right_panel.addWidget(main_window.root_area_viz)
+            main_window.right_panel.setCurrentWidget(main_window.root_area_viz)
 
-                # Update button text
-                main_window.visualize_root_area_button.setText("Close Area Visualization")
-            except Exception as e:
-                raise
+            # Update button text
+            main_window.visualize_root_area_button.setText("Close Area Visualization")
 
         if main_window.root_area_viz:
             try:
@@ -422,6 +433,7 @@ def show_root_area_visualization(main_window):
             create_new_visualization()
 
     except Exception as e:
+        logger.exception("Failed to create root area visualization")
         QMessageBox.critical(
             main_window, "Error", f"Failed to create visualization: {str(e)}"
         )
@@ -448,8 +460,9 @@ def close_root_area_visualization(main_window):
         if main_window.root_area_viz:
             try:
                 main_window.right_panel.removeWidget(main_window.root_area_viz)
-            except Exception:
-                pass
+            except RuntimeError as e:
+                # Widget may already be detached/deleted; safe to ignore.
+                logger.debug("removeWidget (area viz) failed: %s", e)
             main_window.root_area_viz.deleteLater()
         main_window.root_area_viz = None
 
@@ -458,8 +471,9 @@ def close_root_area_visualization(main_window):
             main_window.set_opengl_viewports_enabled(True)
             try:
                 QApplication.processEvents()
-            except Exception:
-                pass
+            except RuntimeError as e:
+                # Event loop may be unavailable mid-teardown; non-fatal.
+                logger.debug("processEvents failed: %s", e)
 
         # Update current image display if available
         current_item = main_window.file_list.currentItem()
@@ -467,6 +481,7 @@ def close_root_area_visualization(main_window):
             main_window.on_image_selected(current_item)
 
     except Exception as e:
+        logger.exception("Error during root area visualization cleanup")
         main_window.root_area_viz = None
         main_window.switch_right_panel("display")
         QMessageBox.warning(main_window, "Warning", f"Error during cleanup: {str(e)}")

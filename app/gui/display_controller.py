@@ -9,7 +9,10 @@ from PyQt6.QtGui import QPixmap, QImage, QPainter, QWheelEvent, QColor
 from PyQt6.QtCore import Qt
 import cv2
 import numpy as np
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 def _env_bool(name: str, *, default: bool) -> bool:
     v = os.environ.get(name, None)
@@ -71,9 +74,10 @@ class MagnifyingGraphicsView(QGraphicsView):
                 self.setViewport(QOpenGLWidget())
                 self._opengl_viewport_enabled = True
                 return
-            except Exception as e:
-                print(f"Failed to set OpenGL viewport: {e}")
-                # Fall through to non-OpenGL viewport
+            except (RuntimeError, OSError) as e:
+                # OpenGL context creation can fail on headless / driverless
+                # systems; fall through to a standard software viewport.
+                logger.warning("Failed to set OpenGL viewport: %s", e)
 
         # Replace with a standard QWidget viewport (removes any existing QOpenGLWidget).
         self.setViewport(QWidget())
@@ -292,31 +296,55 @@ class DisplayController:
                     binary_mask = np.ascontiguousarray(binary_mask)
 
                 height, width = binary_mask.shape
-                
+
+                # F-018: QImage wraps the numpy buffer without copying it, so
+                # the backing array MUST stay alive for as long as the QImage
+                # references it. Hold a reference on the controller; QPixmap
+                # .fromImage() below deep-copies the pixels, after which the
+                # array is free to be replaced.
+                self._overlay_backing_array = binary_mask
+
                 # Create QImage pointing directly to the numpy buffer
                 # Format_Indexed8: 1 byte per pixel
-                overlay_image = QImage(binary_mask.data, width, height, width, QImage.Format.Format_Indexed8)
-                
-                # Define color table
-                # Index 0-49 = Transparent (threshold was 50)
-                # Index 50-255 = Neon Green (R=20, G=255, B=57, A=128)
+                overlay_image = QImage(
+                    binary_mask.data,
+                    width,
+                    height,
+                    width,
+                    QImage.Format.Format_Indexed8,
+                )
+
+                # Define color table.
+                # F-017: the mask is Otsu-binarized above, so it contains ONLY
+                # 0 (background) and 255 (foreground) — there is no value in the
+                # 1..254 range. The table therefore makes index 0 fully
+                # transparent and colors everything from the first foreground
+                # value (1) upward, so it stays correct even if a future soft
+                # mask produces intermediate values rather than silently
+                # dropping foreground pixels below an arbitrary cutoff.
                 color_table = [0] * 256
-                
-                # Fill the active range with the color
+
+                # Fill the foreground range with the color.
                 neon_green = QColor(20, 255, 57, 128).rgba()
-                for i in range(50, 256):
+                for i in range(1, 256):
                     color_table[i] = neon_green
-                    
+
                 overlay_image.setColorTable(color_table)
-                
+
                 overlay_pixmap = QPixmap.fromImage(overlay_image)
                 overlay_item = QGraphicsPixmapItem(overlay_pixmap)
                 overlay_item.setZValue(1)
                 items.append(overlay_item)
             else:
-                 print(f"⚠️ Failed to load fake image data for {os.path.basename(self.current_image)}")
+                 logger.warning(
+                    "Failed to load fake image data for %s",
+                    os.path.basename(self.current_image),
+                )
         else:
-            print(f"⚠️ No fake image found for {os.path.basename(self.current_image)} - showing single image view")
+            logger.info(
+                "No fake image found for %s - showing single image view",
+                os.path.basename(self.current_image),
+            )
 
         self.update_scene_items(items)
 

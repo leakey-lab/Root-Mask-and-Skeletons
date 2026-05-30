@@ -6,7 +6,10 @@ Handles zooming, panning, and drawing event routing.
 from PyQt6.QtWidgets import QGraphicsView, QGraphicsPixmapItem, QWidget
 from PyQt6.QtGui import QPainter, QWheelEvent, QMouseEvent
 from PyQt6.QtCore import Qt, QPointF, QPoint
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 def _env_bool(name: str, *, default: bool) -> bool:
     v = os.environ.get(name, None)
@@ -64,8 +67,10 @@ class MaskTracingGraphicsView(QGraphicsView):
                 self.setViewport(QOpenGLWidget())
                 self._opengl_viewport_enabled = True
                 return
-            except Exception as e:
-                print(f"Failed to set OpenGL viewport: {e}")
+            except (RuntimeError, OSError) as e:
+                # OpenGL context creation can fail on headless / driverless
+                # systems; fall through to a standard software viewport.
+                logger.warning("Failed to set OpenGL viewport: %s", e)
 
         self.setViewport(QWidget())
         self._opengl_viewport_enabled = False
