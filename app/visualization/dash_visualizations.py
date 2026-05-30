@@ -3,34 +3,40 @@ Visualization methods for the Dash root length application.
 Contains all chart creation methods extracted from DashApp.
 """
 
+import logging
+
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
-import warnings
 from typing import Any, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def parse_tube_selection(text: str) -> List[int]:
     """
     Parse tube selection string like '1,3,5,10-15' into list [1,3,5,10,11,12,13,14,15].
-    
+
+    Malformed parts are skipped individually rather than discarding the whole
+    selection, so e.g. "1,foo,3" yields [1, 3] (F-037).
+
     Args:
         text: Comma-separated string containing tube numbers and ranges
-        
+
     Returns:
         Sorted list of unique tube numbers
     """
     if not text or not text.strip():
         return []
-    
+
     tubes = []
-    try:
-        for part in text.split(','):
-            part = part.strip()
-            if not part:
-                continue
+    for part in text.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        try:
             if '-' in part:
                 # Handle range like "10-15"
                 range_parts = part.split('-')
@@ -41,10 +47,11 @@ def parse_tube_selection(text: str) -> List[int]:
             else:
                 # Handle single number
                 tubes.append(int(part))
-    except (ValueError, AttributeError):
-        # Return empty list if parsing fails
-        return []
-    
+        except (ValueError, AttributeError):
+            # Skip this malformed part but keep any valid ones already parsed.
+            logger.debug("Skipping unparseable tube-selection part: %r", part)
+            continue
+
     return sorted(set(tubes))
 
 
@@ -60,18 +67,36 @@ class DashVisualizations:
     def get_tube_date_availability(self) -> dict:
         """
         Get information about which tubes have data for which dates.
-        
+
+        The result is memoized per (DataFrame identity) so repeated callback
+        invocations do not re-run an O(tubes*dates) scan with a fresh boolean
+        mask per cell (F-033). A single groupby computes the present pairs in
+        one pass.
+
         Returns:
             dict: {(tube, date): has_data_bool}
         """
         df = self.data_processor.df
-        availability = {}
-        
-        for tube in sorted(df["Tube"].unique()):
-            for date in sorted(df["Date"].unique()):
-                tube_date_data = df[(df["Tube"] == tube) & (df["Date"] == date)]
-                availability[(tube, date)] = not tube_date_data.empty
-        
+
+        # Invalidate the memo if the underlying DataFrame object changed.
+        cache = getattr(self, "_availability_cache", None)
+        if cache is not None and cache[0] is df:
+            return cache[1]
+
+        tubes = sorted(df["Tube"].unique())
+        dates = sorted(df["Date"].unique())
+        # Pairs that actually have at least one row.
+        present = set(
+            map(tuple, df[["Tube", "Date"]].drop_duplicates().itertuples(index=False))
+        )
+
+        availability = {
+            (tube, date): (tube, date) in present
+            for tube in tubes
+            for date in dates
+        }
+
+        self._availability_cache = (df, availability)
         return availability
 
     def show_growth_lines(self, selected_tube: int) -> go.Figure:
@@ -219,8 +244,8 @@ class DashVisualizations:
                     line={"color": "black", "width": 2, "dash": "dot"},
                 )
 
-        except Exception as e:
-            warnings.warn(f"Error generating growth lines: {e}")
+        except Exception:
+            logger.exception("Error generating growth lines")
             fig = go.Figure()
 
         return fig
@@ -256,49 +281,67 @@ class DashVisualizations:
                 tube_totals = df.groupby(["Date", "Tube"])["Length (mm)"].sum().reset_index()
                 tube_totals.columns = ["Date", "Tube", "Total_Length"]
                 
-                # Create date mapping to merge dates within ±3 days (ONLY for field average)
-                # Get all dates and their measurement counts
+                # Create date mapping to merge measurement dates within ±3 days
+                # (ONLY for the field average). The merge is deterministic:
+                #   - dates are processed in ascending order;
+                #   - the greedy ±3-day window is anchored on the earliest
+                #     not-yet-assigned date;
+                #   - the representative date is the one with the most measuring
+                #     tubes, breaking ties toward the earliest date (idxmax on a
+                #     date-sorted frame returns the first/earliest on a tie).
+                # See F-034: this ordering is fixed so results do not depend on
+                # row order, and merged tube totals are AVERAGED (below), not
+                # summed, so a tube measured on two nearby dates is not double
+                # counted.
                 date_counts = tube_totals.groupby("Date").size().reset_index(name="measurement_count")
-                date_counts = date_counts.sort_values("Date")
-                
+                date_counts = date_counts.sort_values("Date").reset_index(drop=True)
+
                 # Create a mapping of dates to their representative date
                 date_mapping = {}
                 processed_dates = set()
-                
-                for idx, row in date_counts.iterrows():
+
+                for _, row in date_counts.iterrows():
                     current_date = row["Date"]
-                    
+
                     if current_date in processed_dates:
                         continue
-                    
-                    # Find dates within ±3 days
+
+                    # Find not-yet-assigned dates within ±3 days of current_date.
                     date_range_start = current_date - pd.Timedelta(days=3)
                     date_range_end = current_date + pd.Timedelta(days=3)
-                    
+
                     nearby_dates = date_counts[
-                        (date_counts["Date"] >= date_range_start) & 
-                        (date_counts["Date"] <= date_range_end)
+                        (date_counts["Date"] >= date_range_start)
+                        & (date_counts["Date"] <= date_range_end)
+                        & (~date_counts["Date"].isin(processed_dates))
                     ]
-                    
+
                     if len(nearby_dates) > 1:
-                        # Find the date with the most measurements
+                        # Representative = most measurements; earliest date wins
+                        # ties (frame is date-sorted, idxmax returns first max).
                         representative_date = nearby_dates.loc[
                             nearby_dates["measurement_count"].idxmax(), "Date"
                         ]
-                        
-                        # Map all nearby dates to the representative date
-                        for _, nearby_row in nearby_dates.iterrows():
-                            date_mapping[nearby_row["Date"]] = representative_date
-                            processed_dates.add(nearby_row["Date"])
+
+                        for nearby_date in nearby_dates["Date"]:
+                            date_mapping[nearby_date] = representative_date
+                            processed_dates.add(nearby_date)
                     else:
                         date_mapping[current_date] = current_date
                         processed_dates.add(current_date)
-                
+
                 # Apply the date mapping to merge dates
                 tube_totals["Date"] = tube_totals["Date"].map(date_mapping)
-                
-                # Recalculate totals after merging dates (sum across merged dates)
-                tube_totals = tube_totals.groupby(["Date", "Tube"])["Total_Length"].sum().reset_index()
+
+                # Collapse merged dates by AVERAGING each tube's total length
+                # across the dates that merged into one representative date
+                # (F-034: previously summed, which double-counted re-measured
+                # tubes). A tube measured once contributes its single total.
+                tube_totals = (
+                    tube_totals.groupby(["Date", "Tube"])["Total_Length"]
+                    .mean()
+                    .reset_index()
+                )
                 
                 # Then calculate mean and std of those totals across tubes for each date
                 field_stats = tube_totals.groupby("Date")["Total_Length"].agg(
@@ -451,8 +494,8 @@ class DashVisualizations:
             
             return fig
             
-        except Exception as e:
-            warnings.warn(f"Error generating growth over time: {e}")
+        except Exception:
+            logger.exception("Error generating growth over time")
             return go.Figure()
 
     def create_stacked_bar_chart(self) -> go.Figure:
@@ -547,8 +590,8 @@ class DashVisualizations:
 
             return fig
 
-        except Exception as e:
-            warnings.warn(f"Error generating stacked bar chart: {e}")
+        except Exception:
+            logger.exception("Error generating stacked bar chart")
             return go.Figure()
 
     def create_faceted_depth_profile(
@@ -749,10 +792,13 @@ class DashVisualizations:
                     
                     global_max_depth = max(global_max_depth, max(y_positions, default=0))
                     
-                    # Add field average bars (extending LEFT from center)
-                    show_field_legend = not field_avg_added_to_legend and date_idx == 1 and tube_idx == 1
-                    field_avg_added_to_legend = True
-                    
+                    # Add field average bars (extending LEFT from center).
+                    # Show the legend entry on the FIRST data-bearing subplot
+                    # only, and set the dedup flag right after the trace is added
+                    # so a leading empty tube/date does not silence the legend
+                    # forever (F-011).
+                    show_field_legend = not field_avg_added_to_legend
+
                     fig.add_trace(
                         go.Bar(
                             x=[-val for val in field_means],  # Negative values to extend left
@@ -779,11 +825,14 @@ class DashVisualizations:
                         row=date_idx,
                         col=tube_idx,
                     )
-                    
-                    # Add tube bars (extending RIGHT from center)
-                    show_tube_legend = not tube_bar_added_to_legend and date_idx == 1 and tube_idx == 1
-                    tube_bar_added_to_legend = True
-                    
+                    # Mark the field-avg legend entry as emitted now that a real
+                    # trace carrying it has been added (F-011).
+                    field_avg_added_to_legend = True
+
+                    # Add tube bars (extending RIGHT from center). Same dedup
+                    # handling as the field bars above (F-011).
+                    show_tube_legend = not tube_bar_added_to_legend
+
                     fig.add_trace(
                         go.Bar(
                             x=tube_means,  # Positive values to extend right
@@ -805,13 +854,15 @@ class DashVisualizations:
                                 "Count: %{customdata[2]}<br>"
                                 "<extra></extra>"
                             ),
-                            customdata=[[tube_intervals[pos]["interval_start"], pos, tube_intervals[pos]["count"]] 
+                            customdata=[[tube_intervals[pos]["interval_start"], pos, tube_intervals[pos]["count"]]
                                       for pos in y_positions],
                         ),
                         row=date_idx,
                         col=tube_idx,
                     )
-            
+                    # Mark the tube legend entry as emitted (F-011).
+                    tube_bar_added_to_legend = True
+
             # Set y-axis range based on actual data
             y_max = global_max_depth + 10 if global_max_depth > 0 else 120
             
@@ -834,7 +885,7 @@ class DashVisualizations:
             
             # Update overall layout
             fig.update_layout(
-                title=dict[str, str | dict[str, int] | float](
+                title=dict(
                     text="Faceted Depth Profile - Field Average (Left) vs Individual Tube (Right)",
                     font=dict(size=28),
                     x=0.5,
@@ -978,9 +1029,7 @@ class DashVisualizations:
             return fig
             
         except Exception as e:
-            warnings.warn(f"Error generating faceted depth profile: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception("Error generating faceted depth profile")
             fig = go.Figure()
             fig.add_annotation(
                 text=f"Error: {str(e)}",
