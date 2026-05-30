@@ -26,9 +26,10 @@ from app.inference.root_area_inference_handler import calculate_root_area
 from app.gui.skeleton_graph_model import vectorize_skeleton, SkeletonCorrectionModel
 from app.data_processing.data_processor import DataProcessor
 
-# --- Golden constants captured from baseline (v3) ---
-LEN_PER_PX = 0.05178309721543722   # mm per skeleton pixel
-AREA_PER_PX = 0.000761718750         # mm^2 per root pixel (18/640 * 13/480)
+# --- Calibration (physical field of view). Metrics are now resolution-independent:
+# they map the FOV onto the *actual* image/mask shape. See R5 / metrics.py. ---
+FOV_W_MM = 18.0
+FOV_H_MM = 13.0
 
 
 def _row_skeleton(n_px, h=20, w=120):
@@ -37,27 +38,63 @@ def _row_skeleton(n_px, h=20, w=120):
     return sk
 
 
-# ---------------- Length ----------------
+# ---------------- Length (arc-length, R5 corrected) ----------------
 
-@pytest.mark.parametrize("n_px", [1, 10, 25, 100])
-def test_calculate_root_length_scales_with_pixel_count(n_px):
-    sk = _row_skeleton(n_px)
-    assert calculate_root_length(sk) == pytest.approx(n_px * LEN_PER_PX, rel=1e-9)
+@pytest.mark.parametrize("n_px", [2, 10, 25, 100])
+def test_horizontal_length_uses_x_pitch(n_px):
+    # A horizontal line of n_px pixels has n_px-1 orthogonal steps of pitch 18/W mm.
+    w = 120
+    sk = _row_skeleton(n_px, h=20, w=w)
+    assert calculate_root_length(sk) == pytest.approx((n_px - 1) * FOV_W_MM / w, rel=1e-9)
 
 
-def test_calculate_root_length_empty_is_zero():
+def test_length_empty_is_zero():
     assert calculate_root_length(np.zeros((10, 10), dtype=np.uint8)) == 0.0
 
 
-# ---------------- Area ----------------
+def test_diagonal_uses_euclidean_step_and_exceeds_orthogonal():
+    # Arc-length fix: a diagonal of N pixels costs (N-1) Euclidean diagonal steps,
+    # which is strictly more than the old raw pixel count would have given.
+    import math
+    n = 20
+    horiz = np.zeros((40, 40), dtype=np.uint8)
+    horiz[20, 0:n] = 255
+    diag = np.zeros((40, 40), dtype=np.uint8)
+    for i in range(n):
+        diag[i, i] = 255
+    lh = calculate_root_length(horiz)
+    ld = calculate_root_length(diag)
+    diag_step = math.hypot(FOV_W_MM / 40, FOV_H_MM / 40)
+    assert ld == pytest.approx((n - 1) * diag_step, rel=1e-9)
+    assert ld > lh  # diagonals cost more than orthogonal steps (the bug fixed)
+
+
+def test_length_resolution_invariant_full_width_line():
+    # A line spanning the full width is ~FOV width regardless of resolution (F-003).
+    for w in (320, 640, 1280):
+        sk = np.zeros((50, w), dtype=np.uint8)
+        sk[25, :] = 255
+        assert calculate_root_length(sk) == pytest.approx(FOV_W_MM * (w - 1) / w, rel=1e-9)
+
+
+# ---------------- Area (resolution-independent, R5 corrected F-002) ----------------
 
 @pytest.mark.parametrize("n_px", [1, 100, 200, 1000])
-def test_calculate_root_area_scales_with_pixel_count(n_px):
-    m = np.zeros((40, 40), dtype=np.uint8)
-    flat = m.ravel()
-    flat[:n_px] = 255
-    m = flat.reshape(40, 40)
-    assert calculate_root_area(m) == pytest.approx(n_px * AREA_PER_PX, rel=1e-9)
+def test_area_scales_with_pixel_count_at_fixed_resolution(n_px):
+    w = h = 40
+    m = np.zeros((h, w), dtype=np.uint8)
+    m.ravel()[:n_px] = 255
+    expected = n_px * (FOV_W_MM / w) * (FOV_H_MM / h)
+    assert calculate_root_area(m) == pytest.approx(expected, rel=1e-9)
+
+
+def test_area_resolution_invariant_full_mask():
+    # A fully-root mask always measures the whole FOV area, at ANY resolution.
+    # This is the core F-002 fix: previously a non-640x480 mask was wrong by the
+    # square of the resolution ratio.
+    for (h, w) in [(480, 640), (960, 1280), (240, 320)]:
+        m = np.full((h, w), 255, dtype=np.uint8)
+        assert calculate_root_area(m) == pytest.approx(FOV_W_MM * FOV_H_MM, rel=1e-9)
 
 
 # ---------------- Filename parsing ----------------

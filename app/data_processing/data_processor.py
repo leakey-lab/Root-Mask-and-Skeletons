@@ -1,54 +1,48 @@
 import pandas as pd
 
-class DataProcessor:
-    """Handles data loading and preprocessing."""
+
+class MetricDataProcessor:
+    """
+    Loads and prepares a root-metric CSV (length or area) for visualization.
+
+    The length and area pipelines previously had two near-identical processor
+    classes; they now share this base, parameterized only by the metric column.
+    """
+
+    #: name of the numeric metric column in the CSV (e.g. "Length (mm)")
+    value_column = "Length (mm)"
 
     def __init__(self, csv_path):
         self.csv_path = csv_path
         self.df = self._load_and_prepare_data()
 
     def _load_and_prepare_data(self):
-        """Load and preprocess data from CSV."""
         try:
             df = pd.read_csv(self.csv_path, encoding="latin-1")
-            # Convert Date to datetime
             df["Date"] = pd.to_datetime(df["Date"], format="%Y.%m.%d", errors="coerce")
-
-            # Convert numeric columns
             df["Tube"] = pd.to_numeric(df["Tube"], downcast="integer", errors="coerce")
-            df["Position"] = pd.to_numeric(
-                df["Position"], downcast="integer", errors="coerce"
+            df["Position"] = pd.to_numeric(df["Position"], downcast="integer", errors="coerce")
+            df[self.value_column] = pd.to_numeric(
+                df[self.value_column], downcast="float", errors="coerce"
             )
-            df["Length (mm)"] = pd.to_numeric(
-                df["Length (mm)"], downcast="float", errors="coerce"
-            )
-
-            # Drop rows with any NaN values
             df.dropna(inplace=True)
-
-            # Pre-compute identifiers
             df["tube_date"] = df.apply(
-                lambda x: f"Tube {int(x['Tube'])} ({x['Date'].strftime('%Y-%m-%d')})",
-                axis=1,
+                lambda x: f"Tube {int(x['Tube'])} ({x['Date'].strftime('%Y-%m-%d')})", axis=1
             )
             df["tube_position"] = df.apply(
                 lambda x: f"Tube {int(x['Tube'])}_L{int(x['Position'])}", axis=1
             )
-            
             return df
         except Exception:
             return pd.DataFrame()
 
     def get_unique_tubes(self):
-        """Return sorted unique tubes."""
         return sorted(self.df["Tube"].unique())
 
     def get_unique_dates(self):
-        """Return sorted unique dates."""
         return sorted(self.df["Date"].unique())
 
     def get_unique_positions(self):
-        """Return sorted unique positions."""
         return sorted(self.df["Position"].unique())
 
     def get_unique_treatments(self):
@@ -60,3 +54,9 @@ class DataProcessor:
         if "Genotype" in self.df.columns:
             return sorted(self.df["Genotype"].astype(str).unique())
         return []
+
+
+class DataProcessor(MetricDataProcessor):
+    """Root-length data processor."""
+
+    value_column = "Length (mm)"
