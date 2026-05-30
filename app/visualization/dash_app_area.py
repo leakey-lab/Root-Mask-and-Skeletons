@@ -1,3 +1,5 @@
+"""Dash application for root area visualization (F-014 hardened)."""
+import logging
 
 from dash import Dash, dcc, html, Input, Output
 import dash
@@ -6,32 +8,42 @@ import plotly.express as px
 import dash_bootstrap_components as dbc
 import pandas as pd
 
+from app.config import DASH_AREA_PORT
+
+logger = logging.getLogger(__name__)
+
+# Shared graph-container style to avoid duplication (F-087).
+_GRAPH_STYLE = {
+    "backgroundColor": "white",
+    "borderRadius": "8px",
+    "padding": "20px",
+    "boxShadow": "0 4px 8px rgba(0,0,0,0.15)",
+    "height": "800px",
+    "width": "100%",
+    "marginBottom": "20px",
+}
 
 
 class DashAppArea:
     """Manages the Dash application for root area visualization."""
 
     def __init__(self, data_processor, save_directory):
-        try:
-            self.data_processor = data_processor
-            self.save_directory = save_directory
-            
-            self.app = Dash(
-                __name__,
-                external_stylesheets=[dbc.themes.BOOTSTRAP],
-                suppress_callback_exceptions=True,
-                update_title=None,
-            )
-            
-            self._setup_layout()
-            self._setup_callbacks()
-        except Exception as e:
-            raise
+        self.data_processor = data_processor
+        self.save_directory = save_directory
+
+        self.app = Dash(
+            __name__,
+            external_stylesheets=[dbc.themes.BOOTSTRAP],
+            suppress_callback_exceptions=True,
+            update_title=None,
+        )
+
+        self._setup_layout()
+        self._setup_callbacks()
 
     def _setup_layout(self):
         """Define the Dash app layout."""
-        try:
-            self.app.layout = html.Div(
+        self.app.layout = html.Div(
             style={
                 "display": "flex",
                 "flexDirection": "column",
@@ -140,130 +152,92 @@ class DashAppArea:
                 ),
             ],
         )
-        except Exception as e:
-            raise
 
     def _setup_callbacks(self):
         """Define Dash callbacks."""
-        try:
-            @self.app.callback(
-                [
-                    Output("main-graph", "figure"),
-                    Output("click-data", "children"),
-                    Output("tube-selector", "style"),
-                    Output("tube-selector", "options"),
-                    Output("main-graph", "style"),
-                ],
-                [
-                    Input("view-selector", "value"),
-                    Input("tube-selector", "value"),
-                ],
-            )
-            def update_visualization(view_type, selected_tube):
-                ctx = dash.callback_context
-                if not ctx.triggered:
-                    # Initial load - show stacked view by default
+        @self.app.callback(
+            [
+                Output("main-graph", "figure"),
+                Output("click-data", "children"),
+                Output("tube-selector", "style"),
+                Output("tube-selector", "options"),
+                Output("main-graph", "style"),
+            ],
+            [
+                Input("view-selector", "value"),
+                Input("tube-selector", "value"),
+            ],
+        )
+        def update_visualization(view_type, selected_tube):
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                # Initial load - show stacked view by default
+                return (
+                    self.create_stacked_bar_chart(),
+                    "",
+                    {"display": "none"},
+                    [],
+                    dict(_GRAPH_STYLE, overflow="hidden"),
+                )
+
+            trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+            try:
+                if view_type == "stacked":
                     return (
                         self.create_stacked_bar_chart(),
                         "",
                         {"display": "none"},
                         [],
-                        {
-                            "backgroundColor": "white",
-                            "borderRadius": "8px",
-                            "padding": "20px",
-                            "boxShadow": "0 4px 8px rgba(0,0,0,0.15)",
-                            "height": "800px",
-                            "width": "100%",
-                            "marginBottom": "20px",
-                            "overflow": "hidden",
-                        },
+                        _GRAPH_STYLE,
                     )
 
-                trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+                elif view_type == "profile":
+                    tubes = self.data_processor.get_unique_tubes()
+                    tube_options = [
+                        {"label": f"Tube {tube}", "value": tube}
+                        for tube in tubes
+                    ]
 
-                try:
-                    if view_type == "stacked":
+                    if trigger_id == "view-selector":
+                        if not tubes:
+                            logger.warning("profile view: no tubes available")
+                            return dash.no_update
+                        first_tube = tubes[0]
                         return (
-                            self.create_stacked_bar_chart(),
+                            self.show_area_profile(first_tube),
                             "",
-                            {"display": "none"},
-                            [],
-                            {
-                                "backgroundColor": "white",
-                                "borderRadius": "8px",
-                                "padding": "20px",
-                                "boxShadow": "0 4px 8px rgba(0,0,0,0.15)",
-                                "height": "800px",
-                                "width": "100%",
-                                "marginBottom": "20px",
-                            },
+                            {"display": "block"},
+                            tube_options,
+                            _GRAPH_STYLE,
                         )
 
-                    elif view_type == "profile":
-                        tube_options = [
-                            {"label": f"Tube {tube}", "value": tube}
-                            for tube in self.data_processor.get_unique_tubes()
-                        ]
-
-                        if trigger_id == "view-selector":
-                            first_tube = self.data_processor.get_unique_tubes()[0]
-                            return (
-                                self.show_area_profile(first_tube),
-                                "",
-                                {"display": "block"},
-                                tube_options,
-                                {
-                                    "backgroundColor": "white",
-                                    "borderRadius": "8px",
-                                    "padding": "20px",
-                                    "boxShadow": "0 4px 8px rgba(0,0,0,0.15)",
-                                    "height": "800px",
-                                    "width": "100%",
-                                    "marginBottom": "20px",
-                                },
-                            )
-
-                        if trigger_id == "tube-selector" and selected_tube:
-                            return (
-                                self.show_area_profile(selected_tube),
-                                "",
-                                {"display": "block"},
-                                tube_options,
-                                {
-                                    "backgroundColor": "white",
-                                    "borderRadius": "8px",
-                                    "padding": "20px",
-                                    "boxShadow": "0 4px 8px rgba(0,0,0,0.15)",
-                                    "height": "800px",
-                                    "width": "100%",
-                                    "marginBottom": "20px",
-                                },
-                            )
-
-                    elif view_type == "time":
+                    if trigger_id == "tube-selector" and selected_tube:
                         return (
-                            self.show_growth_over_time(),
+                            self.show_area_profile(selected_tube),
                             "",
-                            {"display": "none"},
-                            [],
-                            {
-                                "backgroundColor": "white",
-                                "borderRadius": "8px",
-                                "padding": "20px",
-                                "boxShadow": "0 4px 8px rgba(0,0,0,0.15)",
-                                "height": "800px",
-                                "width": "100%",
-                                "marginBottom": "20px",
-                            },
+                            {"display": "block"},
+                            tube_options,
+                            _GRAPH_STYLE,
                         )
 
-                except Exception as e:
-                    return dash.no_update
+                elif view_type == "time":
+                    return (
+                        self.show_growth_over_time(),
+                        "",
+                        {"display": "none"},
+                        [],
+                        _GRAPH_STYLE,
+                    )
 
+            except (KeyError, IndexError, ValueError) as exc:
+                logger.error("update_visualization(%s): %s", view_type, exc, exc_info=True)
                 return dash.no_update
-        except Exception as e:
-            raise
+            except Exception as exc:  # noqa: BLE001 — last-resort guard
+                logger.exception("update_visualization(%s): unexpected error", view_type)
+                return dash.no_update
+
+            return dash.no_update
 
     def create_stacked_bar_chart(self):
         """Create a stacked bar chart showing root area by tube and date."""
@@ -368,7 +342,11 @@ class DashAppArea:
 
             return fig
 
-        except Exception:
+        except (KeyError, ValueError) as exc:
+            logger.error("create_stacked_bar_chart: %s", exc, exc_info=True)
+            return go.Figure()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("create_stacked_bar_chart: unexpected error")
             return go.Figure()
 
     def show_area_profile(self, selected_tube):
@@ -442,8 +420,10 @@ class DashAppArea:
                 autosize=True,
                 margin=dict(t=60, b=40, l=60, r=100),
             )
-        except Exception:
-            pass
+        except (KeyError, ValueError) as exc:
+            logger.error("show_area_profile(tube=%s): %s", selected_tube, exc, exc_info=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("show_area_profile(tube=%s): unexpected error", selected_tube)
 
         return fig
 
@@ -491,12 +471,18 @@ class DashAppArea:
                 legend=dict(font=dict(size=14)),
             )
             return fig
-        except Exception:
+        except (KeyError, ValueError) as exc:
+            logger.error("show_growth_over_time: %s", exc, exc_info=True)
+            return go.Figure()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("show_growth_over_time: unexpected error")
             return go.Figure()
 
     def run_server(self):
-        """Run the Dash server."""
+        """Run the Dash server (legacy entry point — use DashServerThreadArea in production)."""
         try:
-            self.app.run(debug=False, port=8051, threaded=True)
-        except Exception:
-            pass
+            self.app.run(debug=False, port=DASH_AREA_PORT, host="127.0.0.1", threaded=True)
+        except OSError as exc:
+            logger.error("run_server: port %d unavailable: %s", DASH_AREA_PORT, exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("run_server: unexpected error")
