@@ -25,3 +25,13 @@ dist/
 .pytest_cache/
 .cursorignore
 /field docs ex/
+
+# Claude Code session + tooling artifacts
+.claude/
+.workflow-*.js
+graphify-out/
+_capture_golden.py
+code_review_graph/.extract.json
+code_review_graph/.analysis.json
+code_review_graph/.labels.json
+.graphify_*
