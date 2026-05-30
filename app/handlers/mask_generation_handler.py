@@ -1,14 +1,18 @@
-from PyQt6.QtWidgets import QMessageBox
-from PyQt6.QtCore import QThread, pyqtSignal
+import logging
+import os
+
+import numpy as np
 import torch
 import torch.utils.data as data
 import torchvision.transforms as transforms
-from PIL import Image
-import os
-import sys
-import numpy as np
+from PIL import Image, UnidentifiedImageError
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import QMessageBox
+
+from app.config import MASK_BATCH_SIZE, MASK_THRESHOLD, MASK_WEIGHTS_PATH
 from app.mask_model.model import ResNetSkeleton
-from resources.resource_utils import get_resource_path
+
+logger = logging.getLogger(__name__)
 
 
 class ImageDataset(data.Dataset):
@@ -29,7 +33,12 @@ class ImageDataset(data.Dataset):
     def __getitem__(self, idx):
         filename = self.image_files[idx]
         image_path = os.path.join(self.image_dir, filename)
-        image = Image.open(image_path).convert("RGB")
+        try:
+            image = Image.open(image_path).convert("RGB")
+        except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
+            logger.warning("Skipping unreadable image %s: %s", image_path, exc)
+            # Return a blank RGB image so the DataLoader batch dimension stays consistent.
+            image = Image.new("RGB", (640, 480), color=0)
 
         if self.transform:
             image = self.transform(image)
@@ -62,32 +71,30 @@ class MaskGenerationThread(QThread):
                 ]
             )
 
-            # Create dataset and dataloader
+            # Create dataset and dataloader.
+            # num_workers > 0 deadlocks inside a QThread on Windows (F-022); use 0.
             dataset = ImageDataset(self.input_dir, transform=transform)
             total_images = len(dataset)
 
-            # Optimal batch size and num_workers for GPU utilization
-            # Adjust batch_size based on GPU memory (8-16 is good for most GPUs)
-            batch_size = 16
-            num_workers = min(8, os.cpu_count() or 4)  # Use up to 8 CPU cores
-
             dataloader = data.DataLoader(
                 dataset,
-                batch_size=batch_size,
+                batch_size=MASK_BATCH_SIZE,
                 shuffle=False,
-                num_workers=num_workers,
-                pin_memory=True if self.device.type == "cuda" else False,
-                prefetch_factor=2 if num_workers > 0 else None,
-                persistent_workers=True if num_workers > 0 else False,
+                num_workers=0,
+                pin_memory=(self.device.type == "cuda"),
             )
 
+            failed_images: list[str] = []
             processed_count = 0
 
-            # Process images in batches
-            with torch.no_grad():
+            # Ensure the model is in eval mode for inference (F-022 / ML correctness).
+            self.model.eval()
+
+            # Use inference_mode for maximum performance — no grad tape overhead (F-022).
+            with torch.inference_mode():
                 for batch_images, batch_filenames in dataloader:
                     try:
-                        # Move batch to GPU
+                        # Move batch to device
                         batch_images = batch_images.to(self.device)
 
                         # Generate masks for entire batch
@@ -95,34 +102,62 @@ class MaskGenerationThread(QThread):
 
                         # Process each mask in the batch
                         for mask, filename in zip(batch_masks, batch_filenames):
-                            # Convert to numpy and threshold
+                            # Convert to numpy and threshold using config constant (F-005 / config).
                             mask_np = mask.squeeze().cpu().numpy()
+                            binary_mask = (mask_np > MASK_THRESHOLD).astype(np.uint8) * 255
 
-                            # Properly binarize the mask using a threshold
-                            binary_mask = (mask_np > 0.5).astype(np.uint8) * 255
-
-                            # Convert to PIL Image
+                            # Convert to PIL Image and save
                             mask_pil = Image.fromarray(binary_mask, mode="L")
-
-                            # Save binary mask
                             output_path = os.path.join(
                                 self.output_dir, os.path.splitext(filename)[0] + ".png"
                             )
-                            mask_pil.save(output_path, "PNG")
+                            try:
+                                mask_pil.save(output_path, "PNG")
+                            except OSError as save_exc:
+                                logger.error(
+                                    "Failed to save mask for %s: %s", filename, save_exc
+                                )
+                                failed_images.append(filename)
+                                continue
 
                             processed_count += 1
-
-                            # Update progress after each image for better granularity
                             progress = int((processed_count / total_images) * 100)
                             self.progress.emit(progress)
 
-                    except Exception:
+                    except (RuntimeError, torch.cuda.OutOfMemoryError) as batch_exc:
+                        # Narrow per-batch except: log the failure, collect names, continue
+                        # with the remaining batches rather than silently swallowing (F-021).
+                        names = list(batch_filenames)
+                        logger.error(
+                            "Batch processing failed for images %s: %s", names, batch_exc
+                        )
+                        failed_images.extend(names)
+                        # Free GPU memory before next batch when on CUDA (F-022).
+                        if self.device.type == "cuda":
+                            torch.cuda.empty_cache()
                         continue
 
-            self.finished.emit(self.output_dir)
+                    finally:
+                        # Free GPU memory between every batch boundary (F-022).
+                        if self.device.type == "cuda":
+                            torch.cuda.empty_cache()
 
-        except Exception as e:
-            self.error.emit(str(e))
+            if failed_images:
+                logger.warning(
+                    "Mask generation completed with %d failed image(s): %s",
+                    len(failed_images),
+                    failed_images,
+                )
+                # Encode failures in the signal payload so the UI can surface them (F-021).
+                self.finished.emit(
+                    f"{self.output_dir}|FAILURES:{','.join(failed_images)}"
+                )
+            else:
+                self.finished.emit(self.output_dir)
+
+        except Exception as exc:  # noqa: BLE001 — thread boundary; must not propagate
+            logger.exception("Mask generation thread encountered an unexpected error")
+            self.error.emit(str(exc))
 
 
 class MaskGenerationHandler:
@@ -136,21 +171,35 @@ class MaskGenerationHandler:
         self._initialize_model()
 
     def _initialize_model(self):
-        try:
-            weights_path = get_resource_path(
-                os.path.join("checkpoints", "mask_weights", "best_mask_model_V5.pth")
-            )
+        # Use the centralised config path — no CWD dependency (F-005 / config adoption).
+        weights_path = MASK_WEIGHTS_PATH
 
-            if os.path.exists(weights_path):
-                self.model = ResNetSkeleton(num_classes=1, pretrained=False)
-                self.model.load_state_dict(
-                    torch.load(weights_path, map_location=self.device)
-                )
-                self.model = self.model.to(self.device)
-                self.model.eval()
-            else:
-                self.model = None
-        except Exception:
+        if not os.path.exists(weights_path):
+            logger.warning(
+                "Mask weights not found at %s; mask generation will be unavailable.",
+                weights_path,
+            )
+            self.model = None
+            return
+
+        try:
+            self.model = ResNetSkeleton(num_classes=1, pretrained=False)
+            # weights_only=True prevents arbitrary code execution via pickle (F-023 / SS-01).
+            state_dict = torch.load(
+                weights_path, map_location=self.device, weights_only=True
+            )
+            self.model.load_state_dict(state_dict)
+            # Move the model to its device once at load time; never reload per call (F-022).
+            self.model = self.model.to(self.device)
+            self.model.eval()
+            logger.info(
+                "Mask model loaded from %s on device %s", weights_path, self.device
+            )
+        except (RuntimeError, OSError, ValueError) as exc:
+            # Log the specific exception so the init failure is visible (F-102).
+            logger.exception(
+                "Failed to load mask model weights from %s: %s", weights_path, exc
+            )
             self.model = None
 
     def generate_masks(self):
@@ -172,11 +221,16 @@ class MaskGenerationHandler:
             return
 
         try:
-            # Get input directory and create output directory
-            first_image_path = next(
-                iter(self.main_window.image_manager.images.values())
-            )
-            input_dir = os.path.dirname(first_image_path)
+            # Prefer image_manager.original_folder over inferring from the first image path
+            # (mitigates F-068: mask input dir should not depend on iteration order).
+            if getattr(self.main_window.image_manager, "original_folder", None):
+                input_dir = self.main_window.image_manager.original_folder
+            else:
+                first_image_path = next(
+                    iter(self.main_window.image_manager.images.values())
+                )
+                input_dir = os.path.dirname(first_image_path)
+
             output_dir = os.path.join(input_dir, "mask")
             os.makedirs(output_dir, exist_ok=True)
 
@@ -198,9 +252,10 @@ class MaskGenerationHandler:
             # Show status message
             self.main_window.status_bar.showMessage("Generating masks...")
 
-        except Exception as e:
+        except (OSError, StopIteration) as exc:
+            logger.exception("Error starting mask generation")
             QMessageBox.critical(
-                self.main_window, "Error", f"Error starting mask generation: {str(e)}"
+                self.main_window, "Error", f"Error starting mask generation: {exc}"
             )
 
     def update_progress(self, value):
@@ -208,23 +263,38 @@ class MaskGenerationHandler:
         self.main_window.loading_progress_bar.setValue(value)
         self.main_window.status_bar.showMessage(f"Generating masks... {value}%")
 
-    def on_generation_finished(self, output_dir):
+    def on_generation_finished(self, result):
         """Handle completion of mask generation"""
-        # Hide the progress bar
         self.main_window.loading_progress_bar.hide()
 
-        self.main_window.status_bar.showMessage("Mask generation completed", 5000)
-        QMessageBox.information(
-            self.main_window,
-            "Success",
-            f"Masks generated successfully and saved to:\n{output_dir}",
-        )
+        # Decode the failure list that the thread may have embedded in the payload (F-021).
+        if "|FAILURES:" in result:
+            output_dir, failures_part = result.split("|FAILURES:", 1)
+            failed = [f for f in failures_part.split(",") if f]
+            self.main_window.status_bar.showMessage(
+                f"Mask generation completed with {len(failed)} failure(s)", 5000
+            )
+            QMessageBox.warning(
+                self.main_window,
+                "Partial Success",
+                f"Masks saved to:\n{output_dir}\n\n"
+                f"{len(failed)} image(s) could not be processed:\n"
+                + "\n".join(failed[:20])
+                + ("\n…" if len(failed) > 20 else ""),
+            )
+        else:
+            self.main_window.status_bar.showMessage("Mask generation completed", 5000)
+            QMessageBox.information(
+                self.main_window,
+                "Success",
+                f"Masks generated successfully and saved to:\n{result}",
+            )
 
     def on_generation_error(self, error_message):
         """Handle error during mask generation"""
-        # Hide the progress bar
         self.main_window.loading_progress_bar.hide()
 
+        logger.error("Mask generation error: %s", error_message)
         self.main_window.status_bar.showMessage("Error during mask generation", 5000)
         QMessageBox.critical(
             self.main_window, "Error", f"Error during mask generation: {error_message}"

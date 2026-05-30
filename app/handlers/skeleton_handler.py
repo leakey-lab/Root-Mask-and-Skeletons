@@ -1,16 +1,25 @@
-from PyQt6.QtWidgets import QMessageBox
-from .generate_skeleton_handler import GenerateSkeletonHandler
-from app.inference.root_length_inference_handler import RootLengthCalculatorThread
-from app.inference.root_area_inference_handler import RootAreaCalculatorThread
+import logging
 import os
+
+from PyQt6.QtWidgets import QMessageBox
+
+from .generate_skeleton_handler import GenerateSkeletonHandler
+from app.inference.root_area_inference_handler import RootAreaCalculatorThread
+from app.inference.root_length_inference_handler import RootLengthCalculatorThread
+
+logger = logging.getLogger(__name__)
 
 
 class SkeletonHandler:
     def __init__(self, main_window):
         self.main_window = main_window
         self.skeleton_handler = GenerateSkeletonHandler(self.main_window)
-        self.calculator_thread = None
-        self.area_calculator_thread = None
+        # Keep strong references to calculator threads so they are not GC'd
+        # before they finish (F-024: overwriting the ref before previous thread
+        # finishes causes a thread leak — the new ref at least keeps the current
+        # thread alive until replaced or finished).
+        self.calculator_thread: RootLengthCalculatorThread | None = None
+        self.area_calculator_thread: RootAreaCalculatorThread | None = None
 
     def generate_skeleton(self):
         self.skeleton_handler.generate_skeleton()
@@ -59,12 +68,21 @@ class SkeletonHandler:
             )
             return
 
-        # Collect ALL fake images
-        fake_images = {}
-        for filename in os.listdir(output_dir):
-            if filename.endswith("_fake.png"):
-                base_name = filename.replace("_fake.png", "")
-                fake_images[base_name] = os.path.join(output_dir, filename)
+        # Collect ALL fake images; handle listing errors gracefully.
+        fake_images: dict[str, str] = {}
+        try:
+            for filename in os.listdir(output_dir):
+                if filename.endswith("_fake.png"):
+                    base_name = filename.replace("_fake.png", "")
+                    fake_images[base_name] = os.path.join(output_dir, filename)
+        except OSError as exc:
+            logger.exception("Cannot list skeleton directory %s", output_dir)
+            QMessageBox.critical(
+                self.main_window,
+                "Error",
+                f"Cannot read skeleton directory:\n{output_dir}\n\n{exc}",
+            )
+            return
 
         if not fake_images:
             QMessageBox.warning(
@@ -132,12 +150,21 @@ class SkeletonHandler:
             )
             return
 
-        # Collect ALL mask images
-        mask_images = {}
-        for filename in os.listdir(masks_dir):
-            if filename.lower().endswith(".png"):
-                base_name = os.path.splitext(filename)[0]
-                mask_images[base_name] = os.path.join(masks_dir, filename)
+        # Collect ALL mask images; handle listing errors gracefully.
+        mask_images: dict[str, str] = {}
+        try:
+            for filename in os.listdir(masks_dir):
+                if filename.lower().endswith(".png"):
+                    base_name = os.path.splitext(filename)[0]
+                    mask_images[base_name] = os.path.join(masks_dir, filename)
+        except OSError as exc:
+            logger.exception("Cannot list mask directory %s", masks_dir)
+            QMessageBox.critical(
+                self.main_window,
+                "Error",
+                f"Cannot read mask directory:\n{masks_dir}\n\n{exc}",
+            )
+            return
 
         if not mask_images:
             QMessageBox.warning(
