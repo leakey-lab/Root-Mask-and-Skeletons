@@ -26,6 +26,19 @@ class SkeletonHandler:
 
     def calculate_root_length(self):
         """Calculate root length for all skeleton images in the output directory."""
+        # Guard against re-entry: a second click would orphan the running QThread
+        # (the F-024 strong-ref only keeps ONE alive, it does not prevent overlap).
+        if (
+            self.calculator_thread is not None
+            and self.calculator_thread.isRunning()
+        ):
+            QMessageBox.information(
+                self.main_window,
+                "In Progress",
+                "Calculation already in progress",
+            )
+            return
+
         # First find the base folder
         if self.main_window.image_manager.original_folder:
             base_folder = self.main_window.image_manager.original_folder
@@ -73,7 +86,7 @@ class SkeletonHandler:
         try:
             for filename in os.listdir(output_dir):
                 if filename.endswith("_fake.png"):
-                    base_name = filename.replace("_fake.png", "")
+                    base_name = filename[:-len("_fake.png")]
                     fake_images[base_name] = os.path.join(output_dir, filename)
         except OSError as exc:
             logger.exception("Cannot list skeleton directory %s", output_dir)
@@ -103,6 +116,7 @@ class SkeletonHandler:
         self.main_window.status_bar.showMessage("Calculating root lengths...")
 
     def on_calculation_finished(self, csv_path):
+        self.calculator_thread = None
         self.main_window.status_bar.showMessage(
             "Root length calculation completed.", 5000
         )
@@ -115,6 +129,19 @@ class SkeletonHandler:
 
     def calculate_root_area(self):
         """Calculate root area for all mask images in the masks directory."""
+        # Guard against re-entry: a second click would orphan the running QThread
+        # (the F-024 strong-ref only keeps ONE alive, it does not prevent overlap).
+        if (
+            self.area_calculator_thread is not None
+            and self.area_calculator_thread.isRunning()
+        ):
+            QMessageBox.information(
+                self.main_window,
+                "In Progress",
+                "Calculation already in progress",
+            )
+            return
+
         # First find the base folder
         if self.main_window.image_manager.original_folder:
             base_folder = self.main_window.image_manager.original_folder
@@ -183,6 +210,7 @@ class SkeletonHandler:
         self.main_window.status_bar.showMessage("Calculating root areas...")
 
     def on_area_calculation_finished(self, csv_path):
+        self.area_calculator_thread = None
         self.main_window.status_bar.showMessage(
             "Root area calculation completed.", 5000
         )

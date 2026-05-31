@@ -36,6 +36,7 @@ class DashAppArea:
             external_stylesheets=[dbc.themes.BOOTSTRAP],
             suppress_callback_exceptions=True,
             update_title=None,
+            compress=True,
         )
 
         self._setup_layout()
@@ -255,14 +256,16 @@ class DashAppArea:
             tubes = sorted(grouped["Tube"].unique())
             traces = []
 
+            # Pivot once (tube x date) to avoid O(dates*tubes) per-cell filtering.
+            pivot = (
+                grouped.pivot(index="Tube", columns="Date", values="Area (mm²)")
+                .reindex(index=tubes)
+                .fillna(0)
+            )
+
             # Create a bar trace for each date
             for date in dates:
-                date_data = grouped[grouped["Date"] == date]
-                trace_data = []
-
-                for tube in tubes:
-                    value = date_data[date_data["Tube"] == tube]["Area (mm²)"].values
-                    trace_data.append(value[0] if len(value) > 0 else 0)
+                trace_data = pivot[date].to_numpy()
 
                 traces.append(
                     go.Bar(

@@ -10,6 +10,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QMessageBox
 
 from app.config import MASK_BATCH_SIZE, MASK_THRESHOLD, MASK_WEIGHTS_PATH
+from app.inference import runtime
 from app.mask_model.model import ResNetSkeleton
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class ImageDataset(data.Dataset):
 
 class MaskGenerationThread(QThread):
     progress = pyqtSignal(int)
-    finished = pyqtSignal(str)
+    finished = pyqtSignal(str, list)
     error = pyqtSignal(str)
 
     def __init__(self, input_dir, output_dir, model, device):
@@ -57,6 +58,7 @@ class MaskGenerationThread(QThread):
         self.output_dir = output_dir
         self.model = model
         self.device = device
+        self.rt = runtime.get_runtime()
 
     def run(self):
         try:
@@ -86,16 +88,21 @@ class MaskGenerationThread(QThread):
 
             failed_images: list[str] = []
             processed_count = 0
+            last_emitted_pct = -1
 
             # Ensure the model is in eval mode for inference (F-022 / ML correctness).
             self.model.eval()
 
             # Use inference_mode for maximum performance — no grad tape overhead (F-022).
-            with torch.inference_mode():
+            with torch.inference_mode(), self.rt.autocast():
                 for batch_images, batch_filenames in dataloader:
                     try:
                         # Move batch to device
                         batch_images = batch_images.to(self.device)
+                        if self.rt.use_channels_last and self.device.type == "cuda":
+                            batch_images = batch_images.contiguous(
+                                memory_format=torch.channels_last
+                            )
 
                         # Generate masks for entire batch
                         batch_masks = self.model(batch_images)
@@ -122,7 +129,11 @@ class MaskGenerationThread(QThread):
 
                             processed_count += 1
                             progress = int((processed_count / total_images) * 100)
-                            self.progress.emit(progress)
+                            # Emit only when the integer percent changes to avoid flooding
+                            # the Qt event loop with duplicate cross-thread signals (perf).
+                            if progress != last_emitted_pct:
+                                last_emitted_pct = progress
+                                self.progress.emit(progress)
 
                     except (RuntimeError, torch.cuda.OutOfMemoryError) as batch_exc:
                         # Narrow per-batch except: log the failure, collect names, continue
@@ -137,23 +148,15 @@ class MaskGenerationThread(QThread):
                             torch.cuda.empty_cache()
                         continue
 
-                    finally:
-                        # Free GPU memory between every batch boundary (F-022).
-                        if self.device.type == "cuda":
-                            torch.cuda.empty_cache()
-
             if failed_images:
                 logger.warning(
                     "Mask generation completed with %d failed image(s): %s",
                     len(failed_images),
                     failed_images,
                 )
-                # Encode failures in the signal payload so the UI can surface them (F-021).
-                self.finished.emit(
-                    f"{self.output_dir}|FAILURES:{','.join(failed_images)}"
-                )
-            else:
-                self.finished.emit(self.output_dir)
+            # Emit the failure list as a structured payload so filenames containing
+            # commas or special tokens cannot corrupt the decode (correctness).
+            self.finished.emit(self.output_dir, failed_images)
 
         except Exception as exc:  # noqa: BLE001 — thread boundary; must not propagate
             logger.exception("Mask generation thread encountered an unexpected error")
@@ -192,6 +195,9 @@ class MaskGenerationHandler:
             # Move the model to its device once at load time; never reload per call (F-022).
             self.model = self.model.to(self.device)
             self.model.eval()
+            rt = runtime.get_runtime()
+            if rt.use_channels_last and self.device.type == "cuda":
+                self.model = self.model.to(memory_format=torch.channels_last)
             logger.info(
                 "Mask model loaded from %s on device %s", weights_path, self.device
             )
@@ -217,6 +223,14 @@ class MaskGenerationHandler:
                 self.main_window,
                 "Warning",
                 "No images loaded. Please load images first.",
+            )
+            return
+
+        # Guard against re-entry: a second click would orphan the running QThread and
+        # interleave writes to the same mask dir (bug).
+        if self.generation_thread is not None and self.generation_thread.isRunning():
+            self.main_window.status_bar.showMessage(
+                "Mask generation already in progress...", 5000
             )
             return
 
@@ -263,14 +277,12 @@ class MaskGenerationHandler:
         self.main_window.loading_progress_bar.setValue(value)
         self.main_window.status_bar.showMessage(f"Generating masks... {value}%")
 
-    def on_generation_finished(self, result):
+    def on_generation_finished(self, output_dir, failed):
         """Handle completion of mask generation"""
         self.main_window.loading_progress_bar.hide()
 
-        # Decode the failure list that the thread may have embedded in the payload (F-021).
-        if "|FAILURES:" in result:
-            output_dir, failures_part = result.split("|FAILURES:", 1)
-            failed = [f for f in failures_part.split(",") if f]
+        # The thread now delivers the failure list as a structured argument (F-021).
+        if failed:
             self.main_window.status_bar.showMessage(
                 f"Mask generation completed with {len(failed)} failure(s)", 5000
             )
@@ -287,7 +299,7 @@ class MaskGenerationHandler:
             QMessageBox.information(
                 self.main_window,
                 "Success",
-                f"Masks generated successfully and saved to:\n{result}",
+                f"Masks generated successfully and saved to:\n{output_dir}",
             )
 
     def on_generation_error(self, error_message):

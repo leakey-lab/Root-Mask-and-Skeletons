@@ -52,7 +52,7 @@ class DualAttention(nn.Module):
 
 
 class ResNetSkeleton(nn.Module):
-    def __init__(self, num_classes=1, pretrained=True):
+    def __init__(self, num_classes=1, pretrained=False):
         super(ResNetSkeleton, self).__init__()
 
         resnet = models.resnet18(

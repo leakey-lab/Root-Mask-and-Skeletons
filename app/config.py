@@ -66,5 +66,5 @@ MASK_THRESHOLD = 0.5  # sigmoid threshold for binarizing the mask model output
 # --- Output filenames / CSV schema -----------------------------------------
 ROOT_LENGTHS_CSV = "root_lengths.csv"
 ROOT_AREAS_CSV = "root_areas.csv"
-LENGTH_CSV_HEADERS = ["Image", "Tube", "Position", "Date", "Time", "Length (mm)"]
-AREA_CSV_HEADERS = ["Image", "Tube", "Position", "Date", "Time", "Area (mm²)"]
+LENGTH_CSV_HEADERS = ["Image", "Tube", "Position", "Date", "Time", "Length (mm)", "Error"]
+AREA_CSV_HEADERS = ["Image", "Tube", "Position", "Date", "Time", "Area (mm²)", "Error"]

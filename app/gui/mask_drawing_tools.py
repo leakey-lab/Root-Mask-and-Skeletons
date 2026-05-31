@@ -168,8 +168,9 @@ class MaskDrawingMixin:
             arr.data, width, height, width * 4, QImage.Format.Format_RGBA8888
         )
 
-        # Save for undo and update the mask pixmap
-        self.save_for_undo()
+        # Update the mask pixmap. The undo snapshot is taken by the caller
+        # (mask_graphics_view.mousePressEvent) before dispatching to flood_fill,
+        # so we must NOT save again here or a single fill would cost two undos.
         self.mask_pixmap = QPixmap.fromImage(result_image.copy())
         self.update_display()
 

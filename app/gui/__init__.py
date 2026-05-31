@@ -3,45 +3,13 @@ GUI Components Package
 
 This package contains all GUI-related components for the Root Viewer application.
 Key classes are re-exported here for backward compatibility.
+
+Re-exports are resolved lazily via PEP 562 ``__getattr__`` (see ``_lazy.py``) so
+that importing ``app.gui`` does not eagerly drag in the heavy dependency stack
+(cv2/scipy/skimage/dash/plotly/pandas) at cold start. ``main.py`` imports
+``app.gui.main_window`` directly, so that path is unaffected.
 """
 
-# Main window and core components
-from .main_window import MainWindow
-from .display_controller import DisplayController, MagnifyingGraphicsView
-from .image_manager import ImageManager, ImageLoaderThread
-
-# Mask tracing components
-from .mask_tracing_interface import MaskTracingInterface
-from .mask_graphics_view import MaskTracingGraphicsView
-from .mask_drawing_tools import MaskDrawingMixin
-from .mask_cursor_utils import create_brush_cursor, create_panning_cursor
-
-# Image normalization
-from .image_normalization_interface import ImageNormalization, NormalizationControls
-
-# UI panel helpers
-from . import ui_panels
-from . import file_tree_manager
-from . import visualization_manager
-
-__all__ = [
-    # Main components
-    'MainWindow',
-    'DisplayController',
-    'MagnifyingGraphicsView',
-    'ImageManager',
-    'ImageLoaderThread',
-    # Mask tracing
-    'MaskTracingInterface',
-    'MaskTracingGraphicsView',
-    'MaskDrawingMixin',
-    'create_brush_cursor',
-    'create_panning_cursor',
-    # Image normalization
-    'ImageNormalization',
-    'NormalizationControls',
-    # Modules
-    'ui_panels',
-    'file_tree_manager',
-    'visualization_manager',
-]
+# PEP 562 lazy attribute access. ``__all__`` is preserved for dir()/autocomplete
+# and ``from app.gui import *`` semantics.
+from ._lazy import __all__, __dir__, __getattr__  # noqa: F401

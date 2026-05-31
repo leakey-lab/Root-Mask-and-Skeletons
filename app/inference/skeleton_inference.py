@@ -206,11 +206,17 @@ def get_norm_layer(norm_type="instance"):
 
 
 def move_net_to_device(net, gpu_ids=[]):
-    """Move network to GPU without initializing weights (for loading from checkpoint)."""
+    """Move network to GPU without initializing weights (for loading from checkpoint).
+
+    DataParallel is only used for genuine multi-GPU runs; on a single GPU it is
+    pure scatter/gather overhead (and forces ``.module`` unwrap branches), so we
+    do a plain ``net.to(device)`` instead.
+    """
     if len(gpu_ids) > 0:
         assert torch.cuda.is_available()
         net.to(gpu_ids[0])
-        net = torch.nn.DataParallel(net, gpu_ids)
+        if len(gpu_ids) > 1:
+            net = torch.nn.DataParallel(net, gpu_ids)
     return net
 
 
@@ -519,8 +525,15 @@ class SkeletonModel:
 
     def run(self, input_tensor):
         """Run inference on input tensor."""
-        input_tensor = input_tensor.to(self.device)
-        with torch.inference_mode():
+        from app.inference import runtime
+
+        rt = runtime.get_runtime()
+        # non_blocking pairs with the DataLoader's pinned host memory to overlap
+        # the H2D copy with compute (forward provides the sync point).
+        input_tensor = input_tensor.to(self.device, non_blocking=True)
+        if rt.use_channels_last and self.device.type == "cuda":
+            input_tensor = input_tensor.contiguous(memory_format=torch.channels_last)
+        with torch.inference_mode(), rt.autocast():
             output = self.netG(input_tensor)
         return output
 
@@ -534,8 +547,15 @@ class SkeletonModel:
         Returns:
             Batch of output tensors
         """
-        input_batch = input_batch.to(self.device)
-        with torch.inference_mode():
+        from app.inference import runtime
+
+        rt = runtime.get_runtime()
+        # non_blocking pairs with the DataLoader's pinned host memory to overlap
+        # the H2D copy with compute (forward provides the sync point).
+        input_batch = input_batch.to(self.device, non_blocking=True)
+        if rt.use_channels_last and self.device.type == "cuda":
+            input_batch = input_batch.contiguous(memory_format=torch.channels_last)
+        with torch.inference_mode(), rt.autocast():
             output_batch = self.netG(input_batch)
         return output_batch
 
@@ -564,20 +584,19 @@ def run_inference(
     if batch_size is None:
         batch_size = SKELETON_BATCH_SIZE
 
-    # Setup GPU
-    gpu_ids = []
-    if torch.cuda.is_available():
-        gpu_ids = [0]
-        logger.debug("Using CUDA")
-    else:
-        logger.debug("Using CPU")
-
     # Create output directory structure - save directly to skeletons folder
     images_dir = output_dir
     os.makedirs(images_dir, exist_ok=True)
 
-    # Load model
-    model = SkeletonModel(gpu_ids=gpu_ids)
+    # Load model -- cached singleton (build + checkpoint load happen once per
+    # process via runtime.get_skeleton_model). get_runtime() also enables
+    # cudnn.benchmark, and warmup() amortizes cuDNN autotune + first-kernel JIT
+    # for the fixed 256x256 input off the user's first batch.
+    from app.inference import runtime
+
+    rt = runtime.get_runtime()
+    model = runtime.get_skeleton_model(rt.device)
+    runtime.warmup(model)
 
     # Get image paths
     image_paths = make_dataset(input_dir)
@@ -631,9 +650,10 @@ def run_inference(
             if progress_callback:
                 progress_callback(processed_count, total_images)
 
-        # Explicitly free GPU tensors after each batch to avoid accumulation
+        # Drop the reference so the caching allocator can reuse the buffer for
+        # the next (fixed-size) batch. No per-batch empty_cache(): forcing
+        # cudaFree/cudaMalloc every batch defeats the caching allocator and adds
+        # a GPU stall with no output change.
         del output_batch
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     return images_dir

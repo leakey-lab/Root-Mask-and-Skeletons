@@ -15,6 +15,25 @@ class MetricDataProcessor:
     def __init__(self, csv_path):
         self.csv_path = csv_path
         self.df = self._load_and_prepare_data()
+        self._compute_unique_caches()
+
+    def _compute_unique_caches(self):
+        """Compute the sorted unique lookups once instead of on every accessor call."""
+        self._unique_tubes = sorted(self.df["Tube"].unique()) if "Tube" in self.df.columns else []
+        self._unique_dates = sorted(self.df["Date"].unique()) if "Date" in self.df.columns else []
+        self._unique_positions = (
+            sorted(self.df["Position"].unique()) if "Position" in self.df.columns else []
+        )
+        self._unique_treatments = (
+            sorted(self.df["Treatment"].astype(str).unique())
+            if "Treatment" in self.df.columns
+            else []
+        )
+        self._unique_genotypes = (
+            sorted(self.df["Genotype"].astype(str).unique())
+            if "Genotype" in self.df.columns
+            else []
+        )
 
     def _load_and_prepare_data(self):
         try:
@@ -23,37 +42,33 @@ class MetricDataProcessor:
             df["Tube"] = pd.to_numeric(df["Tube"], downcast="integer", errors="coerce")
             df["Position"] = pd.to_numeric(df["Position"], downcast="integer", errors="coerce")
             df[self.value_column] = pd.to_numeric(
-                df[self.value_column], downcast="float", errors="coerce"
-            )
-            df.dropna(inplace=True)
-            df["tube_date"] = df.apply(
-                lambda x: f"Tube {int(x['Tube'])} ({x['Date'].strftime('%Y-%m-%d')})", axis=1
-            )
-            df["tube_position"] = df.apply(
-                lambda x: f"Tube {int(x['Tube'])}_L{int(x['Position'])}", axis=1
+                df[self.value_column], errors="coerce"
+            ).astype("float64")
+            df.dropna(subset=["Date", "Tube", "Position", self.value_column], inplace=True)
+            date_str = df["Date"].dt.strftime("%Y-%m-%d")
+            tube = df["Tube"].astype("int64").astype(str)
+            df["tube_date"] = "Tube " + tube + " (" + date_str + ")"
+            df["tube_position"] = (
+                "Tube " + tube + "_L" + df["Position"].astype("int64").astype(str)
             )
             return df
         except Exception:
             return pd.DataFrame()
 
     def get_unique_tubes(self):
-        return sorted(self.df["Tube"].unique())
+        return self._unique_tubes
 
     def get_unique_dates(self):
-        return sorted(self.df["Date"].unique())
+        return self._unique_dates
 
     def get_unique_positions(self):
-        return sorted(self.df["Position"].unique())
+        return self._unique_positions
 
     def get_unique_treatments(self):
-        if "Treatment" in self.df.columns:
-            return sorted(self.df["Treatment"].astype(str).unique())
-        return []
+        return self._unique_treatments
 
     def get_unique_genotypes(self):
-        if "Genotype" in self.df.columns:
-            return sorted(self.df["Genotype"].astype(str).unique())
-        return []
+        return self._unique_genotypes
 
 
 class DataProcessor(MetricDataProcessor):

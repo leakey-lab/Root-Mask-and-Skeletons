@@ -1,11 +1,13 @@
 from PyQt6.QtWidgets import QMessageBox
-from app.gui.mask_tracing_interface import MaskTracingInterface
 
 
 class MaskHandler:
     def __init__(self, main_window):
         self.main_window = main_window
-        self.mask_tracing_interface = MaskTracingInterface()
+
+    @property
+    def mask_tracing_interface(self):
+        return self.main_window.mask_tracing_interface
 
     def show_mask_tracing_interface(self):
         self.main_window.right_panel.setCurrentWidget(self.mask_tracing_interface)
