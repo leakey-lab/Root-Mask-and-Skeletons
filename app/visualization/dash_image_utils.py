@@ -2,10 +2,12 @@
 Image utilities for Dash hover display functionality.
 Handles image key management and base64 encoding for thumbnails.
 
-Encoded thumbnails are precomputed once in :func:`build_available_images_map`
-and cached on the returned map so that hover callbacks (which can request up to
-10 images per event) never re-read/decode/resize/encode from disk on every
-hover. This addresses the prior O(disk) per-hover cost (F-013).
+Encoded thumbnails are cached on the map built by
+:func:`build_available_images_map` and encoded lazily on first request by
+:func:`get_encoded_image`, then memoized. A hovered key is read/decoded/
+resized/encoded from disk at most once; repeat hovers are O(1). Encoding is
+NOT done eagerly at build time — that scaled O(all loaded images) and blocked
+the visualization open for minutes on large datasets (F-013).
 """
 
 import os
@@ -55,16 +57,17 @@ def _encode_thumbnail(path: str) -> str:
 
 def build_available_images_map(image_manager) -> dict:
     """
-    Build a mapping of (tube, position, date) -> image_path from the image manager
-    and precompute the base64 thumbnail for each image so hover lookups are O(1).
+    Build a mapping of (tube, position, date) -> image_path from the image
+    manager. Thumbnails are NOT encoded here; the returned map carries an empty
+    cache that :func:`get_encoded_image` fills lazily on first hover.
 
     Args:
         image_manager: ImageManager instance with loaded images
 
     Returns:
         dict: Mapping with (tube, position, date_str) tuple keys -> path values.
-            A private "_encoded_thumbnails" entry holds the precomputed
-            {(tube, position, date_str): data_url} cache used by
+            A private "_encoded_thumbnails" entry holds the
+            {(tube, position, date_str): data_url} cache, populated lazily by
             :func:`get_encoded_image`.
     """
     available_images: dict = {}
@@ -85,8 +88,11 @@ def build_available_images_map(image_manager) -> dict:
 
                 key = (tube, position, date_str)
                 available_images[key] = path
-                # Precompute the encoded thumbnail once (F-013).
-                thumbnails[key] = _encode_thumbnail(path)
+                # F-013: thumbnails are encoded lazily on first hover and
+                # memoized by get_encoded_image(), NOT eagerly here. Eager
+                # precompute scaled O(all loaded images): 46k images blocked
+                # the open for ~6 min. Lazy keeps open fast; hover pays the
+                # ~8ms encode once per (tube, position, date) key.
 
     available_images[_THUMBNAIL_CACHE_KEY] = thumbnails
     return available_images

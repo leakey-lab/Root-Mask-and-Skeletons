@@ -24,6 +24,11 @@ class SkeletonGeneratorThread(QThread):
 
     def run(self):
         try:
+            logger.info(
+                "SkeletonGeneratorThread starting: input=%s output=%s",
+                self.input_dir, self.output_dir,
+            )
+
             # Progress callback function
             def progress_callback(current, total):
                 if total > 0:
@@ -39,6 +44,7 @@ class SkeletonGeneratorThread(QThread):
             )
 
             self.progress.emit(100)  # Ensure we reach 100% at the end
+            logger.info("SkeletonGeneratorThread complete: output=%s", results_dir)
             self.finished.emit(results_dir)
         except (OSError, RuntimeError, ValueError) as exc:
             logger.exception("Skeleton generation failed for input_dir=%s", self.input_dir)

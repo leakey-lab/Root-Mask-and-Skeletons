@@ -5,17 +5,16 @@ Contains all chart creation methods extracted from DashApp.
 
 import logging
 
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import pandas as pd
 import numpy as np
-from typing import Any, List, Optional
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 logger = logging.getLogger(__name__)
 
 
-def parse_tube_selection(text: str) -> List[int]:
+def parse_tube_selection(text: str) -> list[int]:
     """
     Parse tube selection string like '1,3,5,10-15' into list [1,3,5,10,11,12,13,14,15].
 
@@ -32,14 +31,14 @@ def parse_tube_selection(text: str) -> List[int]:
         return []
 
     tubes = []
-    for part in text.split(','):
+    for part in text.split(","):
         part = part.strip()
         if not part:
             continue
         try:
-            if '-' in part:
+            if "-" in part:
                 # Handle range like "10-15"
-                range_parts = part.split('-')
+                range_parts = part.split("-")
                 if len(range_parts) == 2:
                     start, end = int(range_parts[0].strip()), int(range_parts[1].strip())
                     if start <= end:
@@ -86,15 +85,9 @@ class DashVisualizations:
         tubes = sorted(df["Tube"].unique())
         dates = sorted(df["Date"].unique())
         # Pairs that actually have at least one row.
-        present = set(
-            map(tuple, df[["Tube", "Date"]].drop_duplicates().itertuples(index=False))
-        )
+        present = set(map(tuple, df[["Tube", "Date"]].drop_duplicates().itertuples(index=False)))
 
-        availability = {
-            (tube, date): (tube, date) in present
-            for tube in tubes
-            for date in dates
-        }
+        availability = {(tube, date): (tube, date) in present for tube in tubes for date in dates}
 
         self._availability_cache = (df, availability)
         return availability
@@ -184,7 +177,7 @@ class DashVisualizations:
                     "font": {"size": 24},
                 },
                 xaxis={
-                    "title": "Root Length (mm)",
+                    "title": {"text": "Root Length (mm)", "font": {"size": 18}},
                     "showgrid": True,
                     "gridcolor": "lightgray",
                     "zeroline": True,
@@ -192,11 +185,10 @@ class DashVisualizations:
                     "zerolinewidth": 2,
                     "range": [-1, max_length * 1.1] if max_length > 0 else [-1, 10],
                     "tickformat": ".1f",
-                    "titlefont": {"size": 18},
                     "tickfont": {"size": 14},
                 },
                 yaxis={
-                    "title": "Position (L)",
+                    "title": {"text": "Position (L)", "font": {"size": 18}},
                     "showgrid": True,
                     "gridcolor": "lightgray",
                     "zeroline": False,
@@ -205,7 +197,6 @@ class DashVisualizations:
                     "ticktext": [f"L{pos}" for pos in positions] if positions else [],
                     "tickvals": positions if positions else [],
                     "dtick": 10,
-                    "titlefont": {"size": 18},
                     "tickfont": {"size": 14},
                 },
                 plot_bgcolor="white",
@@ -251,36 +242,36 @@ class DashVisualizations:
         return fig
 
     def show_growth_over_time(
-        self, 
-        selected_tubes: Optional[List[int]] = None,
+        self,
+        selected_tubes: list[int] | None = None,
         show_field_average: bool = True,
         show_field_variance: bool = True,
-        show_legend: bool = True
+        show_legend: bool = True,
     ) -> go.Figure:
         """
         Generate growth over time figure with flexible tube selection and variance options.
-        
+
         Args:
             selected_tubes: List of tube numbers to display. If None or empty, no individual tubes shown.
             show_field_average: Whether to show the field average line
             show_field_variance: Whether to show shaded variance for field average
             show_legend: Whether to display the legend
-            
+
         Returns:
             Plotly figure object
         """
         df = self.data_processor.df
         fig = go.Figure()
-        
+
         try:
             colors = px.colors.qualitative.Plotly
-            
+
             # Calculate field average statistics if requested
             if show_field_average:
                 # First, calculate total length per tube per date
                 tube_totals = df.groupby(["Date", "Tube"])["Length (mm)"].sum().reset_index()
                 tube_totals.columns = ["Date", "Tube", "Total_Length"]
-                
+
                 # Create date mapping to merge measurement dates within ±3 days
                 # (ONLY for the field average). The merge is deterministic:
                 #   - dates are processed in ascending order;
@@ -293,7 +284,9 @@ class DashVisualizations:
                 # row order, and merged tube totals are AVERAGED (below), not
                 # summed, so a tube measured on two nearby dates is not double
                 # counted.
-                date_counts = tube_totals.groupby("Date").size().reset_index(name="measurement_count")
+                date_counts = (
+                    tube_totals.groupby("Date").size().reset_index(name="measurement_count")
+                )
                 date_counts = date_counts.sort_values("Date").reset_index(drop=True)
 
                 # Create a mapping of dates to their representative date
@@ -338,20 +331,20 @@ class DashVisualizations:
                 # (F-034: previously summed, which double-counted re-measured
                 # tubes). A tube measured once contributes its single total.
                 tube_totals = (
-                    tube_totals.groupby(["Date", "Tube"])["Total_Length"]
-                    .mean()
+                    tube_totals.groupby(["Date", "Tube"])["Total_Length"].mean().reset_index()
+                )
+
+                # Then calculate mean and std of those totals across tubes for each date
+                field_stats = (
+                    tube_totals.groupby("Date")["Total_Length"]
+                    .agg(["mean", "std", "count"])
                     .reset_index()
                 )
-                
-                # Then calculate mean and std of those totals across tubes for each date
-                field_stats = tube_totals.groupby("Date")["Total_Length"].agg(
-                    ["mean", "std", "count"]
-                ).reset_index()
                 field_stats.columns = ["Date", "mean_length", "std_length", "count"]
-                
+
                 # Sort by date
                 field_stats = field_stats.sort_values("Date")
-                
+
                 # Add variance shading if requested
                 if show_field_variance and field_stats["std_length"].notna().any():
                     # Upper bound
@@ -366,7 +359,7 @@ class DashVisualizations:
                             legendgroup="field_avg",
                         )
                     )
-                    
+
                     # Lower bound with fill
                     fig.add_trace(
                         go.Scatter(
@@ -387,7 +380,7 @@ class DashVisualizations:
                             ),
                         )
                     )
-                
+
                 # Add mean line
                 fig.add_trace(
                     go.Scatter(
@@ -410,21 +403,21 @@ class DashVisualizations:
                         customdata=field_stats[["std_length", "count"]].values,
                     )
                 )
-            
+
             # Add individual tube traces if selected
             if selected_tubes:
                 for idx, tube in enumerate(selected_tubes):
                     tube_data = df[df["Tube"] == tube].sort_values("Date")
-                    
+
                     if tube_data.empty:
                         continue
-                    
+
                     # Calculate total length per date for this tube (NO date merging for individual tubes)
                     tube_stats = tube_data.groupby("Date")["Length (mm)"].sum().reset_index()
                     tube_stats.columns = ["Date", "total_length"]
-                    
+
                     color = colors[idx % len(colors)]
-                    
+
                     # Add main line
                     fig.add_trace(
                         go.Scatter(
@@ -443,7 +436,7 @@ class DashVisualizations:
                             ),
                         )
                     )
-            
+
             # Update layout
             fig.update_layout(
                 title=dict(
@@ -453,15 +446,13 @@ class DashVisualizations:
                     xanchor="center",
                 ),
                 xaxis=dict(
-                    title="Date",
-                    titlefont=dict(size=18),
+                    title=dict(text="Date", font=dict(size=18)),
                     tickfont=dict(size=14),
                     showgrid=True,
                     gridcolor="lightgray",
                 ),
                 yaxis=dict(
-                    title="Total Length (mm)",
-                    titlefont=dict(size=18),
+                    title=dict(text="Total Length (mm)", font=dict(size=18)),
                     tickfont=dict(size=14),
                     showgrid=True,
                     gridcolor="lightgray",
@@ -491,9 +482,9 @@ class DashVisualizations:
                     align="left",
                 ),
             )
-            
+
             return fig
-            
+
         except Exception:
             logger.exception("Error generating growth over time")
             return go.Figure()
@@ -535,14 +526,12 @@ class DashVisualizations:
                     "font": {"size": 24},
                 },
                 xaxis=dict(
-                    title="Tube",
-                    titlefont=dict(size=18),
-                    tickfont=dict(size=14)
+                    title=dict(text="Tube", font=dict(size=18)),
+                    tickfont=dict(size=14),
                 ),
                 yaxis=dict(
-                    title="Total Length (mm)",
-                    titlefont=dict(size=18),
-                    tickfont=dict(size=14)
+                    title=dict(text="Total Length (mm)", font=dict(size=18)),
+                    tickfont=dict(size=14),
                 ),
                 legend_title=dict(text="Measurement Date", font=dict(size=18)),
                 autosize=True,
@@ -595,74 +584,73 @@ class DashVisualizations:
             return go.Figure()
 
     def create_faceted_depth_profile(
-        self, 
-        selected_tubes: List[int],
-        selected_dates: Optional[List[pd.Timestamp]] = None
+        self, selected_tubes: list[int], selected_dates: list[pd.Timestamp] | None = None
     ) -> go.Figure:
         """
         Create a faceted depth profile visualization showing horizontal bar charts
         of root length by depth for each date-tube combination with 10-position binning.
-        
+
         Args:
             selected_tubes: List of tube numbers to display (up to 6)
             selected_dates: List of dates to display (if None, uses all available dates)
-            
+
         Returns:
             Plotly figure with subplots in a grid (rows=dates, cols=tubes)
         """
         try:
             df = self.data_processor.df
             interval_size = 10
-            
+
             # Validate input
             if not selected_tubes or len(selected_tubes) > 6:
                 fig = go.Figure()
                 fig.add_annotation(
                     text="Please select between 1 and 6 tubes for the faceted view",
-                    xref="paper", yref="paper",
-                    x=0.5, y=0.5,
+                    xref="paper",
+                    yref="paper",
+                    x=0.5,
+                    y=0.5,
                     showarrow=False,
-                    font=dict(size=20, color="red")
+                    font=dict(size=20, color="red"),
                 )
                 return fig
-            
+
             # Handle date selection
             if selected_dates is None:
                 selected_dates = sorted(df["Date"].unique())
             else:
                 selected_dates = sorted(selected_dates)
-            
+
             # Filter out dates that have no data for any selected tube
             # Use tube date availability to check which dates have data
             availability = self.get_tube_date_availability()
             dates_with_data = []
             for date in selected_dates:
                 # Check if at least one selected tube has data for this date
-                has_any_data = any(
-                    availability.get((tube, date), False) 
-                    for tube in selected_tubes
-                )
+                has_any_data = any(availability.get((tube, date), False) for tube in selected_tubes)
                 if has_any_data:
                     dates_with_data.append(date)
-            
+
             selected_dates = dates_with_data
             num_dates = len(selected_dates)
             num_tubes = len(selected_tubes)
-            
+
             if num_dates == 0:
                 fig = go.Figure()
                 fig.add_annotation(
                     text="No dates with data for selected tubes",
-                    xref="paper", yref="paper",
-                    x=0.5, y=0.5,
+                    xref="paper",
+                    yref="paper",
+                    x=0.5,
+                    y=0.5,
                     showarrow=False,
-                    font=dict(size=20, color="red")
+                    font=dict(size=20, color="red"),
                 )
                 return fig
-            
+
             # Create color scale (plasma)
             plasma_colors = px.colors.sequential.Plasma
-            
+
             # Create subplots with titles only on first row
             # Subplot titles: show tube names only in first row, empty strings for other rows
             subplot_titles = []
@@ -674,7 +662,7 @@ class DashVisualizations:
                     else:
                         # Other rows: empty string
                         subplot_titles.append("")
-            
+
             fig = make_subplots(
                 rows=num_dates,
                 cols=num_tubes,
@@ -685,13 +673,13 @@ class DashVisualizations:
                 subplot_titles=subplot_titles,
                 row_titles=[date.strftime("%Y-%m-%d") for date in selected_dates],
             )
-            
+
             # Track legends and max values globally
             field_avg_added_to_legend = False
             tube_bar_added_to_legend = False
             global_max_depth = 0  # Track maximum depth position
             global_max_val = 0  # Track max value across all graphs
-            
+
             # Calculate field average intervals for all dates (across ALL tubes, not just selected)
             field_intervals_by_date = {}
             for date in selected_dates:
@@ -702,15 +690,17 @@ class DashVisualizations:
                     min_pos, max_pos = min(positions), max(positions)
                     first_interval_end = ((min_pos - 1) // interval_size + 1) * interval_size
                     last_interval_end = ((max_pos - 1) // interval_size + 1) * interval_size
-                    
+
                     field_intervals = {}
-                    for interval_end in range(first_interval_end, last_interval_end + 1, interval_size):
+                    for interval_end in range(
+                        first_interval_end, last_interval_end + 1, interval_size
+                    ):
                         interval_start = interval_end - interval_size + 1
                         interval_data = date_data[
-                            (date_data["Position"] >= interval_start) &
-                            (date_data["Position"] <= interval_end)
+                            (date_data["Position"] >= interval_start)
+                            & (date_data["Position"] <= interval_end)
                         ]
-                        
+
                         if not interval_data.empty:
                             field_intervals[interval_end] = {
                                 "mean": interval_data["Length (mm)"].mean(),
@@ -719,20 +709,23 @@ class DashVisualizations:
                                 "interval_end": interval_end,
                             }
                     field_intervals_by_date[date] = field_intervals
-            
+
             # Add traces for each date-tube combination
             for date_idx, date in enumerate(selected_dates, start=1):
                 for tube_idx, tube in enumerate(selected_tubes, start=1):
                     # Get interval data for this tube-date combination
                     tube_intervals = self.data_cache.get_interval_data(tube, date, interval_size)
                     field_intervals = field_intervals_by_date.get(date, {})
-                    
+
                     # Check if we have data for this combination
-                    has_data = bool(tube_intervals and any(
-                        not pd.isna(stats["avg"]) and stats["count"] > 0
-                        for stats in tube_intervals.values()
-                    ))
-                    
+                    has_data = bool(
+                        tube_intervals
+                        and any(
+                            not pd.isna(stats["avg"]) and stats["count"] > 0
+                            for stats in tube_intervals.values()
+                        )
+                    )
+
                     if not has_data:
                         # Plot an empty graph with "No Data" text annotation
                         # Add a dummy invisible trace to establish the subplot
@@ -750,10 +743,10 @@ class DashVisualizations:
                             col=tube_idx,
                         )
                         continue
-                    
+
                     # Get sorted intervals
                     interval_ends = sorted(tube_intervals.keys())
-                    
+
                     # Prepare data for bars
                     tube_means = []
                     tube_stds = []
@@ -761,37 +754,47 @@ class DashVisualizations:
                     field_stds = []
                     y_positions = []
                     colors = []
-                    
+
                     for interval_end in interval_ends:
                         tube_stat = tube_intervals[interval_end]
                         if not pd.isna(tube_stat["avg"]) and tube_stat["count"] > 0:
                             tube_means.append(tube_stat["avg"])
-                            tube_stds.append(tube_stat["std"] if not pd.isna(tube_stat["std"]) else 0)
+                            tube_stds.append(
+                                tube_stat["std"] if not pd.isna(tube_stat["std"]) else 0
+                            )
                             y_positions.append(interval_end)
-                            
+
                             # Get field average for this interval
                             if interval_end in field_intervals:
                                 field_means.append(field_intervals[interval_end]["mean"])
-                                field_stds.append(field_intervals[interval_end]["std"] 
-                                                if not pd.isna(field_intervals[interval_end]["std"]) else 0)
+                                field_stds.append(
+                                    field_intervals[interval_end]["std"]
+                                    if not pd.isna(field_intervals[interval_end]["std"])
+                                    else 0
+                                )
                             else:
                                 field_means.append(0)
                                 field_stds.append(0)
-                            
+
                             # Color based on depth
-                            norm_pos = (interval_end - interval_ends[0]) / (interval_ends[-1] - interval_ends[0]) if len(interval_ends) > 1 else 0.5
+                            norm_pos = (
+                                (interval_end - interval_ends[0])
+                                / (interval_ends[-1] - interval_ends[0])
+                                if len(interval_ends) > 1
+                                else 0.5
+                            )
                             color_idx = int(norm_pos * (len(plasma_colors) - 1))
                             colors.append(plasma_colors[color_idx])
-                    
+
                     if not y_positions:
                         continue
-                    
+
                     # Track max values for axis scaling globally (across all graphs)
                     tube_max = max(field_means + tube_means, default=0)
                     global_max_val = max(global_max_val, tube_max)
-                    
+
                     global_max_depth = max(global_max_depth, max(y_positions, default=0))
-                    
+
                     # Add field average bars (extending LEFT from center).
                     # Show the legend entry on the FIRST data-bearing subplot
                     # only, and set the dedup flag right after the trace is added
@@ -819,8 +822,15 @@ class DashVisualizations:
                                 "Avg Length: %{customdata[2]:.2f} mm<br>"
                                 "<extra></extra>"
                             ),
-                            customdata=[[tube_intervals[pos]["interval_start"], pos, field_means[i], field_stds[i]] 
-                                      for i, pos in enumerate(y_positions)],
+                            customdata=[
+                                [
+                                    tube_intervals[pos]["interval_start"],
+                                    pos,
+                                    field_means[i],
+                                    field_stds[i],
+                                ]
+                                for i, pos in enumerate(y_positions)
+                            ],
                         ),
                         row=date_idx,
                         col=tube_idx,
@@ -854,8 +864,14 @@ class DashVisualizations:
                                 "Count: %{customdata[2]}<br>"
                                 "<extra></extra>"
                             ),
-                            customdata=[[tube_intervals[pos]["interval_start"], pos, tube_intervals[pos]["count"]]
-                                      for pos in y_positions],
+                            customdata=[
+                                [
+                                    tube_intervals[pos]["interval_start"],
+                                    pos,
+                                    tube_intervals[pos]["count"],
+                                ]
+                                for pos in y_positions
+                            ],
                         ),
                         row=date_idx,
                         col=tube_idx,
@@ -865,24 +881,26 @@ class DashVisualizations:
 
             # Set y-axis range based on actual data
             y_max = global_max_depth + 10 if global_max_depth > 0 else 120
-            
+
             # Update axes - only show labels on edges
             for date_idx in range(1, num_dates + 1):
                 for tube_idx in range(1, num_tubes + 1):
                     # Y-axis: only show title on leftmost column, reversed for depth
                     fig.update_yaxes(
                         range=[y_max, 0],  # Reversed: start from 0 at top, go to max at bottom
-                        title_text="Vertical Depth (cm)" if tube_idx == 1 and date_idx == (num_dates + 1) // 2 else "",
+                        title=dict(
+                            text="Vertical Depth (cm)"
+                            if tube_idx == 1 and date_idx == (num_dates + 1) // 2
+                            else "",
+                            font=dict(size=20),
+                        ),
                         showgrid=True,
                         gridcolor="lightgray",
                         tickfont=dict(size=18),
-                        titlefont=dict(size=20),
                         row=date_idx,
                         col=tube_idx,
                     )
-                    
 
-            
             # Update overall layout
             fig.update_layout(
                 title=dict(
@@ -919,10 +937,10 @@ class DashVisualizations:
                 margin=dict(l=50, r=80, t=50, b=40),
             )
             fig.update_annotations(font=dict(size=18))
-            
+
             # Set y-axis range based on actual data
             y_max = global_max_depth + 10 if global_max_depth > 0 else 120
-            
+
             # Calculate normalized x-axis range globally (use highest value across all graphs)
             # Round up to nearest 10th digit (20, 30, 40, etc.)
             def round_to_nearest_10(val):
@@ -930,7 +948,7 @@ class DashVisualizations:
                 if val <= 0:
                     return 10
                 return int(np.ceil(val / 10.0) * 10)
-            
+
             # Use global max value for all graphs
             if global_max_val > 0:
                 # Add 10% padding and round to nearest 10
@@ -938,14 +956,14 @@ class DashVisualizations:
                 global_max_range = round_to_nearest_10(padded_max)
             else:
                 global_max_range = 10
-            
+
             # Update all x-axes to use global range and show labels only on bottom row of each column
             for date_idx in range(1, num_dates + 1):
                 for tube_idx in range(1, num_tubes + 1):
                     # Calculate subplot number (row-major order for plotly subplots)
                     subplot_num = (date_idx - 1) * num_tubes + tube_idx
-                    xaxis_key = f'xaxis{subplot_num}' if subplot_num > 1 else 'xaxis'
-                    
+                    xaxis_key = f"xaxis{subplot_num}" if subplot_num > 1 else "xaxis"
+
                     # Add background rectangle and border for each mini graph
                     # Use domain coordinates so the box stays within each subplot
                     x_domain_ref = f"x{subplot_num} domain" if subplot_num > 1 else "x domain"
@@ -962,7 +980,7 @@ class DashVisualizations:
                         line=dict(color="black", width=2),  # Black border
                         layer="below",  # Place behind the data
                     )
-                    
+
                     if xaxis_key in fig.layout:
                         # Create tick values using nearest 10th digit numbers (10, 20, 30, 40, etc.)
                         # Generate ticks at 10-unit intervals from -max to +max
@@ -974,7 +992,7 @@ class DashVisualizations:
                         for val in range(-max_tick, max_tick + tick_step, tick_step):
                             tickvals.append(val)
                         tickvals = sorted(set(tickvals))
-                        
+
                         # Show absolute values as labels, but hide the first/last labels
                         ticktext = []
                         for idx, val in enumerate(tickvals):
@@ -982,11 +1000,11 @@ class DashVisualizations:
                                 ticktext.append("")
                             else:
                                 ticktext.append(f"{abs(val):.0f}")
-                        
+
                         # Only show x-axis labels on bottom row of each column
-                        show_labels = (date_idx == num_dates)
-                        
-                        fig.layout[xaxis_key].tickmode = 'array'
+                        show_labels = date_idx == num_dates
+
+                        fig.layout[xaxis_key].tickmode = "array"
                         fig.layout[xaxis_key].tickvals = tickvals
                         fig.layout[xaxis_key].ticktext = ticktext
                         fig.layout[xaxis_key].range = [-global_max_range, global_max_range]
@@ -1005,7 +1023,7 @@ class DashVisualizations:
                         fig.layout[xaxis_key].ticklen = 6 if show_labels else 0
                         fig.layout[xaxis_key].tickfont = dict(size=16)
 
-                    yaxis_key = f'yaxis{subplot_num}' if subplot_num > 1 else 'yaxis'
+                    yaxis_key = f"yaxis{subplot_num}" if subplot_num > 1 else "yaxis"
                     if yaxis_key in fig.layout:
                         fig.layout[yaxis_key].showline = True
                         fig.layout[yaxis_key].linecolor = "black"
@@ -1025,18 +1043,19 @@ class DashVisualizations:
                         fig.layout[yaxis_key].tickmode = "array"
                         fig.layout[yaxis_key].tickvals = y_tickvals
                         fig.layout[yaxis_key].ticktext = y_ticktext
-            
+
             return fig
-            
+
         except Exception as e:
             logger.exception("Error generating faceted depth profile")
             fig = go.Figure()
             fig.add_annotation(
                 text=f"Error: {str(e)}",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5,
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
                 showarrow=False,
-                font=dict(size=16, color="red")
+                font=dict(size=16, color="red"),
             )
             return fig
-

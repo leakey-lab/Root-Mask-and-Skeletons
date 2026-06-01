@@ -9,6 +9,7 @@ Public names re-exported from this module are *not* part of the package API;
 all public classes remain in their respective modules.
 """
 import logging
+import socket
 import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -16,6 +17,20 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from werkzeug.serving import make_server
 
 logger = logging.getLogger(__name__)
+
+
+def join_qthread(thread: QThread | None, timeout_ms: int = 10000) -> bool:
+    """Block until *thread* finishes; return False if it is still running."""
+    if thread is None:
+        return True
+    if thread.isRunning() and not thread.wait(timeout_ms):
+        logger.warning(
+            "%s did not stop within %dms",
+            thread.objectName() or "QThread",
+            timeout_ms,
+        )
+        return False
+    return True
 
 
 class _DashServerThreadBase(QThread):
@@ -29,8 +44,9 @@ class _DashServerThreadBase(QThread):
     error = pyqtSignal(str)
     port_assigned = pyqtSignal(int)
 
-    def __init__(self, dash_app, port: int):
+    def __init__(self, dash_app, port: int, *, object_name: str = "DashServerThread"):
         super().__init__()
+        self.setObjectName(object_name)
         self.dash_app = dash_app
         self.port = port
         self.server = None
@@ -58,10 +74,18 @@ class _DashServerThreadBase(QThread):
 
     def stop(self) -> None:
         """Signal the loop to exit and close the server socket."""
+        logger.debug("Stopping Dash server on port %d", self.port)
         self._stop_event.set()
+        port = self.port
         if self.server:
             try:
                 self.server.server_close()
-            except Exception:  # noqa: BLE001
-                pass
-            self.server = None
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("server_close() cleanup error (port %d): %s", port, exc)
+        # Unblock handle_request() promptly (it may be waiting on accept).
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as wake:
+                wake.settimeout(0.5)
+                wake.connect(("127.0.0.1", port))
+        except OSError as exc:
+            logger.debug("wake-connect cleanup error (port %d): %s", port, exc)

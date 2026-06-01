@@ -1,7 +1,11 @@
 """Root-area calculation thread (thin wrapper over app.inference.metrics)."""
+import logging
 import os
+import time
 
 from PyQt6.QtCore import QThread, pyqtSignal
+
+logger = logging.getLogger(__name__)
 
 from app.config import AREA_CSV_HEADERS, ROOT_AREAS_CSV
 from app.inference.metrics import (
@@ -36,6 +40,7 @@ def process_single_mask(name, path):
             "Area (mm²)": round(total_area, 2),
         }
     except Exception as e:
+        logger.error("Area metric failed for %r: %s", name, e)
         return {
             "Image": name, "Tube": None, "Position": None, "Date": None,
             "Time": None, "Area (mm²)": 0, "Error": str(e),
@@ -53,9 +58,19 @@ class RootAreaCalculatorThread(QThread):
 
     def run(self):
         if not self.mask_images:
+            logger.debug("RootAreaCalculatorThread: no images, skipping")
             self.finished.emit("")
             return
+        logger.info(
+            "RootAreaCalculatorThread: processing %d images → %s",
+            len(self.mask_images), self.output_dir,
+        )
+        t0 = time.monotonic()
         results = run_metric_pool(self.mask_images, process_single_mask, self.progress.emit)
         csv_path = os.path.join(self.output_dir, ROOT_AREAS_CSV)
         write_metric_csv(results, csv_path, AREA_CSV_HEADERS)
+        logger.info(
+            "RootAreaCalculatorThread: done in %.1fs, wrote %s",
+            time.monotonic() - t0, csv_path,
+        )
         self.finished.emit(csv_path)

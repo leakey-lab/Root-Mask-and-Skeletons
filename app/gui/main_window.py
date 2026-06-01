@@ -13,8 +13,9 @@ from PyQt6.QtWidgets import (
     QStackedWidget,
     QFileDialog,
     QProgressBar,
+    QApplication,
 )
-from PyQt6.QtGui import QColor, QIcon
+from PyQt6.QtGui import QColor, QIcon, QCloseEvent
 from PyQt6.QtCore import Qt, pyqtSignal
 from .image_manager import ImageManager
 from .display_controller import DisplayController
@@ -75,6 +76,18 @@ class MainWindow(QMainWindow):
         self.mask_cleared.connect(self.unhighlight_cleared_mask)
 
         self.init_ui()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """Stop Dash server threads before the window (and embedded viz widgets) are destroyed."""
+        try:
+            if self.root_length_viz is not None:
+                self.close_root_length_visualization()
+            if self.root_area_viz is not None:
+                self.close_root_area_visualization()
+        except Exception:
+            logger.exception("Error cleaning up visualizations on close")
+        QApplication.processEvents()
+        super().closeEvent(event)
 
     def init_ui(self):
         main_widget = QWidget()

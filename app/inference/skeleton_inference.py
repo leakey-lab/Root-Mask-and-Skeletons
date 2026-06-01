@@ -137,20 +137,18 @@ def tensor2im(input_image, imtype=np.uint8):
 def save_image(image_numpy, image_path, aspect_ratio=1.0):
     """Save a numpy image to disk.
 
-    F-004 fix: PIL.Image.resize takes (width, height); the original code
-    passed (h, int(w * aspect_ratio)) which swapped the axes and distorted
-    the skeleton geometry.  Corrected to (int(w * aspect_ratio), h) and
-    (w, int(h / aspect_ratio)) respectively so the resize is aspect-correct.
+    Resize uses the exact axis order from the validated V2 pipeline -- the
+    skeletonizer weights and all downstream length/area metrics were calibrated
+    against this geometry. Do NOT "fix" the apparent (w, h) swap: changing it
+    transposes the skeleton (341x256 -> 256x341) and corrupts the metrics.
     """
     image_pil = Image.fromarray(image_numpy)
     h, w, _ = image_numpy.shape
 
     if aspect_ratio > 1.0:
-        # Widen: scale width up, keep height
-        image_pil = image_pil.resize((int(w * aspect_ratio), h), Image.BICUBIC)
+        image_pil = image_pil.resize((h, int(w * aspect_ratio)), Image.BICUBIC)
     if aspect_ratio < 1.0:
-        # Narrow: scale height up, keep width
-        image_pil = image_pil.resize((w, int(h / aspect_ratio)), Image.BICUBIC)
+        image_pil = image_pil.resize((int(h / aspect_ratio), w), Image.BICUBIC)
     image_pil.save(image_path)
 
 
@@ -524,16 +522,16 @@ class SkeletonModel:
             )
 
     def run(self, input_tensor):
-        """Run inference on input tensor."""
-        from app.inference import runtime
+        """Run inference on input tensor.
 
-        rt = runtime.get_runtime()
+        Runs in full fp32 (NO autocast), matching the validated V2 pipeline. The
+        pix2pix EnhancedResnetGenerator (BatchNorm + Tanh) drifts visibly under
+        fp16/bf16 mixed precision, so the skeletonizer must stay fp32.
+        """
         # non_blocking pairs with the DataLoader's pinned host memory to overlap
         # the H2D copy with compute (forward provides the sync point).
         input_tensor = input_tensor.to(self.device, non_blocking=True)
-        if rt.use_channels_last and self.device.type == "cuda":
-            input_tensor = input_tensor.contiguous(memory_format=torch.channels_last)
-        with torch.inference_mode(), rt.autocast():
+        with torch.inference_mode():
             output = self.netG(input_tensor)
         return output
 
@@ -547,15 +545,12 @@ class SkeletonModel:
         Returns:
             Batch of output tensors
         """
-        from app.inference import runtime
-
-        rt = runtime.get_runtime()
         # non_blocking pairs with the DataLoader's pinned host memory to overlap
         # the H2D copy with compute (forward provides the sync point).
+        # Full fp32 (NO autocast) to match the validated V2 skeletonizer pipeline;
+        # fp16/bf16 mixed precision drifts the pix2pix generator output.
         input_batch = input_batch.to(self.device, non_blocking=True)
-        if rt.use_channels_last and self.device.type == "cuda":
-            input_batch = input_batch.contiguous(memory_format=torch.channels_last)
-        with torch.inference_mode(), rt.autocast():
+        with torch.inference_mode():
             output_batch = self.netG(input_batch)
         return output_batch
 
@@ -583,6 +578,10 @@ def run_inference(
     """
     if batch_size is None:
         batch_size = SKELETON_BATCH_SIZE
+
+    logger.info(
+        "run_inference: input=%s output=%s batch_size=%d", input_dir, output_dir, batch_size
+    )
 
     # Create output directory structure - save directly to skeletons folder
     images_dir = output_dir
@@ -628,7 +627,18 @@ def run_inference(
     for batch_idx, (input_batch, img_paths) in enumerate(dataloader):
         current_batch_size = input_batch.size(0)
         # Run inference on batch; tensors move to device inside run_batch
-        output_batch = model.run_batch(input_batch)
+        try:
+            output_batch = model.run_batch(input_batch)
+        except torch.cuda.OutOfMemoryError:
+            logger.error(
+                "CUDA OOM on batch %d (size %d) — skipping; try a smaller batch_size",
+                batch_idx, current_batch_size,
+            )
+            torch.cuda.empty_cache()
+            if progress_callback:
+                progress_callback(processed_count + current_batch_size, total_images)
+            processed_count += current_batch_size
+            continue
 
         # Process each image in the batch
         for i in range(current_batch_size):

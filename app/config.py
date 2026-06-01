@@ -9,8 +9,11 @@ one place — see CALIBRATION below, which the root-length/area metrics depend o
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 # --- Repository / resource paths -------------------------------------------
 # Resolve relative to this file so behavior does not depend on the current
@@ -59,8 +62,41 @@ DASH_LENGTH_PORT = 8050
 DASH_AREA_PORT = 8051
 
 # --- Inference / batching ---------------------------------------------------
+# Per-sample VRAM for the skeletonizer at 256x256 RGB, measured: ~5 GB / 64 ≈
+# 80 MB/sample (activations + workspace, fp16/bf16 autocast). Used to auto-size
+# the skeleton batch to the GPU instead of hardcoding 64 (which left a 16 GB
+# card at ~5 GB used).
+_SKELETON_BYTES_PER_SAMPLE = 80 * 1024 * 1024
+_SKELETON_BATCH_DEFAULT = 64
+
+
+def _auto_skeleton_batch(default: int = _SKELETON_BATCH_DEFAULT) -> int:
+    """Size the skeleton inference batch to the GPU's free VRAM.
+
+    Returns ``default`` on CPU or if the query fails. On CUDA, targets 70% of
+    *currently free* memory (leaving headroom for the driver, fragmentation, and
+    pinned host transfers), rounds down to a multiple of 8, and never goes below
+    ``default``. BatchNorm runs in eval() (running stats), so the skeleton output
+    is invariant to batch size -- only throughput changes.
+    """
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            logger.info("CUDA unavailable; using default skeleton batch=%d", default)
+            return default
+        free, _ = torch.cuda.mem_get_info()  # bytes free on the active device
+        est = int((free * 0.70) // _SKELETON_BYTES_PER_SAMPLE)
+        result = max(default, (est // 8) * 8)
+        logger.info("Auto skeleton batch: %.1f GB free VRAM → batch=%d", free / 1024 ** 3, result)
+        return result
+    except Exception as exc:  # noqa: BLE001 -- batch sizing must never break startup
+        logger.warning("CUDA mem query failed, using default batch=%d: %s", default, exc)
+        return default
+
+
 MASK_BATCH_SIZE = 16
-SKELETON_BATCH_SIZE = 64
+SKELETON_BATCH_SIZE = _auto_skeleton_batch()
 MASK_THRESHOLD = 0.5  # sigmoid threshold for binarizing the mask model output
 
 # --- Output filenames / CSV schema -----------------------------------------

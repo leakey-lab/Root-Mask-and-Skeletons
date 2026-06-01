@@ -20,11 +20,14 @@ fixes the calibration science:
 from __future__ import annotations
 
 import csv
+import logging
 import math
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 import cv2
 import numpy as np
@@ -116,19 +119,24 @@ def parse_image_name(name: str) -> dict:
         if (m := re.search(r"_(\d{6})(?:_|$)", name)):
             t = m.group(1)
             info["time"] = f"{t[:2]}:{t[2:4]}:{t[4:]}"
-    except (ValueError, AttributeError):
-        pass
+    except (ValueError, AttributeError) as exc:
+        logger.debug("parse_image_name could not parse %r: %s", name, exc)
     return info
 
 
 # ----------------------------- CSV -----------------------------------------
 
 def write_metric_csv(results: list[dict], filename: str, headers: list[str]) -> None:
-    with open(filename, mode="w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        for row in results:
-            writer.writerow({h: row.get(h, "") for h in headers})
+    try:
+        with open(filename, mode="w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=headers)
+            writer.writeheader()
+            for row in results:
+                writer.writerow({h: row.get(h, "") for h in headers})
+        logger.debug("Wrote %d rows to %s", len(results), filename)
+    except OSError as exc:
+        logger.error("Failed to write metric CSV %s: %s", filename, exc)
+        raise
 
 
 def _sort_key(row: dict):
@@ -150,11 +158,17 @@ def run_metric_pool(
     total = len(images)
     if total == 0:
         return results
-    max_workers = min((os.cpu_count() or 4) * 2, 32, total)
+    # Cap at half of logical cores (min 2, max 8) so the Qt main thread
+    # is not starved by workers saturating every CPU core.
+    max_workers = min(max(2, (os.cpu_count() or 4) // 2), 8, total)
+    last_pct = -1
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {ex.submit(worker, name, path): name for name, path in images.items()}
         for i, fut in enumerate(as_completed(futures), start=1):
             results.append(fut.result())
             if progress_cb is not None:
-                progress_cb(int(i / total * 100))
+                pct = int(i / total * 100)
+                if pct != last_pct:
+                    last_pct = pct
+                    progress_cb(pct)
     return sorted(results, key=_sort_key)

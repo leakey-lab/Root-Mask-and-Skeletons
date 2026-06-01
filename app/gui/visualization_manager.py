@@ -126,6 +126,11 @@ def find_test_latest_dir(start_path, max_depth=3):
 def toggle_root_length_visualization(main_window):
     """Toggle between showing and hiding the root length visualization."""
     try:
+        logger.info(
+            "DBG toggle_root_length_viz: root_length_viz=%s, currentWidget=%s",
+            main_window.root_length_viz,
+            main_window.right_panel.currentWidget().__class__.__name__,
+        )
         # If visualization exists and is currently shown
         if (
             main_window.root_length_viz is not None
@@ -145,12 +150,37 @@ def toggle_root_length_visualization(main_window):
 
 def show_root_length_visualization(main_window):
     """Show the root length visualization with proper loading state management."""
+    logger.info("DBG show_root_length_viz: entered, topLevelItemCount=%d",
+                main_window.file_list.topLevelItemCount())
 
     if main_window.file_list.topLevelItemCount() == 0:
         QMessageBox.warning(
             main_window, "Warning", "No images loaded. Please load images first."
         )
         return
+
+    # Guard: don't open the visualization while a calculation that produces
+    # (or invalidates) the length CSV is still running. Launching mid-calc reads
+    # a half-written / empty CSV -> the init worker raises "No data found in CSV
+    # file" and is torn down the instant it errors, racing thread destruction
+    # ("QThread: Destroyed while thread '' is still running").
+    sh = getattr(main_window, "skeleton_handler", None)
+    if sh is not None:
+        busy = (
+            (getattr(sh, "calculator_thread", None) is not None
+             and sh.calculator_thread.isRunning())
+            or (getattr(sh, "skeleton_handler", None) is not None
+                and getattr(sh.skeleton_handler, "_thread", None) is not None
+                and sh.skeleton_handler._thread.isRunning())
+        )
+        if busy:
+            QMessageBox.information(
+                main_window,
+                "Please wait",
+                "A calculation is still running. Wait for it to finish before "
+                "opening the length visualization.",
+            )
+            return
 
     try:
         # Qt6 limitation: QtWebEngine (QWebEngineView) can't render in a window that
@@ -210,22 +240,35 @@ def show_root_length_visualization(main_window):
         if base_path:
             potential_csv_paths.append(os.path.join(base_path, ROOT_LENGTHS_CSV))
         
+        logger.info("DBG show_root_length_viz: base_folder=%s, searching CSV paths: %s",
+                    base_folder, potential_csv_paths)
+
         # Try each path until we find the CSV
         csv_path = None
         for path in potential_csv_paths:
-            if os.path.exists(path):
+            exists = os.path.exists(path)
+            logger.info("DBG show_root_length_viz: checking %s -> exists=%s", path, exists)
+            if exists:
                 csv_path = path
                 break
-        
+
+        logger.info("DBG show_root_length_viz: csv_path=%s", csv_path)
+
         if csv_path is None:
-            error_msg = f"No root length data found. Searched in: {', '.join(potential_csv_paths)}"
-            raise FileNotFoundError(error_msg)
+            QMessageBox.information(
+                main_window,
+                "No root length data",
+                "No root length data was found.\n\n"
+                "Run **Calculate Root Length** first (after generating skeletons).\n\n"
+                "Expected file locations:\n"
+                f"  • {potential_csv_paths[0]}\n"
+                f"  • {potential_csv_paths[1]}",
+            )
+            return
 
 
         def create_new_visualization():
-            # Create new visualization with the current CSV path.
-            # Errors propagate to the outer handler in
-            # show_root_length_visualization, which logs and notifies the user.
+            logger.info("DBG show_root_length_viz: creating RootLengthVisualization with csv=%s", csv_path)
             main_window.root_length_viz = RootLengthVisualization(
                 csv_path, main_window.image_manager
             )
@@ -236,6 +279,8 @@ def show_root_length_visualization(main_window):
             # Add to right panel and show
             main_window.right_panel.addWidget(main_window.root_length_viz)
             main_window.right_panel.setCurrentWidget(main_window.root_length_viz)
+            logger.info("DBG show_root_length_viz: widget added, currentWidget=%s",
+                        main_window.right_panel.currentWidget().__class__.__name__)
 
             # Update button text
             main_window.visualize_root_length_button.setText("Close Visualization")
@@ -311,6 +356,11 @@ def toggle_root_area_visualization(main_window):
     """Toggle between showing and hiding the root area visualization."""
 
     try:
+        logger.info(
+            "DBG toggle_root_area_viz: root_area_viz=%s, currentWidget=%s",
+            main_window.root_area_viz,
+            main_window.right_panel.currentWidget().__class__.__name__,
+        )
         # If visualization exists and is currently shown
         if (
             main_window.root_area_viz is not None
@@ -330,12 +380,37 @@ def toggle_root_area_visualization(main_window):
 
 def show_root_area_visualization(main_window):
     """Show the root area visualization with proper loading state management."""
+    logger.info("DBG show_root_area_viz: entered, topLevelItemCount=%d",
+                main_window.file_list.topLevelItemCount())
 
     if main_window.file_list.topLevelItemCount() == 0:
         QMessageBox.warning(
             main_window, "Warning", "No images loaded. Please load images first."
         )
         return
+
+    # Guard: don't open the visualization while a calculation that produces
+    # (or invalidates) the area CSV is still running. Launching mid-calc reads a
+    # half-written / empty CSV -> the init worker raises "No data found in CSV
+    # file" and is torn down the instant it errors, racing thread destruction
+    # ("QThread: Destroyed while thread '' is still running").
+    sh = getattr(main_window, "skeleton_handler", None)
+    if sh is not None:
+        busy = (
+            (getattr(sh, "area_calculator_thread", None) is not None
+             and sh.area_calculator_thread.isRunning())
+            or (getattr(sh, "skeleton_handler", None) is not None
+                and getattr(sh.skeleton_handler, "_thread", None) is not None
+                and sh.skeleton_handler._thread.isRunning())
+        )
+        if busy:
+            QMessageBox.information(
+                main_window,
+                "Please wait",
+                "A calculation is still running. Wait for it to finish before "
+                "opening the area visualization.",
+            )
+            return
 
     try:
         # Qt6 limitation: QtWebEngine (QWebEngineView) can't render in a window that
@@ -384,6 +459,8 @@ def show_root_area_visualization(main_window):
         else:
             base_folder = start_dir
 
+        logger.info("DBG show_root_area_viz: base_folder=%s, start_dir=%s", base_folder, start_dir)
+
         # Check for masks directory
         potential_paths = [
             os.path.join(base_folder, "output", "mask"),
@@ -392,22 +469,38 @@ def show_root_area_visualization(main_window):
 
         masks_dir = None
         for path in potential_paths:
-            if os.path.exists(path):
+            exists = os.path.exists(path)
+            logger.info("DBG show_root_area_viz: checking mask dir %s -> exists=%s", path, exists)
+            if exists:
                 masks_dir = path
                 break
 
+        logger.info("DBG show_root_area_viz: masks_dir=%s", masks_dir)
+
         if not masks_dir:
-            raise FileNotFoundError("No masks directory found")
+            QMessageBox.information(
+                main_window,
+                "No mask data",
+                "No masks directory was found.\n\n"
+                "Generate masks first, then run **Calculate Root Area**.",
+            )
+            return
 
         csv_path = os.path.join(masks_dir, ROOT_AREAS_CSV)
+        logger.info("DBG show_root_area_viz: csv_path=%s, exists=%s", csv_path, os.path.exists(csv_path))
 
         if not os.path.exists(csv_path):
-            raise FileNotFoundError(f"No root area data found at {csv_path}")
+            QMessageBox.information(
+                main_window,
+                "No root area data",
+                "No root area data was found.\n\n"
+                "Run **Calculate Root Area** first (after generating masks).\n\n"
+                f"Expected file:\n  • {csv_path}",
+            )
+            return
 
         def create_new_visualization():
-            # Create new visualization with the current CSV path.
-            # Errors propagate to the outer handler in
-            # show_root_area_visualization, which logs and notifies the user.
+            logger.info("DBG show_root_area_viz: creating RootAreaVisualization with csv=%s", csv_path)
             main_window.root_area_viz = RootAreaVisualization(csv_path)
             main_window.root_area_viz.server_closed.connect(
                 main_window.on_area_visualization_server_closed
@@ -416,6 +509,8 @@ def show_root_area_visualization(main_window):
             # Add to right panel and show
             main_window.right_panel.addWidget(main_window.root_area_viz)
             main_window.right_panel.setCurrentWidget(main_window.root_area_viz)
+            logger.info("DBG show_root_area_viz: widget added, currentWidget=%s",
+                        main_window.right_panel.currentWidget().__class__.__name__)
 
             # Update button text
             main_window.visualize_root_area_button.setText("Close Area Visualization")

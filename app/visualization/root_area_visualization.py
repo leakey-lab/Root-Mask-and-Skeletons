@@ -1,4 +1,5 @@
 """Root-area Dash visualization window."""
+
 import logging
 import os
 from datetime import datetime
@@ -10,7 +11,7 @@ import socket
 import requests
 
 from .dash_app_area import DashAppArea
-from ._viz_server import _DashServerThreadBase
+from ._viz_server import _DashServerThreadBase, join_qthread
 from app.data_processing.data_processor_area import DataProcessorArea
 from app.config import DASH_AREA_PORT
 
@@ -47,7 +48,7 @@ class DashServerThreadArea(_DashServerThreadBase):
     """Werkzeug server thread for the root-area Dash app (port %d)."""
 
     def __init__(self, dash_app, port: int = DASH_AREA_PORT):
-        super().__init__(dash_app, port)
+        super().__init__(dash_app, port, object_name="DashServerThreadArea")
 
 
 class RootAreaVisualization(QMainWindow):
@@ -103,11 +104,21 @@ class RootAreaVisualization(QMainWindow):
                 return False
 
     def _start_visualization(self) -> None:
+        logger.info("DBG RootAreaViz._start_visualization: port=%d, attempt=%d",
+                    self.port, self.port_check_attempts)
         if not self._is_port_available(self.port):
             self.port_check_attempts += 1
+            logger.info(
+                "DBG RootAreaViz: port %d busy, retry %d/%d",
+                self.port, self.port_check_attempts, self.max_port_check_attempts,
+            )
             if self.port_check_attempts < self.max_port_check_attempts:
                 QTimer.singleShot(500, self._start_visualization)
                 return
+            logger.error(
+                "Port %d still busy after %d attempts, giving up",
+                self.port, self.max_port_check_attempts,
+            )
             error_msg = f"Error: Port {self.port} is in use.\nPlease try again later."
             self.loading_label.setText(error_msg)
             return
@@ -115,12 +126,13 @@ class RootAreaVisualization(QMainWindow):
         try:
             self.loading_label.setText("Loading data...\nThis may take a moment...")
 
-            self.init_worker = VisualizationInitWorkerArea(
-                self.csv_path, self.save_directory
-            )
+            self.init_worker = VisualizationInitWorkerArea(self.csv_path, self.save_directory)
+            self.init_worker.setObjectName("VisualizationInitWorkerArea")
+            self.init_worker.setParent(self)
             self.init_worker.finished.connect(self._on_init_finished)
             self.init_worker.error.connect(self._handle_initialization_error)
             self.init_worker.start()
+            logger.info("DBG RootAreaViz: init worker started")
 
         except Exception as exc:  # noqa: BLE001
             logger.exception("_start_visualization failed")
@@ -128,13 +140,19 @@ class RootAreaVisualization(QMainWindow):
 
     def _on_init_finished(self, processor, dash_app) -> None:
         """Called when worker thread finishes initialization."""
+        logger.info("DBG RootAreaViz._on_init_finished: processor=%s, dash_app=%s",
+                    processor, dash_app)
         try:
+            # Worker is done; release it now so it is not torn down with the widget.
+            self._join_init_worker()
+
             self.processor = processor
             self.dash_app = dash_app
 
             self.loading_label.setText("Starting server...\nPlease wait...")
 
             self.server_thread = DashServerThreadArea(self.dash_app, port=self.port)
+            self.server_thread.setParent(self)
             self.server_thread.error.connect(self._handle_server_error)
             self.server_thread.port_assigned.connect(self._on_port_assigned)
             self.server_thread.start()
@@ -163,9 +181,7 @@ class RootAreaVisualization(QMainWindow):
     def _handle_initialization_error(self, error_msg: str) -> None:
         logger.error("Initialization error: %s", error_msg)
         self.loading_label.setText(f"Initialization Error:\n{error_msg}")
-        QMessageBox.critical(
-            self, "Error", f"Failed to initialize visualization: {error_msg}"
-        )
+        QMessageBox.critical(self, "Error", f"Failed to initialize visualization: {error_msg}")
         self.cleanup_server()
 
     def _check_server(self) -> None:
@@ -173,18 +189,21 @@ class RootAreaVisualization(QMainWindow):
         try:
             url = f"http://localhost:{self.port}"
             response = requests.get(url, timeout=0.1)
+            logger.info("DBG RootAreaViz._check_server: status=%d", response.status_code)
             if response.status_code == 200:
                 self.check_server_timer.stop()
                 self._show_visualization()
-        except requests.exceptions.RequestException:
-            pass
+        except requests.exceptions.RequestException as exc:
+            logger.debug("Server not ready yet (port %d): %s", self.port, exc)
         except Exception as exc:  # noqa: BLE001
             logger.debug("_check_server poll error: %s", exc)
 
     def _show_visualization(self) -> None:
         """Load the Dash URL into the web view — idempotent (F-020)."""
+        logger.info("DBG RootAreaViz._show_visualization: _visualization_shown=%s, web_view=%s",
+                    self._visualization_shown, self.web_view)
         if self._visualization_shown:
-            logger.debug("_show_visualization: already shown, skipping")
+            logger.info("DBG RootAreaViz._show_visualization: already shown, skipping")
             return
         self._visualization_shown = True
 
@@ -200,32 +219,58 @@ class RootAreaVisualization(QMainWindow):
             logger.exception("_show_visualization failed")
             self._handle_initialization_error(str(exc))
 
+    def _join_init_worker(self) -> None:
+        """Wait for the init worker to finish and release it safely."""
+        if self.init_worker is None:
+            return
+        worker = self.init_worker
+        self.init_worker = None
+        for signal in (worker.finished, worker.error):
+            try:
+                signal.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+        if join_qthread(worker):
+            worker.deleteLater()
+        else:
+            # Thread still running after timeout; unparent so the window's
+            # destruction won't tear down a live QThread.
+            worker.setParent(None)
+            worker.finished.connect(lambda *_: worker.deleteLater())
+            worker.error.connect(lambda *_: worker.deleteLater())
+
+    def _join_server_thread(self) -> None:
+        if self.server_thread is None:
+            return
+        thread = self.server_thread
+        self.server_thread = None
+
+        if self.check_server_timer:
+            self.check_server_timer.stop()
+            self.check_server_timer = None
+
+        if self.web_view:
+            self.web_view.setUrl(QUrl("about:blank"))
+            self.web_view.hide()
+
+        thread.stop()
+        if join_qthread(thread):
+            thread.deleteLater()
+
+        self.server_active = False
+        self._visualization_shown = False
+        self.server_closed.emit()
+
     def cleanup_server(self) -> None:
-        # Stop initialization worker if still running
-        if self.init_worker and self.init_worker.isRunning():
-            self.init_worker.terminate()
-            self.init_worker.wait(1000)
-            self.init_worker = None
-
-        if self.server_thread:
-            if self.check_server_timer:
-                self.check_server_timer.stop()
-                self.check_server_timer = None
-
-            if self.web_view:
-                self.web_view.setUrl(QUrl("about:blank"))
-                self.web_view.hide()
-
-            self.server_thread.stop()
-            # Memory fix: join the thread so the OS reclaims the port before
-            # the caller proceeds (server_close alone does not block).
-            self.server_thread.wait(3000)
-            self.server_thread = None
-
-            self.server_active = False
-            self._visualization_shown = False
-
-            self.server_closed.emit()
+        # Join the initialization worker before dropping its reference.
+        # run() overrides QThread (no event loop, so quit() is a no-op) and is
+        # short-lived, so wait() unconditionally — regardless of isRunning(),
+        # which races the fast error path. Never terminate(): force-killing the
+        # thread while its C++ object is torn down is exactly what produces
+        # "QThread: Destroyed while thread '' is still running".
+        self._join_init_worker()
+        if self.server_thread is not None:
+            self._join_server_thread()
 
     def closeEvent(self, event) -> None:
         try:

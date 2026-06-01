@@ -93,8 +93,12 @@ class MaskGenerationThread(QThread):
             # Ensure the model is in eval mode for inference (F-022 / ML correctness).
             self.model.eval()
 
-            # Use inference_mode for maximum performance — no grad tape overhead (F-022).
-            with torch.inference_mode(), self.rt.autocast():
+            # Use inference_mode for performance — no grad tape overhead (F-022).
+            # Run in full fp32 (NO autocast): the ResNetSkeleton DualAttention
+            # blocks do large bmm + softmax over the spatial dims, which lose
+            # precision under fp16/bf16 mixed precision and degrade the mask.
+            # The weights were validated in fp32 (V2), so match that exactly.
+            with torch.inference_mode():
                 for batch_images, batch_filenames in dataloader:
                     try:
                         # Move batch to device
@@ -110,7 +114,7 @@ class MaskGenerationThread(QThread):
                         # Process each mask in the batch
                         for mask, filename in zip(batch_masks, batch_filenames):
                             # Convert to numpy and threshold using config constant (F-005 / config).
-                            mask_np = mask.squeeze().cpu().numpy()
+                            mask_np = mask.squeeze().float().cpu().numpy()
                             binary_mask = (mask_np > MASK_THRESHOLD).astype(np.uint8) * 255
 
                             # Convert to PIL Image and save

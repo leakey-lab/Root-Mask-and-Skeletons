@@ -295,14 +295,12 @@ class DashAppArea:
                     "font": {"size": 24},
                 },
                 xaxis=dict(
-                    title="Tube",
-                    titlefont=dict(size=18),
-                    tickfont=dict(size=14)
+                    title=dict(text="Tube", font=dict(size=18)),
+                    tickfont=dict(size=14),
                 ),
                 yaxis=dict(
-                    title="Total Area (mm²)",
-                    titlefont=dict(size=18),
-                    tickfont=dict(size=14)
+                    title=dict(text="Total Area (mm²)", font=dict(size=18)),
+                    tickfont=dict(size=14),
                 ),
                 legend_title=dict(text="Measurement Date", font=dict(size=18)),
                 autosize=True,
@@ -394,17 +392,15 @@ class DashAppArea:
                     font=dict(size=24),
                 ),
                 xaxis=dict(
-                    title="Position",
+                    title=dict(text="Position", font=dict(size=18)),
                     showgrid=True,
                     gridcolor="lightgray",
-                    titlefont=dict(size=18),
                     tickfont=dict(size=14),
                 ),
                 yaxis=dict(
-                    title="Root Area (mm²)",
+                    title=dict(text="Root Area (mm²)", font=dict(size=18)),
                     showgrid=True,
                     gridcolor="lightgray",
-                    titlefont=dict(size=18),
                     tickfont=dict(size=14),
                 ),
                 plot_bgcolor="white",
@@ -457,14 +453,12 @@ class DashAppArea:
                     font=dict(size=24)
                 ),
                 xaxis=dict(
-                    title="Date",
-                    titlefont=dict(size=18),
-                    tickfont=dict(size=14)
+                    title=dict(text="Date", font=dict(size=18)),
+                    tickfont=dict(size=14),
                 ),
                 yaxis=dict(
-                    title="Total Area (mm²)",
-                    titlefont=dict(size=18),
-                    tickfont=dict(size=14)
+                    title=dict(text="Total Area (mm²)", font=dict(size=18)),
+                    tickfont=dict(size=14),
                 ),
                 showlegend=True,
                 autosize=True,
