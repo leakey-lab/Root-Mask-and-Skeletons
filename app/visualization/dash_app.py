@@ -73,62 +73,64 @@ class DashApp(DashVisualizations):
             ]
             
             self.app.layout = html.Div(
-                className="sprouts-app",
-                style={
-                    "display": "flex",
-                    "flexDirection": "column",
-                    "alignItems": "center",
-                    "minHeight": "100vh",
-                    "width": "100%",
-                    "padding": "12px",
-                },
+                className="sprouts-app viz-page",
                 children=[
-                html.H1(
-                    "Root Length Visualization",
-                    className="sprouts-title",
-                    style={
-                        "textAlign": "center",
-                        "width": "100%",
-                        "marginBottom": "30px",
-                        "fontSize": "36px",
-                    },
+                # ---- header band: eyebrow + title + view selector ----
+                html.Div(
+                    className="viz-header",
+                    children=[
+                        html.Div(
+                            className="viz-header-left",
+                            children=[
+                                html.Div("INTERACTIVE DASHBOARD", className="viz-eyebrow"),
+                                html.H1("Root Length — trial overview", className="viz-title"),
+                            ],
+                        ),
+                        html.Div(
+                            className="viz-header-right",
+                            children=[
+                                dbc.RadioItems(
+                                    id="view-selector",
+                                    options=options,
+                                    value="stacked",
+                                    class_name="btn-group",
+                                    input_class_name="btn-check",
+                                    label_class_name="btn btn-outline-secondary",
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                # ---- collapsible control strip ----
+                html.Div(
+                    className="viz-controls",
+                    children=[
+                        dbc.Button(
+                            [
+                                html.Span("▸", className="viz-controls-caret"),
+                                html.Span("Tube & date range"),
+                                html.Span("controls", className="viz-controls-summary"),
+                            ],
+                            id="viz-controls-toggle",
+                            n_clicks=0,
+                            className="viz-controls-toggle",
+                            color="link",
+                        ),
+                        dbc.Collapse(
+                            id="viz-controls-collapse",
+                            is_open=False,
+                            children=html.Div(
+                                className="viz-controls-body",
+                                children=[
+                # Tube selector (for Growth Lines view)
+                dcc.Dropdown(
+                    id="tube-selector",
+                    placeholder="Select Tube",
+                    className="mb-3",
+                    style={"display": "none", "fontSize": "16px"},
                 ),
                 dbc.Container(
                     [
-                        dbc.Row(
-                            dbc.Col(
-                                dbc.Card(
-                                    dbc.CardBody(
-                                        [
-                                            html.H4(
-                                                "View Options",
-                                                className="card-title text-center",
-                                                style={"fontSize": "24px", "marginBottom": "20px"},
-                                            ),
-                                            dbc.RadioItems(
-                                                id="view-selector",
-                                                options=options,
-                                                value="stacked",
-                                                class_name="btn-group",
-                                                input_class_name="btn-check",
-                                                label_class_name="btn btn-outline-secondary",
-                                            ),
-                                            # Tube selector (for Growth Lines view)
-                                            dcc.Dropdown(
-                                                id="tube-selector",
-                                                placeholder="Select Tube",
-                                                className="mb-3",
-                                                style={"display": "none", "fontSize": "16px"},
-                                            ),
-                                        ]
-                                    ),
-                                    style={"marginBottom": "30px", "padding": "20px"},
-                                ),
-                                md=12,
-                                className="mx-auto",
-                            ),
-                            className="mb-4 justify-content-center",
-                        ),
                         # Tube Selection Panel (for Growth Over Time view)
                         dbc.Row(
                             dbc.Col(
@@ -366,59 +368,71 @@ class DashApp(DashVisualizations):
                             ),
                             className="mb-4 justify-content-center",
                         ),
-                        dbc.Row(
-                            dbc.Col(
-                                [
-                                    dcc.Loading(
-                                        type="default",
-                                        color="#5fd6a0",
-                                        children=dcc.Graph(
-                                            id="main-graph",
-                                            config={
-                                                "scrollZoom": True,
-                                                "doubleClick": "reset",
-                                                "showTips": False,
-                                                "displayModeBar": True,
-                                                "watermark": False,
-                                                "responsive": True,
-                                                "autosizable": True,
-                                                "toImageButtonOptions": {
-                                                    "format": "svg",
-                                                    "filename": "root_length_plot",
-                                                    "scale": 2,
-                                                },
-                                                "modeBarButtonsToAdd": ["downloadCsv"],
-                                            },
-                                        ),
-                                    ),
-                                    html.Div(
-                                        id="click-data",
-                                        className="text-center my-3",
-                                        style={"fontSize": "18px", "padding": "10px"},
-                                    ),
-                                ],
-                                className="d-flex flex-column align-items-center",
-                            )
-                        ),
-                        # Container for dynamically displayed images on hover
-                        dbc.Row(
-                            dbc.Col(
-                                html.Div(
-                                    id="image-container",
-                                ),
-                                md=12,
-                            ),
-                            className="mt-4",
-                        ),
-                        dcc.Store(id="cached-data"),
-                        dcc.Store(id="selected-tubes-store", data=[]),
-                        dcc.Store(id="legend-visible-store", data=True),
-                        dcc.Store(id="faceted-tubes-store", data=[]),
-                        dcc.Store(id="faceted-dates-store", data=[]),
                     ],
                     fluid=True,
                     className="px-2",
                 ),
+                                ],
+                            ),
+                        ),
+                    ],
+                ),
+                # ---- metric chips ----
+                html.Div(
+                    className="viz-metrics",
+                    children=[
+                        html.Div(id="click-data", className="metric"),
+                    ],
+                ),
+                # ---- chart card: full-bleed, fills remaining space ----
+                # Lines view renders chart + image panel side-by-side; other
+                # views are full-width chart. Both keep the same component ids.
+                html.Div(
+                    className="viz-chart-card",
+                    children=html.Div(
+                        className="viz-lines-row",
+                        children=[
+                            html.Div(
+                                className="viz-chart-pane",
+                                children=dcc.Loading(
+                                    type="default",
+                                    color="#5fd6a0",
+                                    children=dcc.Graph(
+                                        id="main-graph",
+                                        style={"width": "100%"},
+                                        config={
+                                            "scrollZoom": True,
+                                            "doubleClick": "reset",
+                                            "showTips": False,
+                                            "displayModeBar": True,
+                                            "watermark": False,
+                                            "responsive": True,
+                                            "autosizable": True,
+                                            "toImageButtonOptions": {
+                                                "format": "svg",
+                                                "filename": "root_length_plot",
+                                                "scale": 2,
+                                            },
+                                            "modeBarButtonsToAdd": ["downloadCsv"],
+                                        },
+                                    ),
+                                ),
+                            ),
+                            # Growth-Lines hover images sit beside the chart.
+                            html.Div(
+                                id="image-container",
+                                className="viz-image-panel",
+                            ),
+                        ],
+                    ),
+                ),
+                # no-op Output target for the clientside resize callback
+                dcc.Store(id="viz-resize-dummy"),
+                dcc.Store(id="cached-data"),
+                dcc.Store(id="selected-tubes-store", data=[]),
+                dcc.Store(id="legend-visible-store", data=True),
+                dcc.Store(id="faceted-tubes-store", data=[]),
+                dcc.Store(id="faceted-dates-store", data=[]),
             ],
         )
         except Exception:
@@ -430,6 +444,35 @@ class DashApp(DashVisualizations):
 
         # Import parse_tube_selection function
         from .dash_visualizations import parse_tube_selection
+
+        # Collapsible control strip toggle (new; touches only new ids).
+        @self.app.callback(
+            Output("viz-controls-collapse", "is_open"),
+            Input("viz-controls-toggle", "n_clicks"),
+            State("viz-controls-collapse", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_controls(n_clicks, is_open):
+            return not is_open
+
+        # Clientside refit: when the control strip toggles or the view changes,
+        # force Plotly to re-fit the chart width. Writes a no-op Store output;
+        # touches NO figure Output.
+        self.app.clientside_callback(
+            """
+            function(_n, _v) {
+                if (window.Plotly) {
+                    var g = document.getElementById('main-graph');
+                    if (g) { try { window.Plotly.Plots.resize(g); } catch (e) {} }
+                }
+                window.dispatchEvent(new Event('resize'));
+                return '';
+            }
+            """,
+            Output("viz-resize-dummy", "data"),
+            Input("viz-controls-collapse", "is_open"),
+            Input("view-selector", "value"),
+        )
 
         # Callback to show/hide tube selection, viz options, and faceted panels based on view type
         @self.app.callback(
