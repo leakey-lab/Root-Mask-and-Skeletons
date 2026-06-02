@@ -106,19 +106,23 @@ def build_ribbon(mw) -> QWidget:
         btn.setIconSize(QSize(16, 16))
         btn.setStyleSheet(f"""
             QToolButton {{
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: 8px;
+                background-color: {tokens.BG_2};
+                border: 1px solid {tokens.BORDER};
+                border-radius: 9px;
                 color: {tokens.TEXT_MUTED};
                 padding: 5px 12px;
                 font-size: 12.5px;
                 font-weight: 500;
             }}
-            QToolButton:hover {{ background-color: {tokens.BG_3}; color: {tokens.TEXT}; }}
-            QToolButton:checked {{
-                background-color: {tokens.ACCENT_SOFT};
+            QToolButton:hover {{
+                background-color: {tokens.BG_3};
                 color: {tokens.TEXT};
-                border: 1px solid {tokens.ACCENT_LINE};
+                border: 1px solid {tokens.BORDER_STRONG};
+            }}
+            QToolButton:checked {{
+                background-color: {tokens.rgba(tokens.ACCENT, 0.14)};
+                color: {tokens.ACCENT};
+                border: 1px solid {tokens.rgba(tokens.ACCENT, 0.30)};
             }}
         """)
         btn.clicked.connect(lambda _=False, h=handlers[label]: h())
