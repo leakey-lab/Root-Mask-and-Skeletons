@@ -146,6 +146,14 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         self.tool_rail.add_widget(self.eraser_button)
         self.tool_rail.add_widget(self.fill_button)
 
+        # Mode toggle (Draw/Pan) -> rail, after a separator.
+        self.tool_rail.add_separator()
+        self.mode_toggle = QPushButton("🔒 Draw")
+        self.mode_toggle.setCheckable(True)
+        self.mode_toggle.setChecked(True)
+        self.mode_toggle.clicked.connect(self.toggle_mode)
+        self.tool_rail.add_widget(self.mode_toggle)
+
     def _create_control_panel(self):
         """Create the bottom control panel with tools and adjustments."""
         control_panel = QWidget()
@@ -188,35 +196,6 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         # Image Enhancement Controls
         self.norm_controls = NormalizationControls(self)
         control_layout.addWidget(self.norm_controls)
-
-        # Mode toggle button
-        toggle_button_style = """
-            QPushButton {
-                background-color: #2d2d2d;
-                border: none;
-                border-radius: 4px;
-                padding: 4px;
-                color: white;
-                min-width: 40px;
-                max-width: 100px;
-                min-height: 28px;
-                max-height: 28px;
-                font-size: 14px;
-            }
-            QPushButton:checked {
-                background-color: #404040;
-            }
-            QPushButton:hover {
-                background-color: #404040;
-            }
-        """
-
-        self.mode_toggle = QPushButton("🔒 Draw")
-        self.mode_toggle.setStyleSheet(toggle_button_style)
-        self.mode_toggle.setCheckable(True)
-        self.mode_toggle.setChecked(True)
-        self.mode_toggle.clicked.connect(self.toggle_mode)
-        tools_layout.addWidget(self.mode_toggle)
 
         # Connect signals
         self._connect_signals()
