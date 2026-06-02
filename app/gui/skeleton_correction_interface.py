@@ -30,7 +30,6 @@ from PyQt6.QtWidgets import (
     QSlider,
     QLabel,
     QButtonGroup,
-    QGroupBox,
     QFileDialog,
     QMessageBox,
     QGraphicsScene,
@@ -225,9 +224,8 @@ class SkeletonCorrectionInterface(QWidget):
         # into the rail.
         self._build_overlays()
 
-        # Bottom controls
-        control_panel = self._create_control_panel()
-        main_layout.addWidget(control_panel)
+        # Construct controls and wire signals (controls live in the overlays).
+        self._create_control_panel()
 
         self.setLayout(main_layout)
 
@@ -339,30 +337,14 @@ class SkeletonCorrectionInterface(QWidget):
         x = max(14, (pw - self.polyline_prompt.width()) // 2)
         self.polyline_prompt.move(x, 14)
 
-    def _create_control_panel(self) -> QWidget:
-        control_panel = QWidget()
-        control_panel.setStyleSheet(
-            """
-            QWidget { background-color: #1e1e1e; }
-            QGroupBox {
-                border: 1px solid #333333;
-                border-radius: 4px;
-                margin-top: 4px;
-                padding-top: 12px;
-                color: white;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 7px;
-                padding: 0px 5px 0px 5px;
-            }
+    def _create_control_panel(self) -> None:
+        """Construct the editor controls and wire signals.
+
+        Controls live in the floating overlays (ToolRail / FloatingDock /
+        EnhancePopover / polyline prompt) built by ``_build_overlays``; this
+        method constructs the remaining widgets and connects every signal.
+        There is no longer a bottom control-panel chrome widget.
         """
-        )
-
-        layout = QHBoxLayout(control_panel)
-        layout.setSpacing(4)
-        layout.setContentsMargins(2, 1, 2, 1)
-
         # Tools (select/eraser/polyline/connect + mode/smooth toggles) live in
         # the floating ToolRail, constructed in _build_overlays.
         btn_style = """
@@ -378,12 +360,6 @@ class SkeletonCorrectionInterface(QWidget):
             QPushButton:checked { background-color: #404040; }
             QPushButton:hover { background-color: #404040; }
         """
-
-        actions_group = QGroupBox("Actions")
-        actions_group.setFixedWidth(140)
-        actions_layout = QVBoxLayout()
-        actions_layout.setSpacing(2)
-        actions_layout.setContentsMargins(4, 2, 4, 2)
 
         self.load_skeleton_button = QPushButton("📎 Load Skeleton…")
         self.save_skeleton_button = QPushButton("💾 Save Skeleton")
@@ -438,13 +414,6 @@ class SkeletonCorrectionInterface(QWidget):
         self._polyline_prompt_layout.addWidget(self.finish_polyline_button)
         self._polyline_prompt_layout.addWidget(self.cancel_polyline_button)
 
-        actions_group.setLayout(actions_layout)
-
-        adj_group = QGroupBox("Adjustments")
-        adj_layout = QVBoxLayout()
-        adj_layout.setSpacing(2)
-        adj_layout.setContentsMargins(8, 2, 8, 2)
-
         slider_style = """
             QSlider { max-height: 20px; }
             QSlider::groove:horizontal {
@@ -470,8 +439,6 @@ class SkeletonCorrectionInterface(QWidget):
         self.opacity_slider.setStyleSheet(slider_style)
         self.opacity_slider.setRange(5, 100)
         self.opacity_slider.setValue(int(self.overlay_opacity * 100))
-
-        adj_group.setLayout(adj_layout)
 
         # ---- FloatingDock: eraser slider [eraser-only], opacity, actions, Save ----
         # Eraser-size slider (label + slider); shown only when the eraser tool
@@ -537,8 +504,6 @@ class SkeletonCorrectionInterface(QWidget):
         self.status_label.setMaximumWidth(360)
         self.dock.add_separator()
         self.dock.add_widget(self.status_label)
-
-        return control_panel
 
     # -------------------- wiring --------------------
     def clamp_to_image(self, pt: QPoint) -> QPoint:
