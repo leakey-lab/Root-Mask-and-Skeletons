@@ -69,9 +69,10 @@ def build_titlebar(mw) -> QWidget:
 # --------------------------------------------------------------------------- #
 _RIBBON_STAGES = [
     ("Library", "image"),
-    ("Mask", "cpu"),
+    ("Generate Mask", "cpu"),
     ("Trace", "brush"),
-    ("Skeleton", "skeleton"),
+    ("Generate Skeleton", "skeleton"),
+    ("Correct", "node"),
     ("Measure", "ruler"),
     ("Visualize", "chart"),
 ]
@@ -90,9 +91,10 @@ def build_ribbon(mw) -> QWidget:
 
     base_handlers = {
         "Library": lambda: mw.switch_right_panel("display"),
-        "Mask": lambda: mw.switch_right_panel("display"),
+        "Generate Mask": lambda: mw.switch_right_panel("display"),
         "Trace": mw.toggle_mask_tracing,
-        "Skeleton": mw.toggle_skeleton_correction,
+        "Generate Skeleton": lambda: mw.switch_right_panel("display"),
+        "Correct": mw.toggle_skeleton_correction,
         "Measure": lambda: mw.switch_right_panel("display"),
         "Visualize": lambda: mw.switch_right_panel("display"),
     }
@@ -155,9 +157,10 @@ def build_ribbon(mw) -> QWidget:
 # Per-stage hint text shown at the left of the action bar.
 _STAGE_HINTS = {
     "Library": "<b>Library.</b> Browse and select images from the tree.",
-    "Mask": "<b>Mask.</b> Generate segmentation masks with the ML model.",
+    "Generate Mask": "<b>Generate Mask.</b> Segment roots from images with the ML model.",
     "Trace": "<b>Trace.</b> Manually paint or refine the root mask.",
-    "Skeleton": "<b>Skeleton.</b> Generate or correct the root skeleton.",
+    "Generate Skeleton": "<b>Generate Skeleton.</b> Extract the medial-axis skeleton from masks.",
+    "Correct": "<b>Correct.</b> Manually edit and repair the root skeleton.",
     "Measure": "<b>Measure.</b> Compute root length and area.",
     "Visualize": "<b>Visualize.</b> Explore length / area dashboards.",
 }
@@ -243,9 +246,10 @@ def build_action_bar(mw) -> QWidget:
 
         pages = {
             "Library": _page(view_seg),
-            "Mask": _page(mw.generate_mask_button),
+            "Generate Mask": _page(mw.generate_mask_button),
             "Trace": _page(trace_clear),
-            "Skeleton": _page(mw.generate_button),
+            "Generate Skeleton": _page(mw.generate_button),
+            "Correct": _page(),
             "Measure": _page(
                 mw.calculate_length_button, mw.calculate_area_button
             ),
