@@ -774,13 +774,12 @@ class DashApp(DashVisualizations):
             faceted_dates
         ):
             ctx = dash.callback_context
+            # Fill the chart card completely: the card is flex:1 of the 100vh
+            # page, so height:100% + width:100% makes the graph occupy the whole
+            # visible viewport (no fixed vh / minHeight gaps, no outer margin).
             default_style = {
-                "borderRadius": "8px",
-                "padding": "12px",
-                "height": "85vh",
-                "minHeight": "800px",
+                "height": "100%",
                 "width": "100%",
-                "marginBottom": "12px",
                 "overflow": "hidden",
             }
 
@@ -818,9 +817,9 @@ class DashApp(DashVisualizations):
                         for tube in self.data_processor.get_unique_tubes()
                     ]
                     
+                    # Lines view: chart pane fills its flex column too (the side
+                    # image panel sits beside it via .viz-lines-row).
                     lines_graph_style = default_style.copy()
-                    lines_graph_style["height"] = "80vh"
-                    lines_graph_style["minHeight"] = "600px"
 
                     # Display-only; .viz-image-panel CSS places it beside the
                     # chart (300px right column) and stacks images vertically.
@@ -1021,30 +1020,38 @@ class DashApp(DashVisualizations):
                                     html.Img(
                                         src=img_src,
                                         style={
+                                            # Fill the side panel width so each
+                                            # image is a meaningful >=100x100
+                                            # representation (panel is ~300px).
                                             "width": "100%",
+                                            "minWidth": "100px",
+                                            "minHeight": "100px",
                                             "height": "auto",
                                             "objectFit": "contain",
-                                            "border": "1px solid #ddd",
-                                            "borderRadius": "4px",
+                                            "border": "1px solid #2a2c39",
+                                            "borderRadius": "6px",
+                                            "background": "#15161c",
                                         },
                                     ),
                                     html.P(
                                         f"Position L{pos}",
                                         style={
                                             "textAlign": "center",
-                                            "fontWeight": "bold",
-                                            "margin": "5px 0",
-                                            "fontSize": "14px",
+                                            "fontWeight": "600",
+                                            "margin": "4px 0 0",
+                                            "fontSize": "11.5px",
+                                            "fontFamily": "'IBM Plex Mono', monospace",
+                                            "color": "#9498ad",
                                         },
                                     ),
                                 ],
                                 key=f"image-{pos}-{date_str}",
                                 style={
-                                    "width": "10%",
-                                    "padding": "2px",
+                                    # Full width of the .viz-image-panel column,
+                                    # stacked vertically (panel is flex-column).
+                                    "width": "100%",
+                                    "padding": "2px 0",
                                     "boxSizing": "border-box",
-                                    "display": "inline-block",
-                                    "verticalAlign": "top",
                                 },
                             )
                         )

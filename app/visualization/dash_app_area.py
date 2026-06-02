@@ -16,13 +16,11 @@ theme.use("sprouts")
 logger = logging.getLogger(__name__)
 
 # Shared graph-container style to avoid duplication (F-087).
+# Fill the chart card completely (card is flex:1 of the 100vh page).
 _GRAPH_STYLE = {
-    "borderRadius": "8px",
-    "padding": "20px",
-    "height": "85vh",
-    "minHeight": "800px",
+    "height": "100%",
     "width": "100%",
-    "marginBottom": "20px",
+    "overflow": "hidden",
 }
 
 

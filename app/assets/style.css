@@ -256,7 +256,7 @@ input[type=checkbox], input[type=radio]{ accent-color:var(--accent); }
 .viz-chart-card{
   flex:1 1 auto; min-height:0; width:100%;
   background:var(--bg-2); border:0;
-  padding:8px;
+  padding:0;
   display:flex; flex-direction:column;
   /* auto: width-fluid views produce no scrollbar; the faceted depth profile
      keeps its tall computed height and scrolls internally instead. */

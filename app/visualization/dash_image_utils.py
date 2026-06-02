@@ -24,8 +24,10 @@ logger = logging.getLogger(__name__)
 # (tube, position, date_str) tuple path keys.
 _THUMBNAIL_CACHE_KEY = "_encoded_thumbnails"
 
-# Thumbnail dimensions for hover previews.
-_THUMBNAIL_SIZE = (200, 150)
+# Thumbnail dimensions for hover previews. Sized so each image renders as a
+# meaningful >=100x100 representation in the Growth-Lines side panel (~300px
+# wide) without visible upscaling blur.
+_THUMBNAIL_SIZE = (256, 256)
 
 
 def _encode_thumbnail(path: str) -> str:
