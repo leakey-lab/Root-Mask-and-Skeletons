@@ -175,6 +175,9 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         self.tool_rail.add_separator()
         self.tool_rail.add_widget(self.enhance_button)
 
+        # Connect signals (all referenced widgets now exist).
+        self._connect_signals()
+
     def _create_control_panel(self):
         """Create the bottom control panel with tools and adjustments."""
         control_panel = QWidget()
@@ -217,9 +220,6 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         # Image Enhancement Controls
         self.norm_controls = NormalizationControls(self)
         control_layout.addWidget(self.norm_controls)
-
-        # Connect signals
-        self._connect_signals()
 
         return control_panel
 
