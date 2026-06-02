@@ -518,10 +518,17 @@ class SkeletonCorrectionInterface(QWidget):
         self.mode_toggle.clicked.connect(self._on_mode_toggle)
         self.smooth_polyline_toggle.toggled.connect(self._on_smooth_polyline_toggled)
 
-        # Image enhancement controls (same as mask tracing)
+        # Image enhancement controls (same as mask tracing) -> top-right popover,
+        # toggled from a contrast IconButton on the rail.
         self.norm_controls = NormalizationControls(self)
         self.norm_controls.apply_button.clicked.connect(self.apply_normalization)
-        layout.addWidget(self.norm_controls)
+        self.enhance_popover.set_content(self.norm_controls)
+        self.enhance_button = IconButton(
+            "contrast", "Image enhancement", checkable=False
+        )
+        self.enhance_button.clicked.connect(self.enhance_popover.toggle)
+        self.tool_rail.add_separator()
+        self.tool_rail.add_widget(self.enhance_button)
 
         # Status/hint label
         status_group = QGroupBox("Status")
