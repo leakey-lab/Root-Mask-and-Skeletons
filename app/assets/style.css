@@ -258,15 +258,15 @@ input[type=checkbox], input[type=radio]{ accent-color:var(--accent); }
   background:var(--bg-2); border:0;
   padding:8px;
   display:flex; flex-direction:column;
-  overflow:hidden;
+  /* auto: width-fluid views produce no scrollbar; the faceted depth profile
+     keeps its tall computed height and scrolls internally instead. */
+  overflow-y:auto; overflow-x:hidden;
 }
 .viz-chart-card > ._dash-loading-callback,
 .viz-chart-card .dash-graph,
 .viz-chart-card .js-plotly-plot{
   flex:1 1 auto; min-height:0; width:100%;
 }
-/* faceted (tall computed height) scrolls internally */
-.viz-chart-card.viz-chart-scroll{ overflow-y:auto; }
 
 /* ---- Growth-Lines two-pane row ---------------------------- */
 .viz-lines-row{
