@@ -142,10 +142,15 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         super().closeEvent(event)
 
-    def init_ui(self):
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout(main_widget)
+    def _build_body(self) -> QWidget:
+        """Build the left/right splitter body (presentation extract of init_ui).
+
+        Returns a container widget holding the QSplitter. PRESERVES the four
+        ``right_panel.addWidget`` calls in their fixed index order
+        (0=display, 1=mask_tracing, 2=visualization, 3=skeleton_correction).
+        """
+        body = QWidget()
+        main_layout = QHBoxLayout(body)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         main_layout.addWidget(splitter)
@@ -168,6 +173,11 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.right_panel)
 
         splitter.setSizes([400, 800])
+        return body
+
+    def init_ui(self):
+        main_widget = self._build_body()
+        self.setCentralWidget(main_widget)
 
         # Status Bar with first-class task-progress widget.
         # Replaces the old cramped status-bar QProgressBar (text-on-bar). The
