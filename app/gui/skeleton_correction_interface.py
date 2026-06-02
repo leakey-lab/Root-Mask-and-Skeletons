@@ -179,7 +179,7 @@ class SkeletonCorrectionInterface(QWidget):
         # lifetime of the displayed pixmap to avoid a use-after-free on the
         # raw numpy pointer handed to QImage.
         self._overlay_color_table = [0] * 256
-        self._overlay_color_table[255] = QColor(57, 255, 20).rgba()  # neon green
+        self._overlay_color_table[255] = QColor("#f0a868").rgba()  # skeleton warm orange
         self._overlay_qimage_buffer: Optional[np.ndarray] = None
 
         self._build_ui()
@@ -739,7 +739,7 @@ class SkeletonCorrectionInterface(QWidget):
 
         r = 5
         item = QGraphicsEllipseItem(pt.x() - r, pt.y() - r, r * 2, r * 2)
-        item.setPen(QPen(QColor("#8be9fd")))
+        item.setPen(QPen(QColor("#c39af6")))  # selection accent purple
         item.setBrush(QBrush(QColor(0, 0, 0, 0)))
         item.setZValue(4)
         self.scene.addItem(item)
@@ -747,7 +747,7 @@ class SkeletonCorrectionInterface(QWidget):
 
     def _clear_endpoint_highlights(self) -> None:
         for it in self._endpoint_items:
-            it.setBrush(QBrush(QColor("#ffb86c")))  # orange
+            it.setBrush(QBrush(QColor("#f0a868")))  # skeleton/endpoint warm orange
 
     def _refresh_endpoints(self) -> None:
         self._clear_endpoint_items()
@@ -756,7 +756,7 @@ class SkeletonCorrectionInterface(QWidget):
             r = 4
             item = QGraphicsEllipseItem(x - r, y - r, r * 2, r * 2)
             item.setPen(QPen(QColor("#282a36")))
-            item.setBrush(QBrush(QColor("#ffb86c")))
+            item.setBrush(QBrush(QColor("#f0a868")))  # skeleton/endpoint warm orange
             item.setZValue(3)
             self.scene.addItem(item)
             self._endpoint_items.append(item)
@@ -785,7 +785,7 @@ class SkeletonCorrectionInterface(QWidget):
         for it in self._endpoint_items:
             c = it.rect().center()
             if abs(c.x() - pt.x()) <= 1 and abs(c.y() - pt.y()) <= 1:
-                it.setBrush(QBrush(QColor("#50fa7b")))
+                it.setBrush(QBrush(QColor("#c39af6")))  # highlight accent purple
 
     # -------------------- actions --------------------
     def clear_skeleton(self) -> None:
@@ -1145,7 +1145,7 @@ class SkeletonCorrectionInterface(QWidget):
         """Draw a transient preview line for the Connect tool drag using vector graphics."""
         if self._connect_line_preview_item is None:
             self._connect_line_preview_item = QGraphicsLineItem()
-            pen = QPen(QColor("#50fa7b"))  # green
+            pen = QPen(QColor("#c39af6"))  # connect preview accent purple
             pen.setWidth(2)
             pen.setCosmetic(True)  # Keep width constant regardless of zoom
             self._connect_line_preview_item.setPen(pen)
@@ -1168,7 +1168,7 @@ class SkeletonCorrectionInterface(QWidget):
         for p in self._polyline_points:
             r = 4
             item = QGraphicsEllipseItem(p.x() - r, p.y() - r, r * 2, r * 2)
-            pen = QPen(QColor("#ff79c6"))  # pink
+            pen = QPen(QColor("#c39af6"))  # handle accent purple
             pen.setWidth(2)
             item.setPen(pen)
             item.setBrush(QBrush(QColor(0, 0, 0, 0)))
@@ -1275,7 +1275,7 @@ class SkeletonCorrectionInterface(QWidget):
 
         if self._polyline_preview_item is None:
             self._polyline_preview_item = QGraphicsPathItem()
-            pen = QPen(QColor("#8be9fd"))  # cyan
+            pen = QPen(QColor("#c39af6"))  # polyline preview accent purple
             pen.setWidth(2)
             pen.setCosmetic(True)
             self._polyline_preview_item.setPen(pen)
