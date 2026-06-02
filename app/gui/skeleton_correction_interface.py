@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import QColor, QImage, QKeyEvent, QPixmap, QKeySequence, QShortcut, QPainterPath
 from PyQt6.QtGui import QPen, QBrush
 from PyQt6.QtWidgets import (
@@ -38,12 +38,21 @@ from PyQt6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsPathItem,
     QGraphicsLineItem,
+    QFrame,
 )
 
 from .skeleton_correction_graphics_view import SkeletonCorrectionGraphicsView
 from .skeleton_graph_model import SkeletonCorrectionModel
 from .image_normalization_interface import ImageNormalization, NormalizationControls
 from .mask_cursor_utils import create_brush_cursor
+from app.gui.widgets import (
+    ToolRail,
+    FloatingDock,
+    EnhancePopover,
+    IconButton,
+    load_icon,
+    tokens,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -216,6 +225,64 @@ class SkeletonCorrectionInterface(QWidget):
         main_layout.addWidget(control_panel)
 
         self.setLayout(main_layout)
+
+        # Floating in-window overlays (parented to the graphics view).
+        self._build_overlays()
+
+    def _build_overlays(self) -> None:
+        """Build the floating in-window overlays (presentation only).
+
+        Creates a left vertical ``ToolRail``, a bottom-centre ``FloatingDock``,
+        a top-right ``EnhancePopover`` and a top-centre contextual polyline
+        prompt, all parented to the graphics view (matching the SPROUTS canvas
+        layout). Controls are reparented into these in later tasks.
+        """
+        self.tool_rail = ToolRail(self.graphics_view)
+        self.dock = FloatingDock(self.graphics_view)
+        self.enhance_popover = EnhancePopover(self.graphics_view)
+
+        # Top-centre contextual polyline prompt (Finish/Cancel), shown only
+        # while a polyline is in progress.
+        self.polyline_prompt = QFrame(self.graphics_view)
+        self.polyline_prompt.setObjectName("polylinePrompt")
+        self.polyline_prompt.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.polyline_prompt.setStyleSheet(f"""
+            QFrame#polylinePrompt {{
+                background-color: {tokens.BG_1};
+                border: 1px solid {tokens.BORDER_STRONG};
+                border-radius: 13px;
+            }}
+        """)
+        self._polyline_prompt_layout = QHBoxLayout(self.polyline_prompt)
+        self._polyline_prompt_layout.setContentsMargins(6, 6, 6, 6)
+        self._polyline_prompt_layout.setSpacing(3)
+        self.polyline_prompt.hide()
+
+        # Position overlays once the initial layout has settled.
+        QTimer.singleShot(0, self._reposition_overlays)
+
+    def _reposition_overlays(self) -> None:
+        """Reposition the floating overlays over the graphics-view bounds."""
+        if hasattr(self, "tool_rail"):
+            self.tool_rail.reposition()
+            self.tool_rail.raise_()
+        if hasattr(self, "dock"):
+            self.dock.reposition()
+            self.dock.raise_()
+        if hasattr(self, "enhance_popover"):
+            self.enhance_popover.reposition()
+            self.enhance_popover.raise_()
+        if hasattr(self, "polyline_prompt"):
+            self._reposition_polyline_prompt()
+            self.polyline_prompt.raise_()
+
+    def _reposition_polyline_prompt(self) -> None:
+        """Top-centre the contextual polyline prompt over the graphics view."""
+        parent = self.graphics_view
+        self.polyline_prompt.adjustSize()
+        pw = parent.width()
+        x = max(14, (pw - self.polyline_prompt.width()) // 2)
+        self.polyline_prompt.move(x, 14)
 
     def _create_control_panel(self) -> QWidget:
         control_panel = QWidget()
