@@ -37,6 +37,14 @@ from .mask_graphics_view import MaskTracingGraphicsView
 from .mask_cursor_utils import create_brush_cursor, create_panning_cursor
 from .mask_drawing_tools import MaskDrawingMixin
 from .image_normalization_interface import ImageNormalization, NormalizationControls
+from app.gui.widgets import (
+    ToolRail,
+    FloatingDock,
+    EnhancePopover,
+    IconButton,
+    load_icon,
+    tokens,
+)
 
 
 class MaskTracingInterface(QWidget, MaskDrawingMixin):
