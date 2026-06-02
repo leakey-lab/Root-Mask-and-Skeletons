@@ -154,6 +154,18 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         self.mode_toggle.clicked.connect(self.toggle_mode)
         self.tool_rail.add_widget(self.mode_toggle)
 
+        # Sliders + actions -> bottom dock.
+        self.size_container.setFixedWidth(150)
+        self.opacity_container.setFixedWidth(150)
+        self.dock.add_widget(self.size_container)
+        self.dock.add_widget(self.opacity_container)
+        self.dock.add_separator()
+        self.dock.add_widget(self.undo_button)
+        self.dock.add_widget(self.redo_button)
+        self.dock.add_widget(self.clear_button)
+        self.dock.add_separator()
+        self.dock.add_widget(self.save_button)
+
     def _create_control_panel(self):
         """Create the bottom control panel with tools and adjustments."""
         control_panel = QWidget()
@@ -352,12 +364,15 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
             if name == "Brush Size":
                 self.size_slider = slider
                 self.size_label = label
+                self.size_container = container
             elif name == "Opacity":
                 self.opacity_slider = slider
                 self.opacity_label = label
+                self.opacity_container = container
             else:
                 self.zoom_slider = slider
                 self.zoom_label = label
+                self.zoom_container = container
 
         adjustments_group.setLayout(adjustments_layout)
         return adjustments_group
