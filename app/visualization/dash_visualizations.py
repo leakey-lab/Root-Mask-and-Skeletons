@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from . import theme
 
 logger = logging.getLogger(__name__)
 
@@ -126,23 +127,20 @@ class DashVisualizations:
                         avg = stats["avg"]
                         averages.append(avg)
                         max_length = max(max_length, stats["max"])
+                        img_status = "Available" if has_image else "Not Available"
                         hover_text = (
-                            f"<b style='color:#2c3e50;'>📏 Interval L{pos - interval_size + 1}-L{pos}</b><br>"
-                            f"<span style='color:#7f8c8d;'>────────────</span><br>"
-                            f"<b>Average:</b> <span style='color:#27ae60; font-weight:bold;'>{avg:.2f} mm</span><br>"
-                            f"<b>Range:</b> <span style='color:#3498db;'>{stats['min']:.2f} - {stats['max']:.2f} mm</span><br>"
-                            f"<b>Std Dev:</b> <span style='color:#e67e22;'>±{stats['std']:.2f}</span><br>"
-                            f"<b>Measurements:</b> <span style='color:#9b59b6;'>{stats['count']}</span><br>"
-                            f"<b>Date:</b> <span style='color:#e74c3c;'>{date_str}</span><br>"
-                            f"<b>Image:</b> <span style='color:{'#27ae60' if has_image else '#95a5a6'};'>{'✓ Available' if has_image else '✗ Not Available'}</span>"
+                            f"Interval L{pos - interval_size + 1}-L{pos}  <b>{date_str}</b><br>"
+                            f"Average  <b>{avg:.2f} mm</b><br>"
+                            f"Range  <b>{stats['min']:.2f} - {stats['max']:.2f} mm</b><br>"
+                            f"Std Dev  <b>+/-{stats['std']:.2f}</b><br>"
+                            f"Measurements  <b>{stats['count']}</b><br>"
+                            f"Image  <b>{img_status}</b>"
                         )
                         custom_data.append(date_str)
                     else:
                         averages.append(float("nan"))
                         hover_text = (
-                            f"<b style='color:#e74c3c;'>⚠ No Data</b><br>"
-                            f"<span style='color:#7f8c8d;'>────────────</span><br>"
-                            f"Interval L{pos - interval_size + 1}-L{pos}"
+                            f"No Data  Interval L{pos - interval_size + 1}-L{pos}"
                         )
                         custom_data.append(date_str)
 
@@ -170,58 +168,22 @@ class DashVisualizations:
 
             # Update layout with optimized settings
             fig.update_layout(
-                title={
-                    "text": f"Root Growth - Tube {int(selected_tube)}",
-                    "x": 0.5,
-                    "xanchor": "center",
-                    "font": {"size": 24},
-                },
-                xaxis={
-                    "title": {"text": "Root Length (mm)", "font": {"size": 18}},
-                    "showgrid": True,
-                    "gridcolor": "lightgray",
-                    "zeroline": True,
-                    "zerolinecolor": "black",
-                    "zerolinewidth": 2,
-                    "range": [-1, max_length * 1.1] if max_length > 0 else [-1, 10],
-                    "tickformat": ".1f",
-                    "tickfont": {"size": 14},
-                },
-                yaxis={
-                    "title": {"text": "Position (L)", "font": {"size": 18}},
-                    "showgrid": True,
-                    "gridcolor": "lightgray",
-                    "zeroline": False,
-                    "autorange": "reversed",
-                    "tickmode": "array",
-                    "ticktext": [f"L{pos}" for pos in positions] if positions else [],
-                    "tickvals": positions if positions else [],
-                    "dtick": 10,
-                    "tickfont": {"size": 14},
-                },
-                plot_bgcolor="white",
-                legend={
-                    "title": {"text": "Measurement Dates", "font": {"size": 18}},
-                    "yanchor": "top",
-                    "y": 0.99,
-                    "xanchor": "left",
-                    "x": 1.02,
-                    "bgcolor": "rgba(255, 255, 255, 0.8)",
-                    "bordercolor": "black",
-                    "borderwidth": 1,
-                    "font": {"size": 14},
-                },
+                title_text=f"Root Growth - Tube {int(selected_tube)}",
+                xaxis_title_text="Root Length (mm)",
+                yaxis_title_text="Position (L)",
+                legend_title_text="Measurement Dates",
                 hovermode="closest",
-                height=520,
-                autosize=True,
-                margin={"t": 60, "b": 40, "l": 60, "r": 100},
-                hoverlabel=dict(
-                    bgcolor="white",
-                    font_size=13,
-                    font_family="Arial, sans-serif",
-                    bordercolor="#2c3e50",
-                    align="left",
-                ),
+            )
+            fig.update_xaxes(
+                range=[-1, max_length * 1.1] if max_length > 0 else [-1, 10],
+                tickformat=".1f",
+            )
+            fig.update_yaxes(
+                autorange="reversed",
+                tickmode="array",
+                ticktext=[f"L{pos}" for pos in positions] if positions else [],
+                tickvals=positions if positions else [],
+                dtick=10,
             )
 
             # Add reference line if we have positions
@@ -371,13 +333,10 @@ class DashVisualizations:
                             line=dict(color="rgba(0,0,0,0)"),
                             name="Field Variance (±1 SD)",
                             legendgroup="field_avg",
-                            hovertemplate=(
-                                "<b style='font-size:14px; color:#2c3e50;'>📊 Field Variance Range</b><br>"
-                                "<span style='color:#7f8c8d;'>────────────────</span><br>"
-                                "<b>Date:</b> <span style='color:#3498db;'>%{x|%b %d, %Y}</span><br>"
-                                "<b>Range:</b> <span style='color:#e74c3c;'>±1 Standard Deviation</span><br>"
-                                "<extra></extra>"
-                            ),
+                            hovertemplate=theme.hover("Field Variance Range", [
+                                ("Date", "%{x|%b %d, %Y}"),
+                                ("Range", "+-1 Standard Deviation"),
+                            ]),
                         )
                     )
 
@@ -391,15 +350,12 @@ class DashVisualizations:
                         line=dict(color="black", width=3),
                         marker=dict(size=8, color="black"),
                         legendgroup="field_avg",
-                        hovertemplate=(
-                            "<b style='font-size:15px; color:#2c3e50;'>🌾 Field Average</b><br>"
-                            "<span style='color:#7f8c8d;'>────────────────</span><br>"
-                            "<b>Date:</b> <span style='color:#3498db;'>%{x|%b %d, %Y}</span><br>"
-                            "<b>Avg Length:</b> <span style='color:#27ae60; font-weight:bold;'>%{y:.2f} mm</span><br>"
-                            "<b>Std Dev:</b> <span style='color:#e67e22;'>±%{customdata[0]:.2f} mm</span><br>"
-                            "<b>Tubes:</b> <span style='color:#9b59b6;'>%{customdata[1]:.0f}</span><br>"
-                            "<extra></extra>"
-                        ),
+                        hovertemplate=theme.hover("Field Average", [
+                            ("Date", "%{x|%b %d, %Y}"),
+                            ("Avg Length", "%{y:.2f} mm"),
+                            ("Std Dev", "+/-%{customdata[0]:.2f} mm"),
+                            ("Tubes", "%{customdata[1]:.0f}"),
+                        ]),
                         customdata=field_stats[["std_length", "count"]].values,
                     )
                 )
@@ -427,60 +383,20 @@ class DashVisualizations:
                             name=f"Tube {int(tube)}",
                             line=dict(color=color, width=2),
                             marker=dict(size=6),
-                            hovertemplate=(
-                                f"<b style='font-size:15px; color:{color};'>🧪 Tube {int(tube)}</b><br>"
-                                "<span style='color:#7f8c8d;'>────────────────</span><br>"
-                                "<b>Date:</b> <span style='color:#3498db;'>%{x|%b %d, %Y}</span><br>"
-                                "<b>Total Length:</b> <span style='color:#27ae60; font-weight:bold;'>%{y:.2f} mm</span><br>"
-                                "<extra></extra>"
-                            ),
+                            hovertemplate=theme.hover(f"Tube {int(tube)}", [
+                                ("Date", "%{x|%b %d, %Y}"),
+                                ("Total Length", "%{y:.2f} mm"),
+                            ]),
                         )
                     )
 
             # Update layout
             fig.update_layout(
-                title=dict(
-                    text="Root Growth Over Time",
-                    font=dict(size=24),
-                    x=0.5,
-                    xanchor="center",
-                ),
-                xaxis=dict(
-                    title=dict(text="Date", font=dict(size=18)),
-                    tickfont=dict(size=14),
-                    showgrid=True,
-                    gridcolor="lightgray",
-                ),
-                yaxis=dict(
-                    title=dict(text="Total Length (mm)", font=dict(size=18)),
-                    tickfont=dict(size=14),
-                    showgrid=True,
-                    gridcolor="lightgray",
-                ),
+                title_text="Root Growth Over Time",
+                xaxis_title_text="Date",
+                yaxis_title_text="Total Length (mm)",
                 showlegend=show_legend,
-                autosize=True,
-                margin=dict(l=60, r=250, t=60, b=40),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="white",
-                height=720,
-                legend=dict(
-                    font=dict(size=14),
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=1.02,
-                    bgcolor="rgba(255,255,255,0.9)",
-                    bordercolor="black",
-                    borderwidth=1,
-                ),
                 hovermode="closest",
-                hoverlabel=dict(
-                    bgcolor="white",
-                    font_size=13,
-                    font_family="Arial, sans-serif",
-                    bordercolor="#2c3e50",
-                    align="left",
-                ),
             )
 
             return fig
@@ -506,75 +422,21 @@ class DashVisualizations:
                         y=trace_data,
                         text=[f"{v:.2f}" for v in trace_data],
                         textposition="auto",
-                        hovertemplate=(
-                            "<b style='font-size:14px; color:#2c3e50;'>🧪 %{x}</b><br>"
-                            "<span style='color:#7f8c8d;'>────────────</span><br>"
-                            f"<b>Date:</b> <span style='color:#3498db;'>{date.strftime('%b %d, %Y')}</span><br>"
-                            "<b>Length:</b> <span style='color:#27ae60; font-weight:bold;'>%{y:.2f} mm</span><br>"
-                            "<extra></extra>"
-                        ),
+                        hovertemplate=theme.hover("%{x}", [
+                            ("Date", date.strftime('%b %d, %Y')),
+                            ("Length", "%{y:.2f} mm"),
+                        ]),
                     )
                 )
 
             fig = go.Figure(data=traces)
             fig.update_layout(
                 barmode="stack",
-                title={
-                    "text": "Root Length Growth by Tube and Date",
-                    "x": 0.5,
-                    "xanchor": "center",
-                    "font": {"size": 24},
-                },
-                xaxis=dict(
-                    title=dict(text="Tube", font=dict(size=18)),
-                    tickfont=dict(size=14),
-                ),
-                yaxis=dict(
-                    title=dict(text="Total Length (mm)", font=dict(size=18)),
-                    tickfont=dict(size=14),
-                ),
-                legend_title=dict(text="Measurement Date", font=dict(size=18)),
-                autosize=True,
-                showlegend=True,
+                title_text="Root Length Growth by Tube and Date",
+                xaxis_title_text="Tube",
+                yaxis_title_text="Total Length (mm)",
+                legend_title_text="Measurement Date",
                 hovermode="x unified",
-                plot_bgcolor="white",
-                bargap=0.2,
-                bargroupgap=0.1,
-                legend={
-                    "yanchor": "top",
-                    "y": 0.99,
-                    "xanchor": "left",
-                    "x": 1.02,
-                    "bgcolor": "rgba(255, 255, 255, 0.8)",
-                    "bordercolor": "black",
-                    "borderwidth": 1,
-                    "font": {"size": 14},
-                },
-                margin={"l": 60, "r": 150, "t": 60, "b": 40},
-                hoverlabel=dict(
-                    bgcolor="white",
-                    font_size=13,
-                    font_family="Arial, sans-serif",
-                    bordercolor="#2c3e50",
-                    align="left",
-                ),
-            )
-
-            fig.update_xaxes(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor="lightgray",
-                showline=True,
-                linewidth=2,
-                linecolor="black",
-            )
-            fig.update_yaxes(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor="lightgray",
-                showline=True,
-                linewidth=2,
-                linecolor="black",
             )
 
             return fig
@@ -611,7 +473,7 @@ class DashVisualizations:
                     x=0.5,
                     y=0.5,
                     showarrow=False,
-                    font=dict(size=20, color="red"),
+                    font=dict(size=20, color="#9498ad"),
                 )
                 return fig
 
@@ -644,7 +506,7 @@ class DashVisualizations:
                     x=0.5,
                     y=0.5,
                     showarrow=False,
-                    font=dict(size=20, color="red"),
+                    font=dict(size=20, color="#9498ad"),
                 )
                 return fig
 
@@ -673,6 +535,7 @@ class DashVisualizations:
                 subplot_titles=subplot_titles,
                 row_titles=[date.strftime("%Y-%m-%d") for date in selected_dates],
             )
+            theme.style(fig, title="Faceted Depth Profile - Field Average (Left) vs Individual Tube (Right)")
 
             # Track legends and max values globally
             field_avg_added_to_legend = False
@@ -735,7 +598,7 @@ class DashVisualizations:
                                 y=[50],  # Middle of typical range
                                 mode="text",
                                 text=["No Data"],
-                                textfont=dict(size=40, color="red"),
+                                textfont=dict(size=40, color="#9498ad"),
                                 showlegend=False,
                                 hoverinfo="skip",
                             ),
@@ -903,38 +766,10 @@ class DashVisualizations:
 
             # Update overall layout
             fig.update_layout(
-                title=dict(
-                    text="Faceted Depth Profile - Field Average (Left) vs Individual Tube (Right)",
-                    font=dict(size=28),
-                    x=0.5,
-                    xanchor="center",
-                ),
-                font=dict(size=18, family="Arial, sans-serif"),
                 showlegend=True,
-                legend=dict(
-                    orientation="v",
-                    yanchor="top",
-                    y=1,
-                    xanchor="left",
-                    x=1.01,
-                    bgcolor="rgba(255,255,255,0.9)",
-                    bordercolor="black",
-                    borderwidth=1,
-                    font=dict(size=18),
-                ),
                 height=max(900, num_dates * 280),  # More compact overall height
-                plot_bgcolor="white",
-                paper_bgcolor="white",
                 hovermode="closest",
-                hoverlabel=dict(
-                    bgcolor="white",
-                    font_size=16,
-                    font_family="Arial, sans-serif",
-                    bordercolor="#2c3e50",
-                    align="left",
-                ),
                 barmode="overlay",  # Allow bars at same y-position to display independently
-                margin=dict(l=50, r=80, t=50, b=40),
             )
             fig.update_annotations(font=dict(size=18))
 
@@ -976,8 +811,8 @@ class DashVisualizations:
                         y0=0,
                         x1=1,
                         y1=1,
-                        fillcolor="rgba(173, 216, 230, 0.35)",  # Light blue background
-                        line=dict(color="black", width=2),  # Black border
+                        fillcolor="rgba(40,42,55,0.55)",
+                        line=dict(color="#2a2c39", width=1),
                         layer="below",  # Place behind the data
                     )
 
@@ -1056,6 +891,6 @@ class DashVisualizations:
                 x=0.5,
                 y=0.5,
                 showarrow=False,
-                font=dict(size=16, color="red"),
+                font=dict(size=16, color="#9498ad"),
             )
             return fig
