@@ -141,6 +141,11 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         self.dock = FloatingDock(self)
         self.enhance_popover = EnhancePopover(self)
 
+        # Tools -> rail (same button objects, still in tool_button_group).
+        self.tool_rail.add_widget(self.brush_button)
+        self.tool_rail.add_widget(self.eraser_button)
+        self.tool_rail.add_widget(self.fill_button)
+
     def _create_control_panel(self):
         """Create the bottom control panel with tools and adjustments."""
         control_panel = QWidget()
