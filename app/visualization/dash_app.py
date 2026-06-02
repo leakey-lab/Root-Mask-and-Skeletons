@@ -734,7 +734,8 @@ class DashApp(DashVisualizations):
             default_style = {
                 "borderRadius": "8px",
                 "padding": "12px",
-                "height": "800px",
+                "height": "85vh",
+                "minHeight": "800px",
                 "width": "100%",
                 "marginBottom": "12px",
                 "overflow": "hidden",
@@ -781,7 +782,8 @@ class DashApp(DashVisualizations):
                     ]
                     
                     lines_graph_style = default_style.copy()
-                    lines_graph_style["height"] = "600px"
+                    lines_graph_style["height"] = "80vh"
+                    lines_graph_style["minHeight"] = "600px"
 
                     visible_images_style = {
                         "width": "100%",
@@ -888,6 +890,8 @@ class DashApp(DashVisualizations):
                     # Create faceted depth profile
                     faceted_style = default_style.copy()
                     faceted_style["height"] = "auto"  # Allow dynamic height based on dates
+                    faceted_style["minHeight"] = "90vh"
+                    faceted_style["overflow"] = "visible"
                     faceted_style["padding"] = "6px"
                     faceted_style["marginBottom"] = "8px"
                     

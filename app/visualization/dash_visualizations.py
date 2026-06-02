@@ -767,7 +767,7 @@ class DashVisualizations:
             # Update overall layout
             fig.update_layout(
                 showlegend=True,
-                height=max(900, num_dates * 280),  # More compact overall height
+                height=max(1100, num_dates * 420),  # Larger height: ~420px per facet row
                 hovermode="closest",
                 barmode="overlay",  # Allow bars at same y-position to display independently
             )

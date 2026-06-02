@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 _GRAPH_STYLE = {
     "borderRadius": "8px",
     "padding": "20px",
-    "height": "800px",
+    "height": "85vh",
+    "minHeight": "800px",
     "width": "100%",
     "marginBottom": "20px",
 }
