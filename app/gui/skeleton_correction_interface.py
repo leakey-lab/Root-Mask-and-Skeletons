@@ -431,16 +431,12 @@ class SkeletonCorrectionInterface(QWidget):
             self.clear_button,
         ]:
             b.setStyleSheet(btn_style)
-            actions_layout.addWidget(b)
-        
-        # Add polyline buttons with special styling
+
+        # Polyline buttons styled here; reparented into the polyline prompt.
         self.finish_polyline_button.setStyleSheet(polyline_btn_style)
         self.cancel_polyline_button.setStyleSheet(cancel_btn_style)
-        actions_layout.addWidget(self.finish_polyline_button)
-        actions_layout.addWidget(self.cancel_polyline_button)
 
         actions_group.setLayout(actions_layout)
-        layout.addWidget(actions_group)
 
         adj_group = QGroupBox("Adjustments")
         adj_layout = QVBoxLayout()
@@ -473,13 +469,26 @@ class SkeletonCorrectionInterface(QWidget):
         self.opacity_slider.setRange(5, 100)
         self.opacity_slider.setValue(int(self.overlay_opacity * 100))
 
-        adj_layout.addWidget(self.eraser_label)
-        adj_layout.addWidget(self.eraser_slider)
-        adj_layout.addWidget(self.opacity_label)
-        adj_layout.addWidget(self.opacity_slider)
-
         adj_group.setLayout(adj_layout)
-        layout.addWidget(adj_group)
+
+        # ---- FloatingDock: opacity slider, actions, primary Save ----
+        # Overlay-opacity slider (label + slider) in a fixed-width container.
+        self.opacity_container = QWidget(self)
+        opacity_box = QVBoxLayout(self.opacity_container)
+        opacity_box.setSpacing(1)
+        opacity_box.setContentsMargins(0, 0, 0, 0)
+        opacity_box.addWidget(self.opacity_label)
+        opacity_box.addWidget(self.opacity_slider)
+        self.opacity_container.setFixedWidth(150)
+        self.dock.add_widget(self.opacity_container)
+
+        self.dock.add_separator()
+        self.dock.add_widget(self.load_skeleton_button)
+        self.dock.add_widget(self.undo_button)
+        self.dock.add_widget(self.redo_button)
+        self.dock.add_widget(self.clear_button)
+        self.dock.add_separator()
+        self.dock.add_widget(self.save_skeleton_button)
 
         # Signals
         self.tool_group.buttonClicked.connect(self._on_tool_changed)
