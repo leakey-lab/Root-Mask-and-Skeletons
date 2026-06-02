@@ -166,6 +166,15 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         self.dock.add_separator()
         self.dock.add_widget(self.save_button)
 
+        # Image enhancement controls -> top-right popover, toggled from rail.
+        self.enhance_popover.set_content(self.norm_controls)
+        self.enhance_button = IconButton(
+            "contrast", "Image enhancement", checkable=False
+        )
+        self.enhance_button.clicked.connect(self.enhance_popover.toggle)
+        self.tool_rail.add_separator()
+        self.tool_rail.add_widget(self.enhance_button)
+
     def _create_control_panel(self):
         """Create the bottom control panel with tools and adjustments."""
         control_panel = QWidget()
