@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -87,13 +88,27 @@ def build_ribbon(mw) -> QWidget:
     mw.ribbon = bar
     mw.ribbon_buttons = {}
 
-    handlers = {
+    base_handlers = {
         "Library": lambda: mw.switch_right_panel("display"),
         "Mask": lambda: mw.switch_right_panel("display"),
         "Trace": mw.toggle_mask_tracing,
         "Skeleton": mw.toggle_skeleton_correction,
         "Measure": lambda: mw.switch_right_panel("display"),
         "Visualize": lambda: mw.switch_right_panel("display"),
+    }
+
+    def _make_handler(stage_label, base):
+        def _h():
+            base()
+            # Swap the action-bar page + hint for this stage (FIX4). Safe no-op
+            # until the action bar is populated.
+            activate = getattr(mw, "_activate_action_stage", None)
+            if callable(activate):
+                activate(stage_label)
+        return _h
+
+    handlers = {
+        label: _make_handler(label, base) for label, base in base_handlers.items()
     }
 
     for label, icon in _RIBBON_STAGES:
@@ -137,13 +152,25 @@ def build_ribbon(mw) -> QWidget:
 
 
 # --------------------------------------------------------------------------- #
+# Per-stage hint text shown at the left of the action bar.
+_STAGE_HINTS = {
+    "Library": "<b>Library.</b> Browse and select images from the tree.",
+    "Mask": "<b>Mask.</b> Generate segmentation masks with the ML model.",
+    "Trace": "<b>Trace.</b> Manually paint or refine the root mask.",
+    "Skeleton": "<b>Skeleton.</b> Generate or correct the root skeleton.",
+    "Measure": "<b>Measure.</b> Compute root length and area.",
+    "Visualize": "<b>Visualize.</b> Explore length / area dashboards.",
+}
+
+
 def build_action_bar(mw) -> QWidget:
     bar = _band("shellActionBar", height=52)
     row = QHBoxLayout(bar)
     row.setContentsMargins(16, 8, 16, 8)
     row.setSpacing(10)
 
-    hint = QLabel("Select a stage above, then act on the loaded images.")
+    hint = QLabel(_STAGE_HINTS["Library"])
+    hint.setTextFormat(Qt.TextFormat.RichText)
     hint.setStyleSheet(f"color: {tokens.TEXT_MUTED}; font-size: 12px;")
     mw.action_bar_hint = hint
     row.addWidget(hint)
@@ -164,7 +191,78 @@ def build_action_bar(mw) -> QWidget:
 
     viz_seg.valueChanged.connect(_on_viz)
     mw.action_bar_viz_seg = viz_seg
-    row.addWidget(viz_seg)
+
+    # Stage-aware action widgets live in a QStackedWidget on the right of the
+    # action bar. Pages are built once the real buttons exist (after the body is
+    # constructed); build_action_bar only erects the skeleton + the populate
+    # callable, which _build_shell invokes post-body.
+    stack = QStackedWidget()
+    mw.action_bar_stack = stack
+    row.addWidget(stack)
+
+    def _page(*widgets) -> QWidget:
+        page = QWidget()
+        lay = QHBoxLayout(page)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        for w in widgets:
+            if w is not None:
+                w.setParent(page)
+                lay.addWidget(w)
+        return page
+
+    def _populate():
+        # Display-mode cosmetic segmented control (forwards into the hidden live
+        # view_mode_combo; reverse-synced to avoid drift).
+        view_seg = SegmentedControl(
+            [("single", "Single"), ("overlay", "Overlay"), ("split", "Side by side")],
+            value="single",
+        )
+        mw.action_bar_view_seg = view_seg
+        _seg_index = {"single": 0, "overlay": 1, "split": 2}
+        _index_seg = {0: "single", 1: "overlay", 2: "split"}
+
+        def _on_view(value: str):
+            idx = _seg_index.get(value)
+            if idx is not None and mw.view_mode_combo.currentIndex() != idx:
+                mw.view_mode_combo.setCurrentIndex(idx)
+
+        view_seg.valueChanged.connect(_on_view)
+
+        def _on_combo(idx: int):
+            val = _index_seg.get(idx)
+            if val is not None and view_seg.value() != val:
+                view_seg.setValue(val, emit=False)
+
+        mw.view_mode_combo.currentIndexChanged.connect(_on_combo)
+
+        # Trace stage: reuse the mask-tracing clear button if exposed.
+        trace_clear = getattr(
+            getattr(mw, "mask_tracing_interface", None), "clear_button", None
+        )
+
+        pages = {
+            "Library": _page(view_seg),
+            "Mask": _page(mw.generate_mask_button),
+            "Trace": _page(trace_clear),
+            "Skeleton": _page(mw.generate_button),
+            "Measure": _page(
+                mw.calculate_length_button, mw.calculate_area_button
+            ),
+            "Visualize": _page(viz_seg),
+        }
+        mw._action_bar_pages = {}
+        for label, page in pages.items():
+            mw._action_bar_pages[label] = stack.addWidget(page)
+
+    def _activate_action_stage(label: str):
+        hint.setText(_STAGE_HINTS.get(label, ""))
+        idx = getattr(mw, "_action_bar_pages", {}).get(label)
+        if idx is not None:
+            stack.setCurrentIndex(idx)
+
+    mw._populate_action_bar = _populate
+    mw._activate_action_stage = _activate_action_stage
 
     return bar
 

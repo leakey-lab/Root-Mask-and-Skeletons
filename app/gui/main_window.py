@@ -195,6 +195,14 @@ class MainWindow(QMainWindow):
         col.addWidget(shell_chrome.build_action_bar(self))
         col.addWidget(self._build_body(), 1)
         col.addWidget(shell_chrome.build_statusline(self))
+
+        # Populate the stage-aware action bar now that the body (and the real
+        # stage buttons created in create_left_panel) exists; then show the
+        # default Library stage.
+        if callable(getattr(self, "_populate_action_bar", None)):
+            self._populate_action_bar()
+        if callable(getattr(self, "_activate_action_stage", None)):
+            self._activate_action_stage("Library")
         return shell
 
     # Sentinel: presence signals the PR4 guided shell (app_stack) is wired, used

@@ -11,14 +11,19 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QToolButton,
     QTreeWidget,
+    QTreeWidgetItem,
+    QLineEdit,
     QLabel,
     QComboBox,
     QFrame,
     QSizePolicy,
     QStackedWidget,
 )
-from PyQt6.QtCore import QSize
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QIcon
+
+from app.gui.widgets import tokens
+from app.gui.widgets.icons import load_icon
 
 
 def get_icon_path(icon_name: str) -> str:
@@ -124,24 +129,6 @@ def create_left_panel(main_window) -> QWidget:
     layout.setSpacing(6)
     layout.setContentsMargins(8, 8, 8, 8)
 
-    # Style for icon toolbar buttons
-    toolbar_button_style = """
-        QToolButton {
-            background-color: transparent;
-            border: 2px solid transparent;
-            border-radius: 6px;
-            padding: 4px;
-        }
-        QToolButton:hover {
-            background-color: #44475a;
-            border: 2px solid #6272a4;
-        }
-        QToolButton:pressed {
-            background-color: #6272a4;
-            border: 2px solid #bd93f9;
-        }
-    """
-    
     # Style for text toolbar buttons
     text_button_style = """
         QPushButton {
@@ -197,31 +184,14 @@ def create_left_panel(main_window) -> QWidget:
     # for any code referencing them, but the button is not shown in the shell.
     main_window.load_images_button.setVisible(False)
 
-    # ========== TOP ROW: PROCESSING & CORRECTION/ANNOTATIONS ==========
-    top_row_layout = QHBoxLayout()
-    top_row_layout.setSpacing(8)
-    top_row_layout.setContentsMargins(0, 0, 0, 0)
+    # ====================================================================== #
+    # FIX4: The stage action buttons are constructed here (so their mw.<attr>
+    # names and .clicked.connect() targets stay intact) but are NOT added to
+    # the left layout. build_action_bar() reparents the real button objects
+    # into the stage-aware action bar. Construction-only here.
+    # ====================================================================== #
 
-    # Left column: Processing section
-    processing_widget = QWidget()
-    processing_widget.setStyleSheet("""
-        QWidget {
-            background-color: rgba(139, 233, 253, 0.1);
-            border: 2px solid #8be9fd;
-            border-radius: 6px;
-            padding: 6px;
-        }
-    """)
-    processing_section = QVBoxLayout(processing_widget)
-    processing_section.setSpacing(4)
-    processing_section.setContentsMargins(0, 0, 0, 0)
-    processing_section.addWidget(create_section_label("Processing", "#8be9fd"))
-    
-    processing_layout = QVBoxLayout()
-    processing_layout.setSpacing(4)
-    processing_layout.setContentsMargins(0, 0, 0, 0)
-
-    # Generate ML Masks button
+    # Generate ML Masks button (Mask stage)
     main_window.generate_mask_button = create_text_button(
         "Generate ML Masks",
         "Generate ML Masks\n\nUse AI machine learning to automatically generate segmentation masks for root images. This will process all loaded images using a trained neural network model."
@@ -230,43 +200,16 @@ def create_left_panel(main_window) -> QWidget:
     main_window.generate_mask_button.clicked.connect(
         main_window.mask_generation_handler.generate_masks
     )
-    processing_layout.addWidget(main_window.generate_mask_button)
 
-    # Generate Skeleton button
+    # Generate Skeleton button (Skeleton stage)
     main_window.generate_button = create_text_button(
         "Generate Skeleton",
         "Generate Skeleton\n\nExtract skeleton structure (medial axis) from segmentation masks. Converts mask images into line-based skeleton representations for length measurement."
     )
     main_window.generate_button.setStyleSheet(text_button_style)
     main_window.generate_button.clicked.connect(main_window.skeleton_handler.generate_skeleton)
-    processing_layout.addWidget(main_window.generate_button)
 
-    processing_section.addLayout(processing_layout)
-    processing_widget.setSizePolicy(
-        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
-    )
-    top_row_layout.addWidget(processing_widget, 1)
-
-    # Right column: Correction & Annotations section
-    correction_widget = QWidget()
-    correction_widget.setStyleSheet("""
-        QWidget {
-            background-color: rgba(255, 184, 108, 0.1);
-            border: 2px solid #ffb86c;
-            border-radius: 6px;
-            padding: 6px;
-        }
-    """)
-    correction_section = QVBoxLayout(correction_widget)
-    correction_section.setSpacing(4)
-    correction_section.setContentsMargins(0, 0, 0, 0)
-    correction_section.addWidget(create_section_label("Correction & Annotations", "#ffb86c"))
-    
-    correction_layout = QVBoxLayout()
-    correction_layout.setSpacing(4)
-    correction_layout.setContentsMargins(0, 0, 0, 0)
-
-    # Skeleton Correction button
+    # Skeleton Correction button (reparented; kept for .setText callers)
     main_window.toggle_skeleton_correction_button = create_text_button(
         "Skeleton Correction",
         "Skeleton Correction\n\nOpen the skeleton correction editor to manually fix skeleton errors. Allows you to add, remove, or modify skeleton branches interactively."
@@ -275,94 +218,33 @@ def create_left_panel(main_window) -> QWidget:
     main_window.toggle_skeleton_correction_button.clicked.connect(
         main_window.toggle_skeleton_correction
     )
-    correction_layout.addWidget(main_window.toggle_skeleton_correction_button)
 
-    # Toggle Mask Tracing button
+    # Toggle Mask Tracing button (reparented; kept for .setText callers)
     main_window.toggle_mask_tracing_button = create_text_button(
         "Mask Tracing",
         "Toggle Mask Tracing\n\nSwitch to mask tracing mode to manually draw or edit segmentation masks using brush tools. Toggle again to return to the main view."
     )
     main_window.toggle_mask_tracing_button.setStyleSheet(text_button_style)
     main_window.toggle_mask_tracing_button.clicked.connect(main_window.toggle_mask_tracing)
-    correction_layout.addWidget(main_window.toggle_mask_tracing_button)
 
-    correction_section.addLayout(correction_layout)
-    correction_widget.setSizePolicy(
-        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
-    )
-    top_row_layout.addWidget(correction_widget, 1)
-
-    layout.addLayout(top_row_layout)
-
-    # ========== BOTTOM ROW: CALCULATIONS & VISUALIZATIONS ==========
-    bottom_row_layout = QHBoxLayout()
-    bottom_row_layout.setSpacing(8)
-    bottom_row_layout.setContentsMargins(0, 0, 0, 0)
-
-    # Left column: Calculations section
-    calculations_widget = QWidget()
-    calculations_widget.setStyleSheet("""
-        QWidget {
-            background-color: rgba(80, 250, 123, 0.1);
-            border: 2px solid #50fa7b;
-            border-radius: 6px;
-            padding: 6px;
-        }
-    """)
-    calculations_section = QVBoxLayout(calculations_widget)
-    calculations_section.setSpacing(4)
-    calculations_section.setContentsMargins(0, 0, 0, 0)
-    calculations_section.addWidget(create_section_label("Calculations", "#50fa7b"))
-
-    
-    calculations_layout = QVBoxLayout()
-    calculations_layout.setSpacing(4)
-    calculations_layout.setContentsMargins(0, 0, 0, 0)
-
-    # Calculate Root Length button
+    # Calculate Root Length button (Measure stage)
     main_window.calculate_length_button = create_text_button(
         "Calculate Root Length",
         "Calculate Root Length\n\nMeasure total root length from skeleton data. Processes all skeleton files and calculates cumulative length measurements for each image."
     )
     main_window.calculate_length_button.setStyleSheet(text_button_style)
     main_window.calculate_length_button.clicked.connect(main_window.calculate_root_length)
-    calculations_layout.addWidget(main_window.calculate_length_button)
 
-    # Calculate Root Area button
+    # Calculate Root Area button (Measure stage)
     main_window.calculate_area_button = create_text_button(
         "Calculate Root Area",
         "Calculate Root Area\n\nMeasure root surface area from segmentation masks. Processes all mask files and calculates pixel-based area measurements for each image."
     )
     main_window.calculate_area_button.setStyleSheet(text_button_style)
     main_window.calculate_area_button.clicked.connect(main_window.calculate_root_area)
-    calculations_layout.addWidget(main_window.calculate_area_button)
 
-    calculations_section.addLayout(calculations_layout)
-    calculations_widget.setSizePolicy(
-        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
-    )
-    bottom_row_layout.addWidget(calculations_widget, 1)
-
-    # Right column: Visualizations section
-    visualizations_widget = QWidget()
-    visualizations_widget.setStyleSheet("""
-        QWidget {
-            background-color: rgba(255, 121, 198, 0.1);
-            border: 2px solid #ff79c6;
-            border-radius: 6px;
-            padding: 6px;
-        }
-    """)
-    visualizations_section = QVBoxLayout(visualizations_widget)
-    visualizations_section.setSpacing(4)
-    visualizations_section.setContentsMargins(0, 0, 0, 0)
-    visualizations_section.addWidget(create_section_label("Visualizations", "#ff79c6"))
-    
-    visualizations_layout = QVBoxLayout()
-    visualizations_layout.setSpacing(4)
-    visualizations_layout.setContentsMargins(0, 0, 0, 0)
-
-    # Visualize Root Length button
+    # Visualize Root Length button (kept for .setText callers; Visualize stage
+    # uses the SegmentedControl in the action bar)
     main_window.visualize_root_length_button = create_text_button(
         "Visualize Root Length",
         "Visualize Root Length\n\nOpen interactive dashboard with line charts showing root length analysis. Compare length measurements across different images, tubes, and dates."
@@ -371,9 +253,8 @@ def create_left_panel(main_window) -> QWidget:
     main_window.visualize_root_length_button.clicked.connect(
         main_window.toggle_root_length_visualization
     )
-    visualizations_layout.addWidget(main_window.visualize_root_length_button)
 
-    # Visualize Root Area button
+    # Visualize Root Area button (kept for .setText callers)
     main_window.visualize_root_area_button = create_text_button(
         "Visualize Root Area",
         "Visualize Root Area\n\nOpen interactive dashboard with bar charts showing root area analysis. Compare area measurements across different images, tubes, and dates."
@@ -382,79 +263,68 @@ def create_left_panel(main_window) -> QWidget:
     main_window.visualize_root_area_button.clicked.connect(
         main_window.toggle_root_area_visualization
     )
-    visualizations_layout.addWidget(main_window.visualize_root_area_button)
 
-    visualizations_section.addLayout(visualizations_layout)
-    visualizations_widget.setSizePolicy(
-        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
-    )
-    bottom_row_layout.addWidget(visualizations_widget, 1)
-
-    layout.addLayout(bottom_row_layout)
-
-    # ========== SEPARATOR ==========
-    separator = QFrame()
-    separator.setFrameShape(QFrame.Shape.HLine)
-    separator.setStyleSheet("background-color: #44475a; margin: 8px 0px;")
-    separator.setFixedHeight(1)
-    layout.addWidget(separator)
-
-    # ========== VIEW MODE COMBO ==========
+    # ========== VIEW MODE COMBO (hidden live driver) ==========
+    # The combo stays the single source of truth for the display mode (indices
+    # 0/1/2 -> display_controller.update_display_mode). It is hidden; a cosmetic
+    # SegmentedControl in the action bar forwards into it (see build_action_bar).
     main_window.view_mode_combo = QComboBox()
     main_window.view_mode_combo.addItems(["Single Image", "Overlay", "Side by Side"])
-    main_window.view_mode_combo.setStyleSheet("""
-        QComboBox {
-            background-color: #44475a;
-            color: #f8f8f2;
-            border: 2px solid #6272a4;
-            border-radius: 5px;
-            padding: 6px 10px;
-            font-size: 9pt;
-        }
-        QComboBox:hover {
-            border: 2px solid #8be9fd;
-        }
-        QComboBox::drop-down {
-            border: none;
-            padding-right: 8px;
-        }
-        QComboBox QAbstractItemView {
-            background-color: #44475a;
-            color: #f8f8f2;
-            selection-background-color: #6272a4;
-        }
-    """)
     main_window.view_mode_combo.currentIndexChanged.connect(
         main_window.display_controller.update_display_mode
     )
+    main_window.view_mode_combo.setVisible(False)
     layout.addWidget(main_window.view_mode_combo)
 
-    # ========== TREE CONTROL BUTTONS ==========
+    # ========== SEARCH FIELD ==========
+    main_window.library_search = QLineEdit()
+    main_window.library_search.setPlaceholderText("Search images…")
+    main_window.library_search.setClearButtonEnabled(True)
+    main_window.library_search.setStyleSheet(f"""
+        QLineEdit {{
+            background-color: {tokens.BG_3};
+            color: {tokens.TEXT};
+            border: 1px solid {tokens.BORDER};
+            border-radius: 7px;
+            padding: 6px 10px;
+            font-size: 12px;
+        }}
+        QLineEdit:focus {{ border: 1px solid {tokens.ACCENT_LINE}; }}
+    """)
+    main_window.library_search.textChanged.connect(
+        lambda text: filter_file_list(main_window, text)
+    )
+    layout.addWidget(main_window.library_search)
+
+    # ========== TREE CONTROL BUTTONS (small icon buttons) ==========
     tree_controls_layout = QHBoxLayout()
     tree_controls_layout.setSpacing(5)
 
-    tree_button_style = """
-        QPushButton {
-            background-color: #44475a;
-            color: #f8f8f2;
-            border: 1px solid #6272a4;
-            border-radius: 4px;
+    tree_button_style = f"""
+        QPushButton {{
+            background-color: {tokens.BG_2};
+            color: {tokens.TEXT_MUTED};
+            border: 1px solid {tokens.BORDER};
+            border-radius: 6px;
             padding: 5px 10px;
             font-size: 8pt;
-        }
-        QPushButton:hover {
-            background-color: #6272a4;
-            border: 1px solid #8be9fd;
-        }
+        }}
+        QPushButton:hover {{
+            background-color: {tokens.BG_3};
+            color: {tokens.TEXT};
+            border: 1px solid {tokens.BORDER_STRONG};
+        }}
     """
 
-    main_window.expand_all_button = QPushButton("➕ Expand All")
+    main_window.expand_all_button = QPushButton(" Expand")
+    main_window.expand_all_button.setIcon(load_icon("expand", tokens.TEXT_MUTED, 14))
     main_window.expand_all_button.setStyleSheet(tree_button_style)
     main_window.expand_all_button.clicked.connect(lambda: main_window.file_list.expandAll())
     main_window.expand_all_button.setMaximumHeight(28)
     tree_controls_layout.addWidget(main_window.expand_all_button)
 
-    main_window.collapse_all_button = QPushButton("➖ Collapse All")
+    main_window.collapse_all_button = QPushButton(" Collapse")
+    main_window.collapse_all_button.setIcon(load_icon("collapse", tokens.TEXT_MUTED, 14))
     main_window.collapse_all_button.setStyleSheet(tree_button_style)
     main_window.collapse_all_button.clicked.connect(lambda: main_window.file_list.collapseAll())
     main_window.collapse_all_button.setMaximumHeight(28)
@@ -521,6 +391,30 @@ def create_left_panel(main_window) -> QWidget:
     layout.addWidget(main_window.file_list, 1)
 
     return left_widget
+
+
+def filter_file_list(main_window, query: str) -> None:
+    """Filter the image-library tree by item text (case-insensitive contains).
+
+    FIX5: empty query shows everything. A parent stays visible if any of its
+    descendants match (so the path to a matching image is preserved).
+    """
+    tree = getattr(main_window, "file_list", None)
+    if tree is None:
+        return
+    needle = (query or "").strip().lower()
+
+    def visit(item: "QTreeWidgetItem") -> bool:
+        child_match = False
+        for i in range(item.childCount()):
+            child_match = visit(item.child(i)) or child_match
+        self_match = needle in item.text(0).lower() if needle else True
+        visible = self_match or child_match
+        item.setHidden(not visible)
+        return visible
+
+    for i in range(tree.topLevelItemCount()):
+        visit(tree.topLevelItem(i))
 
 
 def create_right_panel(main_window) -> QWidget:
