@@ -111,6 +111,9 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         # Set the main layout
         self.setLayout(main_layout)
 
+        # Build floating overlays (tool rail, dock, enhance popover)
+        self._build_overlays()
+
         # Initialize drawing attributes
         self.last_point = QPoint()
         self.drawing = False
@@ -126,6 +129,17 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
 
         # Set the initial cursor
         self.setCursor(self.brush_cursor)
+
+    def _build_overlays(self):
+        """Build the floating in-window overlays (presentation only).
+
+        Creates a left vertical ``ToolRail``, a bottom-centre ``FloatingDock``
+        and a top-right ``EnhancePopover``, all parented to this interface
+        widget (matching the SPROUTS canvas layout).
+        """
+        self.tool_rail = ToolRail(self)
+        self.dock = FloatingDock(self)
+        self.enhance_popover = EnhancePopover(self)
 
     def _create_control_panel(self):
         """Create the bottom control panel with tools and adjustments."""
