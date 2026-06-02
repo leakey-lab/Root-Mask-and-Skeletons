@@ -530,17 +530,13 @@ class SkeletonCorrectionInterface(QWidget):
         self.tool_rail.add_separator()
         self.tool_rail.add_widget(self.enhance_button)
 
-        # Status/hint label
-        status_group = QGroupBox("Status")
-        status_layout = QVBoxLayout()
-        status_layout.setSpacing(2)
-        status_layout.setContentsMargins(4, 2, 4, 2)
+        # Status/hint label -> bottom dock (separator + label).
         self.status_label = QLabel("Select an image, then load a skeleton to edit.")
         self.status_label.setStyleSheet("color: #8be9fd; font-size: 11px;")
         self.status_label.setWordWrap(True)
-        status_layout.addWidget(self.status_label)
-        status_group.setLayout(status_layout)
-        layout.addWidget(status_group)
+        self.status_label.setMaximumWidth(360)
+        self.dock.add_separator()
+        self.dock.add_widget(self.status_label)
 
         return control_panel
 
