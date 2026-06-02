@@ -58,21 +58,23 @@ def apply_stylesheet(app):
 
     app.setStyleSheet(stylesheet)
 
-    # Set the application palette for a consistent dark theme
+    # Application palette — SPROUTS refined-dark tokens (styles.css :root),
+    # purple accent #c39af6 primary, purple #b794f6 selection.
     palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#282a36"))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor("#f8f8f2"))
-    palette.setColor(QPalette.ColorRole.Base, QColor("#282a36"))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#3d4251"))
-    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#282a36"))
-    palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#f8f8f2"))
-    palette.setColor(QPalette.ColorRole.Text, QColor("#f8f8f2"))
-    palette.setColor(QPalette.ColorRole.Button, QColor("#44475a"))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor("#f8f8f2"))
+    palette.setColor(QPalette.ColorRole.Window, QColor("#15161c"))           # --bg-0
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("#eceef5"))       # --text
+    palette.setColor(QPalette.ColorRole.Base, QColor("#1b1c24"))             # --bg-1
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#21232e"))    # --bg-2
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#1b1c24"))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#eceef5"))
+    palette.setColor(QPalette.ColorRole.Text, QColor("#eceef5"))
+    palette.setColor(QPalette.ColorRole.Disabled, QPalette.ColorRole.Text, QColor("#686c82"))  # --text-faint
+    palette.setColor(QPalette.ColorRole.Button, QColor("#282a37"))           # --bg-3
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor("#eceef5"))
     palette.setColor(QPalette.ColorRole.BrightText, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.Link, QColor("#8be9fd"))
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#bd93f9"))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+    palette.setColor(QPalette.ColorRole.Link, QColor("#79c0e8"))             # --info
+    palette.setColor(QPalette.ColorRole.Highlight, QColor("#b794f6"))        # --sel
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#15161c"))
 
     app.setPalette(palette)
 
