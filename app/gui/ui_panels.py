@@ -440,6 +440,17 @@ def create_right_panel(main_window) -> QWidget:
     main_window.display_area = main_window.display_controller.setup_display_area(
         display_page
     )
+
+    # Read-only metrics strip mounted as a sibling *below* the display canvas,
+    # inside the display page itself. This leaves the QStackedWidget page
+    # indices (0 = display, 1 = empty state) untouched (Track M2).
+    from .metrics_bar import MetricsBar
+
+    main_window.metrics_bar = MetricsBar()
+    page_layout = display_page.layout()
+    if page_layout is not None:
+        page_layout.addWidget(main_window.metrics_bar)
+
     page_stack.addWidget(display_page)
 
     empty_state = EmptyStateWidget(on_load=main_window.load_images)

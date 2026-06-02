@@ -73,62 +73,64 @@ class DashApp(DashVisualizations):
             ]
             
             self.app.layout = html.Div(
-                className="sprouts-app",
-                style={
-                    "display": "flex",
-                    "flexDirection": "column",
-                    "alignItems": "center",
-                    "minHeight": "100vh",
-                    "width": "100%",
-                    "padding": "12px",
-                },
+                className="sprouts-app viz-page",
                 children=[
-                html.H1(
-                    "Root Length Visualization",
-                    className="sprouts-title",
-                    style={
-                        "textAlign": "center",
-                        "width": "100%",
-                        "marginBottom": "30px",
-                        "fontSize": "36px",
-                    },
+                # ---- header band: eyebrow + title + view selector ----
+                html.Div(
+                    className="viz-header",
+                    children=[
+                        html.Div(
+                            className="viz-header-left",
+                            children=[
+                                html.Div("INTERACTIVE DASHBOARD", className="viz-eyebrow"),
+                                html.H1("Root Length — trial overview", className="viz-title"),
+                            ],
+                        ),
+                        html.Div(
+                            className="viz-header-right",
+                            children=[
+                                dbc.RadioItems(
+                                    id="view-selector",
+                                    options=options,
+                                    value="stacked",
+                                    class_name="btn-group",
+                                    input_class_name="btn-check",
+                                    label_class_name="btn btn-outline-secondary",
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                # ---- collapsible control strip ----
+                html.Div(
+                    className="viz-controls",
+                    children=[
+                        dbc.Button(
+                            [
+                                html.Span("▸", className="viz-controls-caret"),
+                                html.Span("Tube & date range"),
+                                html.Span("controls", className="viz-controls-summary"),
+                            ],
+                            id="viz-controls-toggle",
+                            n_clicks=0,
+                            className="viz-controls-toggle",
+                            color="link",
+                        ),
+                        dbc.Collapse(
+                            id="viz-controls-collapse",
+                            is_open=False,
+                            children=html.Div(
+                                className="viz-controls-body",
+                                children=[
+                # Tube selector (for Growth Lines view)
+                dcc.Dropdown(
+                    id="tube-selector",
+                    placeholder="Select Tube",
+                    className="mb-3",
+                    style={"display": "none", "fontSize": "16px"},
                 ),
                 dbc.Container(
                     [
-                        dbc.Row(
-                            dbc.Col(
-                                dbc.Card(
-                                    dbc.CardBody(
-                                        [
-                                            html.H4(
-                                                "View Options",
-                                                className="card-title text-center",
-                                                style={"fontSize": "24px", "marginBottom": "20px"},
-                                            ),
-                                            dbc.RadioItems(
-                                                id="view-selector",
-                                                options=options,
-                                                value="stacked",
-                                                class_name="btn-group",
-                                                input_class_name="btn-check",
-                                                label_class_name="btn btn-outline-secondary",
-                                            ),
-                                            # Tube selector (for Growth Lines view)
-                                            dcc.Dropdown(
-                                                id="tube-selector",
-                                                placeholder="Select Tube",
-                                                className="mb-3",
-                                                style={"display": "none", "fontSize": "16px"},
-                                            ),
-                                        ]
-                                    ),
-                                    style={"marginBottom": "30px", "padding": "20px"},
-                                ),
-                                md=12,
-                                className="mx-auto",
-                            ),
-                            className="mb-4 justify-content-center",
-                        ),
                         # Tube Selection Panel (for Growth Over Time view)
                         dbc.Row(
                             dbc.Col(
@@ -366,59 +368,71 @@ class DashApp(DashVisualizations):
                             ),
                             className="mb-4 justify-content-center",
                         ),
-                        dbc.Row(
-                            dbc.Col(
-                                [
-                                    dcc.Loading(
-                                        type="default",
-                                        color="#5fd6a0",
-                                        children=dcc.Graph(
-                                            id="main-graph",
-                                            config={
-                                                "scrollZoom": True,
-                                                "doubleClick": "reset",
-                                                "showTips": False,
-                                                "displayModeBar": True,
-                                                "watermark": False,
-                                                "responsive": True,
-                                                "autosizable": True,
-                                                "toImageButtonOptions": {
-                                                    "format": "svg",
-                                                    "filename": "root_length_plot",
-                                                    "scale": 2,
-                                                },
-                                                "modeBarButtonsToAdd": ["downloadCsv"],
-                                            },
-                                        ),
-                                    ),
-                                    html.Div(
-                                        id="click-data",
-                                        className="text-center my-3",
-                                        style={"fontSize": "18px", "padding": "10px"},
-                                    ),
-                                ],
-                                className="d-flex flex-column align-items-center",
-                            )
-                        ),
-                        # Container for dynamically displayed images on hover
-                        dbc.Row(
-                            dbc.Col(
-                                html.Div(
-                                    id="image-container",
-                                ),
-                                md=12,
-                            ),
-                            className="mt-4",
-                        ),
-                        dcc.Store(id="cached-data"),
-                        dcc.Store(id="selected-tubes-store", data=[]),
-                        dcc.Store(id="legend-visible-store", data=True),
-                        dcc.Store(id="faceted-tubes-store", data=[]),
-                        dcc.Store(id="faceted-dates-store", data=[]),
                     ],
                     fluid=True,
                     className="px-2",
                 ),
+                                ],
+                            ),
+                        ),
+                    ],
+                ),
+                # ---- metric chips ----
+                html.Div(
+                    className="viz-metrics",
+                    children=[
+                        html.Div(id="click-data", className="metric"),
+                    ],
+                ),
+                # ---- chart card: full-bleed, fills remaining space ----
+                # Lines view renders chart + image panel side-by-side; other
+                # views are full-width chart. Both keep the same component ids.
+                html.Div(
+                    className="viz-chart-card",
+                    children=html.Div(
+                        className="viz-lines-row",
+                        children=[
+                            html.Div(
+                                className="viz-chart-pane",
+                                children=dcc.Loading(
+                                    type="default",
+                                    color="#5fd6a0",
+                                    children=dcc.Graph(
+                                        id="main-graph",
+                                        style={"width": "100%"},
+                                        config={
+                                            "scrollZoom": True,
+                                            "doubleClick": "reset",
+                                            "showTips": False,
+                                            "displayModeBar": True,
+                                            "watermark": False,
+                                            "responsive": True,
+                                            "autosizable": True,
+                                            "toImageButtonOptions": {
+                                                "format": "svg",
+                                                "filename": "root_length_plot",
+                                                "scale": 2,
+                                            },
+                                            "modeBarButtonsToAdd": ["downloadCsv"],
+                                        },
+                                    ),
+                                ),
+                            ),
+                            # Growth-Lines hover images sit beside the chart.
+                            html.Div(
+                                id="image-container",
+                                className="viz-image-panel",
+                            ),
+                        ],
+                    ),
+                ),
+                # no-op Output target for the clientside resize callback
+                dcc.Store(id="viz-resize-dummy"),
+                dcc.Store(id="cached-data"),
+                dcc.Store(id="selected-tubes-store", data=[]),
+                dcc.Store(id="legend-visible-store", data=True),
+                dcc.Store(id="faceted-tubes-store", data=[]),
+                dcc.Store(id="faceted-dates-store", data=[]),
             ],
         )
         except Exception:
@@ -430,6 +444,35 @@ class DashApp(DashVisualizations):
 
         # Import parse_tube_selection function
         from .dash_visualizations import parse_tube_selection
+
+        # Collapsible control strip toggle (new; touches only new ids).
+        @self.app.callback(
+            Output("viz-controls-collapse", "is_open"),
+            Input("viz-controls-toggle", "n_clicks"),
+            State("viz-controls-collapse", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_controls(n_clicks, is_open):
+            return not is_open
+
+        # Clientside refit: when the control strip toggles or the view changes,
+        # force Plotly to re-fit the chart width. Writes a no-op Store output;
+        # touches NO figure Output.
+        self.app.clientside_callback(
+            """
+            function(_n, _v) {
+                if (window.Plotly) {
+                    var g = document.getElementById('main-graph');
+                    if (g) { try { window.Plotly.Plots.resize(g); } catch (e) {} }
+                }
+                window.dispatchEvent(new Event('resize'));
+                return '';
+            }
+            """,
+            Output("viz-resize-dummy", "data"),
+            Input("viz-controls-collapse", "is_open"),
+            Input("view-selector", "value"),
+        )
 
         # Callback to show/hide tube selection, viz options, and faceted panels based on view type
         @self.app.callback(
@@ -731,26 +774,19 @@ class DashApp(DashVisualizations):
             faceted_dates
         ):
             ctx = dash.callback_context
+            # Fill the chart card completely: the card is flex:1 of the 100vh
+            # page, so height:100% + width:100% makes the graph occupy the whole
+            # visible viewport (no fixed vh / minHeight gaps, no outer margin).
             default_style = {
-                "borderRadius": "8px",
-                "padding": "12px",
-                "height": "85vh",
-                "minHeight": "800px",
+                "height": "100%",
                 "width": "100%",
-                "marginBottom": "12px",
                 "overflow": "hidden",
             }
 
-            hidden_images_style = {
-                "width": "100%",
-                "display": "none",
-                "flexWrap": "wrap",
-                "justifyContent": "center",
-                "marginTop": "12px",
-                "padding": "12px",
-                "borderRadius": "8px",
-                "minHeight": "200px",
-            }
+            # Display-only: the .viz-image-panel CSS owns the side-panel size/
+            # layout (300px column, internal scroll). Inline width/flex-wrap here
+            # would override it and force the old below-chart strip.
+            hidden_images_style = {"display": "none"}
             
             if not ctx.triggered:
                 return (
@@ -781,20 +817,13 @@ class DashApp(DashVisualizations):
                         for tube in self.data_processor.get_unique_tubes()
                     ]
                     
+                    # Lines view: chart pane fills its flex column too (the side
+                    # image panel sits beside it via .viz-lines-row).
                     lines_graph_style = default_style.copy()
-                    lines_graph_style["height"] = "80vh"
-                    lines_graph_style["minHeight"] = "600px"
 
-                    visible_images_style = {
-                        "width": "100%",
-                        "display": "flex",
-                        "flexWrap": "wrap",
-                        "justifyContent": "center",
-                        "marginTop": "20px",
-                        "padding": "20px",
-                        "borderRadius": "8px",
-                        "minHeight": "200px",
-                    }
+                    # Display-only; .viz-image-panel CSS places it beside the
+                    # chart (300px right column) and stacks images vertically.
+                    visible_images_style = {"display": "flex"}
 
                     if trigger_id == "view-selector":
                         # Guard against empty/failed datasets so switching to the
@@ -991,30 +1020,38 @@ class DashApp(DashVisualizations):
                                     html.Img(
                                         src=img_src,
                                         style={
+                                            # Fill the side panel width so each
+                                            # image is a meaningful >=100x100
+                                            # representation (panel is ~300px).
                                             "width": "100%",
+                                            "minWidth": "100px",
+                                            "minHeight": "100px",
                                             "height": "auto",
                                             "objectFit": "contain",
-                                            "border": "1px solid #ddd",
-                                            "borderRadius": "4px",
+                                            "border": "1px solid #2a2c39",
+                                            "borderRadius": "6px",
+                                            "background": "#15161c",
                                         },
                                     ),
                                     html.P(
                                         f"Position L{pos}",
                                         style={
                                             "textAlign": "center",
-                                            "fontWeight": "bold",
-                                            "margin": "5px 0",
-                                            "fontSize": "14px",
+                                            "fontWeight": "600",
+                                            "margin": "4px 0 0",
+                                            "fontSize": "11.5px",
+                                            "fontFamily": "'IBM Plex Mono', monospace",
+                                            "color": "#9498ad",
                                         },
                                     ),
                                 ],
                                 key=f"image-{pos}-{date_str}",
                                 style={
-                                    "width": "10%",
-                                    "padding": "2px",
+                                    # Full width of the .viz-image-panel column,
+                                    # stacked vertically (panel is flex-column).
+                                    "width": "100%",
+                                    "padding": "2px 0",
                                     "boxSizing": "border-box",
-                                    "display": "inline-block",
-                                    "verticalAlign": "top",
                                 },
                             )
                         )

@@ -492,6 +492,40 @@ class MainWindow(QMainWindow):
         mask_path = os.path.join(mask_dir, os.path.basename(image_path))
         return os.path.exists(mask_path) or self.image_manager.has_mask(stored_name)
 
+    def _image_has_skeleton(self, stored_name):
+        """Return True if a processed ``<name>_fake.png`` skeleton exists on disk.
+
+        Read-only: inspects the image manager's discovered skeletons folder
+        (``processed_base_path``) without computing anything.
+        """
+        base = getattr(self.image_manager, "processed_base_path", None)
+        if not base:
+            return False
+        return os.path.exists(os.path.join(base, f"{stored_name}_fake.png"))
+
+    def _refresh_metrics_bar(self, stored_name=None):
+        """Update the read-only metrics strip for the selected image.
+
+        Pure presentation (Track M). Status is derived from existing on-disk /
+        in-memory mask + skeleton state. Measured root length/area are not
+        retained per-image at selection time (they live only in the batch CSV
+        outputs), so they are passed as ``None`` rather than computed here.
+        """
+        bar = getattr(self, "metrics_bar", None)
+        if bar is None:
+            return
+
+        status = None
+        if stored_name:
+            if self._image_has_skeleton(stored_name):
+                status = "Skeleton ready"
+            elif self._image_has_mask(stored_name):
+                status = "Mask ready"
+            else:
+                status = "No mask"
+
+        bar.set_metrics(length=None, area=None, status=status)
+
     def on_tree_item_clicked(self, item, column):
         """Handle tree item clicks - expand/collapse folders, load images"""
         # Get the stored image name from the item's user data
@@ -527,6 +561,9 @@ class MainWindow(QMainWindow):
         else:
             self.display_controller.display_selected_image_by_name(image_name)
 
+        # Read-only: refresh the metrics strip for the now-selected image.
+        self._refresh_metrics_bar(image_name)
+
     # ==================== Calculation Methods ====================
     
     def calculate_root_length(self):
@@ -558,6 +595,11 @@ class MainWindow(QMainWindow):
 
         self.status_bar.showMessage("Results loaded successfully.", 5000)
         self.notify("Results loaded successfully")
+
+        # Read-only: re-evaluate the metrics strip. ``load_results`` is a batch
+        # event (no specific image selected), so we reset to the empty state;
+        # the per-image status is repopulated on the next image selection.
+        self._refresh_metrics_bar(None)
 
     # ==================== Mask Tracing ====================
     

@@ -2,22 +2,27 @@
 
 Tracked during the `feat/sprouts-redesign` work. These are open items, not regressions introduced by the redesign unless noted.
 
-## 1. Visualization is still broken — needs reconsideration
+## 1. Visualization layout — RESOLVED (redesigned 2026-06-01)
 
-The embedded Dash/Plotly dashboards still do not render/behave correctly and the
-sizing/layout approach needs to be rethought, not just enlarged. The PR4 change
-(`fix(viz): enlarge Dash chart drawing area`) raised the drawing area (85vh main,
-90vh faceted, taller per-row faceted height) but the visualization as a whole is
-**still broken and must be reconsidered** — the chart area, faceted depth profile
-layout, and the QWebEngineView embedding all need a fresh design pass rather than
-incremental size bumps. Do not treat the current viz as final.
+Rebuilt both Dash dashboards to the SPROUTS VizView (spec:
+`docs/superpowers/specs/2026-06-01-viz-redesign-design.md`): full-bleed,
+width-fluid chart that auto-fits the panel; collapsible control strip; metric
+chips; Growth-Lines hover images now sit **beside** the chart (300px right
+column), not below. No data/callback/id/customdata changes. Verify in the
+running app that the chart fills width and the faceted profile scrolls.
 
-## 2. Ribbon needs separate buttons for skeleton generation vs tracing
+## 2. Ribbon split — RESOLVED (2026-06-01)
 
-The 6-stage ribbon currently conflates actions: skeleton **generation**
-(`skeleton_handler.generate_skeleton`, today an action-bar button under the
-Skeleton stage) and mask **tracing** / skeleton **correction** editing are not
-clearly separated as their own ribbon entries. Skeleton generation and tracing
-should each get their **own dedicated ribbon button** so the pipeline reads
-clearly (generate vs manually edit are distinct user intents). Revisit the ribbon
-stage model when doing the editor PRs (PR5/PR6).
+Ribbon is now 7 explicit stages: Library · Generate Mask · Trace ·
+Generate Skeleton · Correct · Measure · Visualize. Generation (auto) and manual
+editing (Trace/Correct editors) are distinct entries, each wired to the existing
+handlers.
+
+## 3. Metrics bar — length/area have no read-only source (OPEN)
+
+The new display `MetricsBar` shows Status + FOV correctly, but **Root length /
+Root area show `—`**: measured values are produced only by batch threads
+(`skeleton_handler.calculate_root_length/area` → calculator threads) and written
+to CSV outputs; they are never loaded back into per-image state. Populating them
+read-only would need parsing those CSVs (or caching the measurements in
+`image_manager`). Deferred — do not fabricate values.
