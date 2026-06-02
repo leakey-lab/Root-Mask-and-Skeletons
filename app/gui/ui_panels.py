@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
     QSizePolicy,
+    QStackedWidget,
 )
 from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QIcon
@@ -530,6 +531,30 @@ def create_right_panel(main_window) -> QWidget:
     Returns:
         QWidget: The configured right panel widget
     """
-    right_widget = QWidget()
-    main_window.display_area = main_window.display_controller.setup_display_area(right_widget)
-    return right_widget
+    from .empty_state import EmptyStateWidget
+
+    container = QWidget()
+    outer = QVBoxLayout(container)
+    outer.setContentsMargins(0, 0, 0, 0)
+
+    # Page stack: index 0 = real display area, index 1 = empty-state placeholder.
+    page_stack = QStackedWidget()
+
+    display_page = QWidget()
+    main_window.display_area = main_window.display_controller.setup_display_area(
+        display_page
+    )
+    page_stack.addWidget(display_page)
+
+    empty_state = EmptyStateWidget(on_load=main_window.load_images)
+    page_stack.addWidget(empty_state)
+
+    # Start on the empty state until images are loaded; MainWindow flips to the
+    # display page in on_loading_finished.
+    page_stack.setCurrentIndex(1)
+
+    main_window.display_page_stack = page_stack
+    main_window.empty_state = empty_state
+
+    outer.addWidget(page_stack)
+    return container
