@@ -471,7 +471,19 @@ class SkeletonCorrectionInterface(QWidget):
 
         adj_group.setLayout(adj_layout)
 
-        # ---- FloatingDock: opacity slider, actions, primary Save ----
+        # ---- FloatingDock: eraser slider [eraser-only], opacity, actions, Save ----
+        # Eraser-size slider (label + slider); shown only when the eraser tool
+        # is active (toggled from _on_tool_changed).
+        self.eraser_container = QWidget(self)
+        eraser_box = QVBoxLayout(self.eraser_container)
+        eraser_box.setSpacing(1)
+        eraser_box.setContentsMargins(0, 0, 0, 0)
+        eraser_box.addWidget(self.eraser_label)
+        eraser_box.addWidget(self.eraser_slider)
+        self.eraser_container.setFixedWidth(150)
+        self.dock.add_widget(self.eraser_container)
+        self.eraser_container.setVisible(self.current_tool == self.TOOL_ERASER)
+
         # Overlay-opacity slider (label + slider) in a fixed-width container.
         self.opacity_container = QWidget(self)
         opacity_box = QVBoxLayout(self.opacity_container)
@@ -599,6 +611,12 @@ class SkeletonCorrectionInterface(QWidget):
         # Update cursor in view
         if hasattr(self, 'graphics_view'):
             self.graphics_view.update_cursor()
+
+        # Eraser-size slider is only relevant for the eraser tool.
+        if hasattr(self, 'eraser_container'):
+            self.eraser_container.setVisible(self.current_tool == self.TOOL_ERASER)
+            if hasattr(self, 'dock'):
+                self.dock.reposition()
 
         # Reset transient state when switching tools
         self._polyline_points.clear()
