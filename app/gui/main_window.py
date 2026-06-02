@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
     QHBoxLayout,
+    QVBoxLayout,
     QSplitter,
     QStatusBar,
     QMessageBox,
@@ -175,9 +176,52 @@ class MainWindow(QMainWindow):
         splitter.setSizes([400, 800])
         return body
 
+    def _build_shell(self) -> QWidget:
+        """Build the guided shell: titlebar / ribbon / action-bar over the body
+        (stretch) over the statusline. Returns the shell container.
+
+        Presentation wrapper only — the body (and its four right_panel indices)
+        is unchanged; the chrome bands forward to existing handlers.
+        """
+        from . import shell_chrome
+
+        shell = QWidget()
+        col = QVBoxLayout(shell)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+
+        col.addWidget(shell_chrome.build_titlebar(self))
+        col.addWidget(shell_chrome.build_ribbon(self))
+        col.addWidget(shell_chrome.build_action_bar(self))
+        col.addWidget(self._build_body(), 1)
+        col.addWidget(shell_chrome.build_statusline(self))
+        return shell
+
+    # Sentinel: presence signals the PR4 guided shell (app_stack) is wired, used
+    # by the shell smoke test to gate the MainWindow contract assertions.
+    _pr4_shell_ready = True
+
     def init_ui(self):
-        main_widget = self._build_body()
-        self.setCentralWidget(main_widget)
+        # Guided app shell: a QStackedWidget that flips between the Welcome
+        # screen (index 0) and the working shell/body (index 1). The window
+        # starts on Welcome; load_images flips to the shell (T4.6).
+        from app.gui.welcome_screen import WelcomeWidget
+        from app.gui.loading_overlay import LoadingOverlay
+
+        self.app_stack = QStackedWidget()
+        self.welcome = WelcomeWidget(on_get_started=self.load_images)
+        self.app_stack.addWidget(self.welcome)          # index 0
+
+        shell = self._build_shell()
+        self.app_stack.addWidget(shell)                 # index 1
+
+        self.setCentralWidget(self.app_stack)
+        self.app_stack.setCurrentIndex(0)
+
+        # Full-window loading overlay (parented to the window), hidden until a
+        # directory is chosen.
+        self.loading_overlay = LoadingOverlay(self)
+        self.loading_overlay.hide()
 
         # Status Bar with first-class task-progress widget.
         # Replaces the old cramped status-bar QProgressBar (text-on-bar). The
@@ -206,6 +250,9 @@ class MainWindow(QMainWindow):
         toasts = getattr(self, "toasts", None)
         if toasts is not None:
             toasts.reposition()
+        overlay = getattr(self, "loading_overlay", None)
+        if overlay is not None:
+            overlay.reposition()
 
     def set_opengl_viewports_enabled(self, enabled: bool) -> None:
         """Enable/disable QOpenGLWidget-based viewports across the app.
@@ -310,6 +357,13 @@ class MainWindow(QMainWindow):
     def load_images(self):
         dir_name = QFileDialog.getExistingDirectory(self, "Select Image Directory")
         if dir_name:
+            # Leave the Welcome screen for the working shell and show the
+            # full-window loading overlay (PR4 T4.6).
+            if getattr(self, "app_stack", None) is not None:
+                self.app_stack.setCurrentIndex(1)
+            if getattr(self, "loading_overlay", None) is not None:
+                self.loading_overlay.start("Loading images")
+
             # Show progress before loading.
             self.task_progress.start("Loading images")
 
@@ -333,10 +387,14 @@ class MainWindow(QMainWindow):
     def update_loading_progress(self, value):
         """Update the loading progress bar"""
         self.task_progress.set_progress(value)
+        if getattr(self, "loading_overlay", None) is not None:
+            self.loading_overlay.set_progress(value)
 
     def on_loading_finished(self, images, fake_images, masks, has_fake_real_pairs):
         """Handle completion of image loading"""
         self.task_progress.finish(f"Loaded {len(images)} images")
+        if getattr(self, "loading_overlay", None) is not None:
+            self.loading_overlay.hide()
         self.populate_file_list()
         self.status_bar.showMessage(f"Loaded {len(images)} images", 5000)
         self.notify(f"Loaded {len(images)} images")
