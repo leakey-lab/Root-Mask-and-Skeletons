@@ -53,6 +53,36 @@ def test_welcome_get_started_callback(app):
     assert calls == [1]
 
 
+def test_filter_file_list(app):
+    """FIX5: case-insensitive contains filter, empty query shows all; parents of
+    matching leaves stay visible."""
+    from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
+    from app.gui.ui_panels import filter_file_list
+
+    class _MW:
+        pass
+
+    mw = _MW()
+    tree = QTreeWidget()
+    parent = QTreeWidgetItem(["FieldA"])
+    leaf1 = QTreeWidgetItem(["root_001.png"])
+    leaf2 = QTreeWidgetItem(["other_002.png"])
+    parent.addChild(leaf1)
+    parent.addChild(leaf2)
+    tree.addTopLevelItem(parent)
+    mw.file_list = tree
+
+    filter_file_list(mw, "ROOT")
+    assert not leaf1.isHidden()
+    assert leaf2.isHidden()
+    assert not parent.isHidden()  # kept for the matching descendant
+
+    filter_file_list(mw, "")
+    assert not leaf1.isHidden()
+    assert not leaf2.isHidden()
+    assert not parent.isHidden()
+
+
 def test_loading_overlay_imports(app):
     from app.gui.loading_overlay import LoadingOverlay
 
