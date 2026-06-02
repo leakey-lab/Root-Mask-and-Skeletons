@@ -2,7 +2,7 @@
 import logging
 import os
 
-from dash import Dash, dcc, html, Input, Output
+from dash import Dash, dcc, html, Input, Output, State
 import dash
 import plotly.graph_objects as go
 import plotly.express as px
@@ -51,123 +51,142 @@ class DashAppArea:
     def _setup_layout(self):
         """Define the Dash app layout."""
         self.app.layout = html.Div(
-            className="sprouts-app",
-            style={
-                "display": "flex",
-                "flexDirection": "column",
-                "alignItems": "center",
-                "minHeight": "100vh",
-                "width": "100%",
-                "padding": "20px",
-            },
+            className="sprouts-app viz-page",
             children=[
-                # Title
-                html.H1(
-                    "Root Area Visualization",
-                    className="sprouts-title",
-                    style={
-                        "textAlign": "center",
-                        "width": "100%",
-                        "marginBottom": "30px",
-                        "fontSize": "36px",
-                    },
-                ),
-                # Container
-                dbc.Container(
-                    [
-                        # Controls
-                        dbc.Row(
-                            dbc.Col(
-                                dbc.Card(
-                                    dbc.CardBody(
-                                        [
-                                            html.H4(
-                                                "View Options",
-                                                className="card-title text-center",
-                                                style={"fontSize": "24px", "marginBottom": "20px"},
-                                            ),
-                                            dbc.RadioItems(
-                                                id="view-selector",
-                                                options=[
-                                                    {
-                                                        "label": "Stacked Bar View",
-                                                        "value": "stacked",
-                                                    },
-                                                    {
-                                                        "label": "Growth Over Time",
-                                                        "value": "time",
-                                                    },
-                                                    {
-                                                        "label": "Area Profile by Position",
-                                                        "value": "profile",
-                                                    },
-                                                ],
-                                                value="stacked",
-                                                class_name="btn-group",
-                                                input_class_name="btn-check",
-                                                label_class_name="btn btn-outline-secondary",
-                                            ),
-                                            dcc.Dropdown(
-                                                id="tube-selector",
-                                                placeholder="Select Tube",
-                                                className="mb-3",
-                                                style={"display": "none", "fontSize": "16px"},
-                                            ),
-                                        ]
-                                    ),
-                                    style={"marginBottom": "30px", "padding": "20px"},
-                                ),
-                                md=12,
-                                className="mx-auto",
-                            ),
-                            className="mb-4 justify-content-center",
+                # ---- header band ----
+                html.Div(
+                    className="viz-header",
+                    children=[
+                        html.Div(
+                            className="viz-header-left",
+                            children=[
+                                html.Div("INTERACTIVE DASHBOARD", className="viz-eyebrow"),
+                                html.H1("Root Area — trial overview", className="viz-title"),
+                            ],
                         ),
-                        # Graph
-                        dbc.Row(
-                            dbc.Col(
-                                [
-                                    dcc.Loading(
-                                        type="default",
-                                        color="#5fd6a0",
-                                        children=dcc.Graph(
-                                            id="main-graph",
-                                            className="sprouts-graph-card",
-                                            config={
-                                                "scrollZoom": True,
-                                                "doubleClick": "reset",
-                                                "showTips": False,
-                                                "displayModeBar": True,
-                                                "watermark": False,
-                                                "responsive": True,
-                                                "autosizable": True,
-                                                "toImageButtonOptions": {
-                                                    "format": "svg",
-                                                    "filename": "root_area_plot",
-                                                    "scale": 2,
-                                                },
-                                            },
-                                        ),
-                                    ),
-                                    html.Div(
-                                        id="click-data",
-                                        className="text-center my-3",
-                                        style={"fontSize": "18px", "padding": "10px"},
+                        html.Div(
+                            className="viz-header-right",
+                            children=[
+                                dbc.RadioItems(
+                                    id="view-selector",
+                                    options=[
+                                        {"label": "Stacked Bar View", "value": "stacked"},
+                                        {"label": "Growth Over Time", "value": "time"},
+                                        {"label": "Area Profile by Position", "value": "profile"},
+                                    ],
+                                    value="stacked",
+                                    class_name="btn-group",
+                                    input_class_name="btn-check",
+                                    label_class_name="btn btn-outline-secondary",
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+                # ---- collapsible control strip ----
+                html.Div(
+                    className="viz-controls",
+                    children=[
+                        dbc.Button(
+                            [
+                                html.Span("▸", className="viz-controls-caret"),
+                                html.Span("Tube selection"),
+                                html.Span("controls", className="viz-controls-summary"),
+                            ],
+                            id="viz-controls-toggle",
+                            n_clicks=0,
+                            className="viz-controls-toggle",
+                            color="link",
+                        ),
+                        dbc.Collapse(
+                            id="viz-controls-collapse",
+                            is_open=False,
+                            children=html.Div(
+                                className="viz-controls-body",
+                                children=[
+                                    dcc.Dropdown(
+                                        id="tube-selector",
+                                        placeholder="Select Tube",
+                                        className="mb-3",
+                                        style={"display": "none", "fontSize": "16px"},
                                     ),
                                 ],
-                                className="d-flex flex-column align-items-center",
-                            )
+                            ),
                         ),
-                        # Hidden store for caching
-                        dcc.Store(id="cached-data"),
                     ],
-                    fluid=True,
-                    className="px-4",
                 ),
+                # ---- metric chips ----
+                html.Div(
+                    className="viz-metrics",
+                    children=[
+                        html.Div(id="click-data", className="metric"),
+                    ],
+                ),
+                # ---- chart card: full-bleed, fills remaining space ----
+                html.Div(
+                    className="viz-chart-card",
+                    children=dcc.Loading(
+                        type="default",
+                        color="#5fd6a0",
+                        children=dcc.Graph(
+                            id="main-graph",
+                            className="sprouts-graph-card",
+                            style={"width": "100%"},
+                            config={
+                                "scrollZoom": True,
+                                "doubleClick": "reset",
+                                "showTips": False,
+                                "displayModeBar": True,
+                                "watermark": False,
+                                "responsive": True,
+                                "autosizable": True,
+                                "toImageButtonOptions": {
+                                    "format": "svg",
+                                    "filename": "root_area_plot",
+                                    "scale": 2,
+                                },
+                            },
+                        ),
+                    ),
+                ),
+                # no-op Output target for the clientside resize callback
+                dcc.Store(id="viz-resize-dummy"),
+                # Hidden store for caching
+                dcc.Store(id="cached-data"),
             ],
         )
 
     def _setup_callbacks(self):
         """Define Dash callbacks."""
+
+        # Collapsible control strip toggle (new; touches only new ids).
+        @self.app.callback(
+            Output("viz-controls-collapse", "is_open"),
+            Input("viz-controls-toggle", "n_clicks"),
+            State("viz-controls-collapse", "is_open"),
+            prevent_initial_call=True,
+        )
+        def toggle_controls(n_clicks, is_open):
+            return not is_open
+
+        # Clientside refit on control-strip toggle / view change. Writes a
+        # no-op Store output; touches NO figure Output.
+        self.app.clientside_callback(
+            """
+            function(_n, _v) {
+                if (window.Plotly) {
+                    var g = document.getElementById('main-graph');
+                    if (g) { try { window.Plotly.Plots.resize(g); } catch (e) {} }
+                }
+                window.dispatchEvent(new Event('resize'));
+                return '';
+            }
+            """,
+            Output("viz-resize-dummy", "data"),
+            Input("viz-controls-collapse", "is_open"),
+            Input("view-selector", "value"),
+        )
+
         @self.app.callback(
             [
                 Output("main-graph", "figure"),
