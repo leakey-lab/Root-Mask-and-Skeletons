@@ -22,7 +22,7 @@ from PyQt6.QtGui import (
     QShortcut,
     QWheelEvent,
 )
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF, QTimer
 from collections import deque
 import logging
 import os
@@ -174,6 +174,26 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
 
         # Connect signals (all referenced widgets now exist).
         self._connect_signals()
+
+        # Position overlays once the initial layout has settled.
+        QTimer.singleShot(0, self._reposition_overlays)
+
+    def _reposition_overlays(self):
+        """Reposition the floating overlays over the current widget bounds."""
+        if hasattr(self, "tool_rail"):
+            self.tool_rail.reposition()
+            self.tool_rail.raise_()
+        if hasattr(self, "dock"):
+            self.dock.reposition()
+            self.dock.raise_()
+        if hasattr(self, "enhance_popover"):
+            self.enhance_popover.reposition()
+            self.enhance_popover.raise_()
+
+    def resizeEvent(self, event):
+        """Keep floating overlays positioned on widget resize."""
+        super().resizeEvent(event)
+        self._reposition_overlays()
 
     def _create_controls(self):
         """Construct all editor controls (placed into floating overlays)."""
