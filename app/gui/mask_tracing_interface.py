@@ -6,12 +6,10 @@ Provides tools for brush, eraser, and flood fill operations.
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QHBoxLayout,
     QPushButton,
     QSlider,
     QLabel,
     QButtonGroup,
-    QGroupBox,
     QGraphicsScene,
     QGraphicsPixmapItem,
 )
@@ -104,9 +102,8 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         self.mask_item.setZValue(1)
         self.scene.addItem(self.mask_item)
 
-        # Bottom control panel
-        control_panel = self._create_control_panel()
-        main_layout.addWidget(control_panel)
+        # Construct the editor controls (placed into floating overlays below).
+        self._create_controls()
 
         # Set the main layout
         self.setLayout(main_layout)
@@ -178,59 +175,15 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         # Connect signals (all referenced widgets now exist).
         self._connect_signals()
 
-    def _create_control_panel(self):
-        """Create the bottom control panel with tools and adjustments."""
-        control_panel = QWidget()
-        control_panel.setStyleSheet(
-            """
-            QWidget {
-                background-color: #1e1e1e;
-            }
-            QGroupBox {
-                border: 1px solid #333333;
-                border-radius: 4px;
-                margin-top: 4px;
-                padding-top: 12px;
-                color: white;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 7px;
-                padding: 0px 5px 0px 5px;
-            }
-        """
-        )
-
-        control_layout = QHBoxLayout(control_panel)
-        control_layout.setSpacing(4)
-        control_layout.setContentsMargins(2, 1, 2, 1)
-
-        # Tools Group
-        tools_group, tools_layout = self._create_tools_group()
-        control_layout.addWidget(tools_group)
-
-        # Actions Group
-        actions_group = self._create_actions_group()
-        control_layout.addWidget(actions_group)
-
-        # Adjustments Group
-        adjustments_group = self._create_adjustments_group()
-        control_layout.addWidget(adjustments_group)
-
-        # Image Enhancement Controls
+    def _create_controls(self):
+        """Construct all editor controls (placed into floating overlays)."""
+        self._create_tools_group()
+        self._create_actions_group()
+        self._create_adjustments_group()
         self.norm_controls = NormalizationControls(self)
-        control_layout.addWidget(self.norm_controls)
-
-        return control_panel
 
     def _create_tools_group(self):
-        """Create the tools group with brush, eraser, and fill buttons."""
-        tools_group = QGroupBox("Tools")
-        tools_group.setFixedWidth(100)
-        tools_layout = QVBoxLayout()
-        tools_layout.setSpacing(2)
-        tools_layout.setContentsMargins(4, 2, 4, 2)
-
+        """Create the brush, eraser, and fill buttons (+ button group)."""
         tool_button_style = """
             QPushButton {
                 background-color: #2d2d2d;
@@ -263,21 +216,11 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
             button.setStyleSheet(tool_button_style)
             button.setCheckable(True)
             self.tool_button_group.addButton(button)
-            tools_layout.addWidget(button)
 
         self.brush_button.setChecked(True)
-        tools_group.setLayout(tools_layout)
-        
-        return tools_group, tools_layout
 
     def _create_actions_group(self):
-        """Create the actions group with clear, save, undo, redo buttons."""
-        actions_group = QGroupBox("Actions")
-        actions_group.setFixedWidth(100)
-        actions_layout = QVBoxLayout()
-        actions_layout.setSpacing(2)
-        actions_layout.setContentsMargins(4, 2, 4, 2)
-
+        """Create the clear, save, undo, redo buttons."""
         action_button_style = """
             QPushButton {
                 background-color: #2d2d2d;
@@ -308,18 +251,9 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
             self.redo_button,
         ]:
             button.setStyleSheet(action_button_style)
-            actions_layout.addWidget(button)
-
-        actions_group.setLayout(actions_layout)
-        return actions_group
 
     def _create_adjustments_group(self):
-        """Create the adjustments group with sliders."""
-        adjustments_group = QGroupBox("Adjustments")
-        adjustments_layout = QVBoxLayout()
-        adjustments_layout.setSpacing(2)
-        adjustments_layout.setContentsMargins(8, 2, 8, 2)
-
+        """Create the brush size, opacity, and zoom sliders."""
         slider_style = """
             QSlider {
                 max-height: 20px;
@@ -355,7 +289,7 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         ]
 
         for name, min_val, max_val, default in sliders_data:
-            container = QWidget()
+            container = QWidget(self)
             container_layout = QVBoxLayout(container)
             container_layout.setSpacing(1)
             container_layout.setContentsMargins(0, 0, 0, 0)
@@ -368,7 +302,6 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
 
             container_layout.addWidget(label)
             container_layout.addWidget(slider)
-            adjustments_layout.addWidget(container)
 
             if name == "Brush Size":
                 self.size_slider = slider
@@ -383,8 +316,9 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
                 self.zoom_label = label
                 self.zoom_container = container
 
-        adjustments_group.setLayout(adjustments_layout)
-        return adjustments_group
+        # The zoom slider remains a live widget (driven by Ctrl-wheel) but is
+        # not surfaced in any overlay; keep it hidden, parented to self.
+        self.zoom_container.hide()
 
     def _connect_signals(self):
         """Connect all signals to their handlers."""
