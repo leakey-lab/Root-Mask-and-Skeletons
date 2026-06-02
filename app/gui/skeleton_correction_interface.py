@@ -337,6 +337,11 @@ class SkeletonCorrectionInterface(QWidget):
         x = max(14, (pw - self.polyline_prompt.width()) // 2)
         self.polyline_prompt.move(x, 14)
 
+    def resizeEvent(self, event):
+        """Keep floating overlays positioned (and raised) on widget resize."""
+        super().resizeEvent(event)
+        self._reposition_overlays()
+
     def _create_control_panel(self) -> None:
         """Construct the editor controls and wire signals.
 
