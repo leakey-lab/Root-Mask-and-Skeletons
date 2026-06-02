@@ -12,7 +12,12 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
+
+# Allow the MainWindow mount test to construct the window offscreen (MainWindow
+# transitively imports QtWebEngine via the visualization modules).
+QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
 
 from app.gui.metrics_bar import MetricsBar  # noqa: E402
 
@@ -45,3 +50,25 @@ def test_set_metrics_with_none(app):
     assert bar._length_value.text() == "—"
     assert bar._area_value.text() == "—"
     assert bar._status_value.text() == "—"
+
+
+def test_metrics_bar_mounts_without_disturbing_stack(app):
+    """Track M3: the bar mounts under the display page and the QStackedWidget
+    page indices (0 = display, 1 = empty state) and right-panel are unchanged."""
+    from app.gui.main_window import MainWindow
+
+    w = MainWindow()
+    try:
+        assert isinstance(w.metrics_bar, MetricsBar)
+        # Stack indices unchanged: 2 pages, empty state still at index 1.
+        assert w.display_page_stack.count() == 2
+        assert w.display_page_stack.indexOf(w.empty_state) == 1
+        # Bar is a child of the display page (stack index 0), not its own page.
+        display_page = w.display_page_stack.widget(0)
+        assert w.metrics_bar in display_page.findChildren(MetricsBar)
+        # Right panel page count unchanged (display/mask/skeleton/normalization).
+        assert w.right_panel.count() == 4
+        # Read-only refresh runs without error.
+        w._refresh_metrics_bar(None)
+    finally:
+        w.close()
