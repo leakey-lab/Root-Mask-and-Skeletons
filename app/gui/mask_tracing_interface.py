@@ -6,12 +6,10 @@ Provides tools for brush, eraser, and flood fill operations.
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QHBoxLayout,
     QPushButton,
     QSlider,
     QLabel,
     QButtonGroup,
-    QGroupBox,
     QGraphicsScene,
     QGraphicsPixmapItem,
 )
@@ -24,7 +22,7 @@ from PyQt6.QtGui import (
     QShortcut,
     QWheelEvent,
 )
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF, QTimer
 from collections import deque
 import logging
 import os
@@ -37,6 +35,14 @@ from .mask_graphics_view import MaskTracingGraphicsView
 from .mask_cursor_utils import create_brush_cursor, create_panning_cursor
 from .mask_drawing_tools import MaskDrawingMixin
 from .image_normalization_interface import ImageNormalization, NormalizationControls
+from app.gui.widgets import (
+    ToolRail,
+    FloatingDock,
+    EnhancePopover,
+    IconButton,
+    load_icon,
+    tokens,
+)
 
 
 class MaskTracingInterface(QWidget, MaskDrawingMixin):
@@ -96,12 +102,14 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         self.mask_item.setZValue(1)
         self.scene.addItem(self.mask_item)
 
-        # Bottom control panel
-        control_panel = self._create_control_panel()
-        main_layout.addWidget(control_panel)
+        # Construct the editor controls (placed into floating overlays below).
+        self._create_controls()
 
         # Set the main layout
         self.setLayout(main_layout)
+
+        # Build floating overlays (tool rail, dock, enhance popover)
+        self._build_overlays()
 
         # Initialize drawing attributes
         self.last_point = QPoint()
@@ -119,91 +127,83 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         # Set the initial cursor
         self.setCursor(self.brush_cursor)
 
-    def _create_control_panel(self):
-        """Create the bottom control panel with tools and adjustments."""
-        control_panel = QWidget()
-        control_panel.setStyleSheet(
-            """
-            QWidget {
-                background-color: #1e1e1e;
-            }
-            QGroupBox {
-                border: 1px solid #333333;
-                border-radius: 4px;
-                margin-top: 4px;
-                padding-top: 12px;
-                color: white;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 7px;
-                padding: 0px 5px 0px 5px;
-            }
+    def _build_overlays(self):
+        """Build the floating in-window overlays (presentation only).
+
+        Creates a left vertical ``ToolRail``, a bottom-centre ``FloatingDock``
+        and a top-right ``EnhancePopover``, all parented to this interface
+        widget (matching the SPROUTS canvas layout).
         """
-        )
+        self.tool_rail = ToolRail(self)
+        self.dock = FloatingDock(self)
+        self.enhance_popover = EnhancePopover(self)
 
-        control_layout = QHBoxLayout(control_panel)
-        control_layout.setSpacing(4)
-        control_layout.setContentsMargins(2, 1, 2, 1)
+        # Tools -> rail (same button objects, still in tool_button_group).
+        self.tool_rail.add_widget(self.brush_button)
+        self.tool_rail.add_widget(self.eraser_button)
+        self.tool_rail.add_widget(self.fill_button)
 
-        # Tools Group
-        tools_group, tools_layout = self._create_tools_group()
-        control_layout.addWidget(tools_group)
-
-        # Actions Group
-        actions_group = self._create_actions_group()
-        control_layout.addWidget(actions_group)
-
-        # Adjustments Group
-        adjustments_group = self._create_adjustments_group()
-        control_layout.addWidget(adjustments_group)
-
-        # Image Enhancement Controls
-        self.norm_controls = NormalizationControls(self)
-        control_layout.addWidget(self.norm_controls)
-
-        # Mode toggle button
-        toggle_button_style = """
-            QPushButton {
-                background-color: #2d2d2d;
-                border: none;
-                border-radius: 4px;
-                padding: 4px;
-                color: white;
-                min-width: 40px;
-                max-width: 100px;
-                min-height: 28px;
-                max-height: 28px;
-                font-size: 14px;
-            }
-            QPushButton:checked {
-                background-color: #404040;
-            }
-            QPushButton:hover {
-                background-color: #404040;
-            }
-        """
-
+        # Mode toggle (Draw/Pan) -> rail, after a separator.
+        self.tool_rail.add_separator()
         self.mode_toggle = QPushButton("🔒 Draw")
-        self.mode_toggle.setStyleSheet(toggle_button_style)
         self.mode_toggle.setCheckable(True)
         self.mode_toggle.setChecked(True)
         self.mode_toggle.clicked.connect(self.toggle_mode)
-        tools_layout.addWidget(self.mode_toggle)
+        self.tool_rail.add_widget(self.mode_toggle)
 
-        # Connect signals
+        # Sliders + actions -> bottom dock.
+        self.size_container.setFixedWidth(150)
+        self.opacity_container.setFixedWidth(150)
+        self.dock.add_widget(self.size_container)
+        self.dock.add_widget(self.opacity_container)
+        self.dock.add_separator()
+        self.dock.add_widget(self.undo_button)
+        self.dock.add_widget(self.redo_button)
+        self.dock.add_widget(self.clear_button)
+        self.dock.add_separator()
+        self.dock.add_widget(self.save_button)
+
+        # Image enhancement controls -> top-right popover, toggled from rail.
+        self.enhance_popover.set_content(self.norm_controls)
+        self.enhance_button = IconButton(
+            "contrast", "Image enhancement", checkable=False
+        )
+        self.enhance_button.clicked.connect(self.enhance_popover.toggle)
+        self.tool_rail.add_separator()
+        self.tool_rail.add_widget(self.enhance_button)
+
+        # Connect signals (all referenced widgets now exist).
         self._connect_signals()
 
-        return control_panel
+        # Position overlays once the initial layout has settled.
+        QTimer.singleShot(0, self._reposition_overlays)
+
+    def _reposition_overlays(self):
+        """Reposition the floating overlays over the current widget bounds."""
+        if hasattr(self, "tool_rail"):
+            self.tool_rail.reposition()
+            self.tool_rail.raise_()
+        if hasattr(self, "dock"):
+            self.dock.reposition()
+            self.dock.raise_()
+        if hasattr(self, "enhance_popover"):
+            self.enhance_popover.reposition()
+            self.enhance_popover.raise_()
+
+    def resizeEvent(self, event):
+        """Keep floating overlays positioned on widget resize."""
+        super().resizeEvent(event)
+        self._reposition_overlays()
+
+    def _create_controls(self):
+        """Construct all editor controls (placed into floating overlays)."""
+        self._create_tools_group()
+        self._create_actions_group()
+        self._create_adjustments_group()
+        self.norm_controls = NormalizationControls(self)
 
     def _create_tools_group(self):
-        """Create the tools group with brush, eraser, and fill buttons."""
-        tools_group = QGroupBox("Tools")
-        tools_group.setFixedWidth(100)
-        tools_layout = QVBoxLayout()
-        tools_layout.setSpacing(2)
-        tools_layout.setContentsMargins(4, 2, 4, 2)
-
+        """Create the brush, eraser, and fill buttons (+ button group)."""
         tool_button_style = """
             QPushButton {
                 background-color: #2d2d2d;
@@ -236,21 +236,11 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
             button.setStyleSheet(tool_button_style)
             button.setCheckable(True)
             self.tool_button_group.addButton(button)
-            tools_layout.addWidget(button)
 
         self.brush_button.setChecked(True)
-        tools_group.setLayout(tools_layout)
-        
-        return tools_group, tools_layout
 
     def _create_actions_group(self):
-        """Create the actions group with clear, save, undo, redo buttons."""
-        actions_group = QGroupBox("Actions")
-        actions_group.setFixedWidth(100)
-        actions_layout = QVBoxLayout()
-        actions_layout.setSpacing(2)
-        actions_layout.setContentsMargins(4, 2, 4, 2)
-
+        """Create the clear, save, undo, redo buttons."""
         action_button_style = """
             QPushButton {
                 background-color: #2d2d2d;
@@ -281,18 +271,9 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
             self.redo_button,
         ]:
             button.setStyleSheet(action_button_style)
-            actions_layout.addWidget(button)
-
-        actions_group.setLayout(actions_layout)
-        return actions_group
 
     def _create_adjustments_group(self):
-        """Create the adjustments group with sliders."""
-        adjustments_group = QGroupBox("Adjustments")
-        adjustments_layout = QVBoxLayout()
-        adjustments_layout.setSpacing(2)
-        adjustments_layout.setContentsMargins(8, 2, 8, 2)
-
+        """Create the brush size, opacity, and zoom sliders."""
         slider_style = """
             QSlider {
                 max-height: 20px;
@@ -328,7 +309,7 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         ]
 
         for name, min_val, max_val, default in sliders_data:
-            container = QWidget()
+            container = QWidget(self)
             container_layout = QVBoxLayout(container)
             container_layout.setSpacing(1)
             container_layout.setContentsMargins(0, 0, 0, 0)
@@ -341,20 +322,23 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
 
             container_layout.addWidget(label)
             container_layout.addWidget(slider)
-            adjustments_layout.addWidget(container)
 
             if name == "Brush Size":
                 self.size_slider = slider
                 self.size_label = label
+                self.size_container = container
             elif name == "Opacity":
                 self.opacity_slider = slider
                 self.opacity_label = label
+                self.opacity_container = container
             else:
                 self.zoom_slider = slider
                 self.zoom_label = label
+                self.zoom_container = container
 
-        adjustments_group.setLayout(adjustments_layout)
-        return adjustments_group
+        # The zoom slider remains a live widget (driven by Ctrl-wheel) but is
+        # not surfaced in any overlay; keep it hidden, parented to self.
+        self.zoom_container.hide()
 
     def _connect_signals(self):
         """Connect all signals to their handlers."""

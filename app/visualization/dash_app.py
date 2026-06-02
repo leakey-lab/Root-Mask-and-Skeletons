@@ -5,6 +5,7 @@ Orchestrates layout, callbacks, and visualization components.
 
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -18,6 +19,8 @@ from app.config import DASH_LENGTH_PORT
 from .dash_data_cache import DataCache
 from .dash_image_utils import build_available_images_map, get_encoded_image
 from .dash_visualizations import DashVisualizations
+from . import theme
+theme.use("sprouts")
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +44,15 @@ class DashApp(DashVisualizations):
         # Initialize Dash app
         self.app = Dash(
             __name__,
-            external_stylesheets=[dbc.themes.BOOTSTRAP],
+            external_stylesheets=[dbc.themes.DARKLY],
+            assets_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets"),
             suppress_callback_exceptions=True,
             update_title=None,
             compress=True,
         )
+        self.app.index_string = '''<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+{%favicon%}{%css%}</head><body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>'''
 
         # Set up layout and callbacks
         self._setup_layout()
@@ -66,23 +73,23 @@ class DashApp(DashVisualizations):
             ]
             
             self.app.layout = html.Div(
+                className="sprouts-app",
                 style={
                     "display": "flex",
                     "flexDirection": "column",
                     "alignItems": "center",
                     "minHeight": "100vh",
                     "width": "100%",
-                    "backgroundColor": "#f8f9fa",
                     "padding": "12px",
                 },
                 children=[
                 html.H1(
                     "Root Length Visualization",
+                    className="sprouts-title",
                     style={
                         "textAlign": "center",
                         "width": "100%",
                         "marginBottom": "30px",
-                        "color": "#2c3e50",
                         "fontSize": "36px",
                     },
                 ),
@@ -98,12 +105,13 @@ class DashApp(DashVisualizations):
                                                 className="card-title text-center",
                                                 style={"fontSize": "24px", "marginBottom": "20px"},
                                             ),
-                                            dcc.Dropdown(
+                                            dbc.RadioItems(
                                                 id="view-selector",
                                                 options=options,
                                                 value="stacked",
-                                                className="mb-3",
-                                                style={"fontSize": "16px"},
+                                                class_name="btn-group",
+                                                input_class_name="btn-check",
+                                                label_class_name="btn btn-outline-secondary",
                                             ),
                                             # Tube selector (for Growth Lines view)
                                             dcc.Dropdown(
@@ -219,7 +227,6 @@ class DashApp(DashVisualizations):
                                                         style={
                                                             "minHeight": "50px",
                                                             "padding": "10px",
-                                                            "backgroundColor": "#f8f9fa",
                                                             "borderRadius": "5px",
                                                             "marginBottom": "15px",
                                                         },
@@ -330,7 +337,6 @@ class DashApp(DashVisualizations):
                                                 id="faceted-selection-info",
                                                 style={
                                                     "padding": "10px",
-                                                    "backgroundColor": "#f8f9fa",
                                                     "borderRadius": "5px",
                                                     "marginBottom": "15px",
                                                 },
@@ -344,7 +350,6 @@ class DashApp(DashVisualizations):
                                                 id="tube-date-availability",
                                                 style={
                                                     "padding": "10px",
-                                                    "backgroundColor": "#f8f9fa",
                                                     "borderRadius": "5px",
                                                     "maxHeight": "200px",
                                                     "overflowY": "auto",
@@ -364,28 +369,32 @@ class DashApp(DashVisualizations):
                         dbc.Row(
                             dbc.Col(
                                 [
-                                    dcc.Graph(
-                                        id="main-graph",
-                                        config={
-                                            "scrollZoom": True,
-                                            "doubleClick": "reset",
-                                            "showTips": False,
-                                            "displayModeBar": True,
-                                            "watermark": False,
-                                            "responsive": True,
-                                            "autosizable": True,
-                                            "toImageButtonOptions": {
-                                                "format": "svg",
-                                                "filename": "root_length_plot",
-                                                "scale": 2,
+                                    dcc.Loading(
+                                        type="default",
+                                        color="#5fd6a0",
+                                        children=dcc.Graph(
+                                            id="main-graph",
+                                            config={
+                                                "scrollZoom": True,
+                                                "doubleClick": "reset",
+                                                "showTips": False,
+                                                "displayModeBar": True,
+                                                "watermark": False,
+                                                "responsive": True,
+                                                "autosizable": True,
+                                                "toImageButtonOptions": {
+                                                    "format": "svg",
+                                                    "filename": "root_length_plot",
+                                                    "scale": 2,
+                                                },
+                                                "modeBarButtonsToAdd": ["downloadCsv"],
                                             },
-                                            "modeBarButtonsToAdd": ["downloadCsv"],
-                                        },
+                                        ),
                                     ),
                                     html.Div(
                                         id="click-data",
                                         className="text-center my-3",
-                                        style={"color": "#2c3e50", "fontSize": "18px", "padding": "10px"},
+                                        style={"fontSize": "18px", "padding": "10px"},
                                     ),
                                 ],
                                 className="d-flex flex-column align-items-center",
@@ -723,16 +732,15 @@ class DashApp(DashVisualizations):
         ):
             ctx = dash.callback_context
             default_style = {
-                "backgroundColor": "white",
                 "borderRadius": "8px",
                 "padding": "12px",
-                "boxShadow": "0 4px 8px rgba(0,0,0,0.15)",
-                "height": "800px",
+                "height": "85vh",
+                "minHeight": "800px",
                 "width": "100%",
                 "marginBottom": "12px",
                 "overflow": "hidden",
             }
-            
+
             hidden_images_style = {
                 "width": "100%",
                 "display": "none",
@@ -740,7 +748,6 @@ class DashApp(DashVisualizations):
                 "justifyContent": "center",
                 "marginTop": "12px",
                 "padding": "12px",
-                "backgroundColor": "#f8f9fa",
                 "borderRadius": "8px",
                 "minHeight": "200px",
             }
@@ -775,7 +782,8 @@ class DashApp(DashVisualizations):
                     ]
                     
                     lines_graph_style = default_style.copy()
-                    lines_graph_style["height"] = "600px"
+                    lines_graph_style["height"] = "80vh"
+                    lines_graph_style["minHeight"] = "600px"
 
                     visible_images_style = {
                         "width": "100%",
@@ -784,7 +792,6 @@ class DashApp(DashVisualizations):
                         "justifyContent": "center",
                         "marginTop": "20px",
                         "padding": "20px",
-                        "backgroundColor": "#f8f9fa",
                         "borderRadius": "8px",
                         "minHeight": "200px",
                     }
@@ -863,8 +870,6 @@ class DashApp(DashVisualizations):
                             align="center",
                         )
                         fig.update_layout(
-                            plot_bgcolor="white",
-                            paper_bgcolor="white",
                             height=600,
                         )
                         return (
@@ -875,7 +880,7 @@ class DashApp(DashVisualizations):
                             default_style,
                             hidden_images_style,
                         )
-                    
+
                     # Convert dates to Timestamps if provided
                     selected_dates_ts = None
                     if faceted_dates:
@@ -885,6 +890,8 @@ class DashApp(DashVisualizations):
                     # Create faceted depth profile
                     faceted_style = default_style.copy()
                     faceted_style["height"] = "auto"  # Allow dynamic height based on dates
+                    faceted_style["minHeight"] = "90vh"
+                    faceted_style["overflow"] = "visible"
                     faceted_style["padding"] = "6px"
                     faceted_style["marginBottom"] = "8px"
                     
@@ -913,7 +920,7 @@ class DashApp(DashVisualizations):
                     align="center",
                 )
                 error_fig.update_layout(
-                    plot_bgcolor="white", paper_bgcolor="white", height=600
+                    height=600
                 )
                 return (
                     error_fig,

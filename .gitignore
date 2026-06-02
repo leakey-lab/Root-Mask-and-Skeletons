@@ -31,7 +31,6 @@ dist/
 .workflow-*.js
 graphify-out/
 _capture_golden.py
-code_review_graph/.extract.json
-code_review_graph/.analysis.json
-code_review_graph/.labels.json
 .graphify_*
+# SPROUTS design handoff bundle (local reference, not source)
+.design_sprouts/

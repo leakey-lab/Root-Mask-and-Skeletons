@@ -1,5 +1,6 @@
 """Dash application for root area visualization (F-014 hardened)."""
 import logging
+import os
 
 from dash import Dash, dcc, html, Input, Output
 import dash
@@ -9,16 +10,17 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 
 from app.config import DASH_AREA_PORT
+from . import theme
+theme.use("sprouts")
 
 logger = logging.getLogger(__name__)
 
 # Shared graph-container style to avoid duplication (F-087).
 _GRAPH_STYLE = {
-    "backgroundColor": "white",
     "borderRadius": "8px",
     "padding": "20px",
-    "boxShadow": "0 4px 8px rgba(0,0,0,0.15)",
-    "height": "800px",
+    "height": "85vh",
+    "minHeight": "800px",
     "width": "100%",
     "marginBottom": "20px",
 }
@@ -33,11 +35,15 @@ class DashAppArea:
 
         self.app = Dash(
             __name__,
-            external_stylesheets=[dbc.themes.BOOTSTRAP],
+            external_stylesheets=[dbc.themes.DARKLY],
+            assets_folder=os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets"),
             suppress_callback_exceptions=True,
             update_title=None,
             compress=True,
         )
+        self.app.index_string = '''<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+{%favicon%}{%css%}</head><body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>'''
 
         self._setup_layout()
         self._setup_callbacks()
@@ -45,24 +51,24 @@ class DashAppArea:
     def _setup_layout(self):
         """Define the Dash app layout."""
         self.app.layout = html.Div(
+            className="sprouts-app",
             style={
                 "display": "flex",
                 "flexDirection": "column",
                 "alignItems": "center",
                 "minHeight": "100vh",
                 "width": "100%",
-                "backgroundColor": "#f8f9fa",
                 "padding": "20px",
             },
             children=[
                 # Title
                 html.H1(
                     "Root Area Visualization",
+                    className="sprouts-title",
                     style={
                         "textAlign": "center",
                         "width": "100%",
                         "marginBottom": "30px",
-                        "color": "#2c3e50",
                         "fontSize": "36px",
                     },
                 ),
@@ -80,7 +86,7 @@ class DashAppArea:
                                                 className="card-title text-center",
                                                 style={"fontSize": "24px", "marginBottom": "20px"},
                                             ),
-                                            dcc.Dropdown(
+                                            dbc.RadioItems(
                                                 id="view-selector",
                                                 options=[
                                                     {
@@ -97,8 +103,9 @@ class DashAppArea:
                                                     },
                                                 ],
                                                 value="stacked",
-                                                className="mb-3",
-                                                style={"fontSize": "16px"},
+                                                class_name="btn-group",
+                                                input_class_name="btn-check",
+                                                label_class_name="btn btn-outline-secondary",
                                             ),
                                             dcc.Dropdown(
                                                 id="tube-selector",
@@ -119,27 +126,32 @@ class DashAppArea:
                         dbc.Row(
                             dbc.Col(
                                 [
-                                    dcc.Graph(
-                                        id="main-graph",
-                                        config={
-                                            "scrollZoom": True,
-                                            "doubleClick": "reset",
-                                            "showTips": False,
-                                            "displayModeBar": True,
-                                            "watermark": False,
-                                            "responsive": True,
-                                            "autosizable": True,
-                                            "toImageButtonOptions": {
-                                                "format": "svg",
-                                                "filename": "root_area_plot",
-                                                "scale": 2,
+                                    dcc.Loading(
+                                        type="default",
+                                        color="#5fd6a0",
+                                        children=dcc.Graph(
+                                            id="main-graph",
+                                            className="sprouts-graph-card",
+                                            config={
+                                                "scrollZoom": True,
+                                                "doubleClick": "reset",
+                                                "showTips": False,
+                                                "displayModeBar": True,
+                                                "watermark": False,
+                                                "responsive": True,
+                                                "autosizable": True,
+                                                "toImageButtonOptions": {
+                                                    "format": "svg",
+                                                    "filename": "root_area_plot",
+                                                    "scale": 2,
+                                                },
                                             },
-                                        },
+                                        ),
                                     ),
                                     html.Div(
                                         id="click-data",
                                         className="text-center my-3",
-                                        style={"color": "#2c3e50", "fontSize": "18px", "padding": "10px"},
+                                        style={"fontSize": "18px", "padding": "10px"},
                                     ),
                                 ],
                                 className="d-flex flex-column align-items-center",
@@ -274,71 +286,22 @@ class DashAppArea:
                         y=trace_data,
                         text=[f"{v:.2f}" for v in trace_data],
                         textposition="auto",
-                        hovertemplate="<b>%{x}</b><br>"
-                        + "Date: "
-                        + date.strftime("%Y-%m-%d")
-                        + "<br>"
-                        + "Area: %{y:.2f} mm²<br>"
-                        + "<extra></extra>",
+                        hovertemplate=theme.hover("%{x}", [
+                            ("Date", date.strftime("%Y-%m-%d")),
+                            ("Area", "%{y:.2f} mm²"),
+                        ]),
                     )
                 )
 
             fig = go.Figure(data=traces)
 
-            # Update layout for stacked bars
             fig.update_layout(
                 barmode="stack",
-                title={
-                    "text": "Root Area Growth by Tube and Date",
-                    "x": 0.5,
-                    "xanchor": "center",
-                    "font": {"size": 24},
-                },
-                xaxis=dict(
-                    title=dict(text="Tube", font=dict(size=18)),
-                    tickfont=dict(size=14),
-                ),
-                yaxis=dict(
-                    title=dict(text="Total Area (mm²)", font=dict(size=18)),
-                    tickfont=dict(size=14),
-                ),
-                legend_title=dict(text="Measurement Date", font=dict(size=18)),
-                autosize=True,
-                showlegend=True,
+                title_text="Root Area Growth by Tube and Date",
+                xaxis_title_text="Tube",
+                yaxis_title_text="Total Area (mm²)",
+                legend_title_text="Measurement Date",
                 hovermode="x unified",
-                plot_bgcolor="white",
-                bargap=0.2,
-                bargroupgap=0.1,
-                legend=dict(
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=1.02,
-                    bgcolor="rgba(255, 255, 255, 0.8)",
-                    bordercolor="black",
-                    borderwidth=1,
-                    font=dict(size=14),
-                ),
-                margin=dict(l=60, r=150, t=60, b=40),
-            )
-
-            # Update axes
-            fig.update_xaxes(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor="lightgray",
-                showline=True,
-                linewidth=2,
-                linecolor="black",
-            )
-
-            fig.update_yaxes(
-                showgrid=True,
-                gridwidth=1,
-                gridcolor="lightgray",
-                showline=True,
-                linewidth=2,
-                linecolor="black",
             )
 
             return fig
@@ -376,48 +339,19 @@ class DashAppArea:
                             marker_color=colors[i % len(colors)],
                             text=position_data["Area (mm²)"].round(2),
                             textposition="auto",
-                            hovertemplate="<b>Position: %{x}</b><br>"
-                            + "Area: %{y:.2f} mm²<br>"
-                            + "Date: "
-                            + date.strftime("%Y-%m-%d")
-                            + "<extra></extra>",
+                            hovertemplate=theme.hover("Position: %{x}", [
+                                ("Area", "%{y:.2f} mm²"),
+                                ("Date", date.strftime("%Y-%m-%d")),
+                            ]),
                         )
                     )
 
             fig.update_layout(
-                title=dict(
-                    text=f"Root Area Profile - Tube {int(selected_tube)}",
-                    x=0.5,
-                    xanchor="center",
-                    font=dict(size=24),
-                ),
-                xaxis=dict(
-                    title=dict(text="Position", font=dict(size=18)),
-                    showgrid=True,
-                    gridcolor="lightgray",
-                    tickfont=dict(size=14),
-                ),
-                yaxis=dict(
-                    title=dict(text="Root Area (mm²)", font=dict(size=18)),
-                    showgrid=True,
-                    gridcolor="lightgray",
-                    tickfont=dict(size=14),
-                ),
-                plot_bgcolor="white",
-                legend=dict(
-                    title=dict(text="Measurement Dates", font=dict(size=18)),
-                    yanchor="top",
-                    y=0.99,
-                    xanchor="left",
-                    x=1.02,
-                    bgcolor="rgba(255, 255, 255, 0.8)",
-                    bordercolor="black",
-                    borderwidth=1,
-                    font=dict(size=14),
-                ),
+                title_text=f"Root Area Profile - Tube {int(selected_tube)}",
+                xaxis_title_text="Position",
+                yaxis_title_text="Root Area (mm²)",
+                legend_title_text="Measurement Dates",
                 barmode="group",
-                autosize=True,
-                margin=dict(t=60, b=40, l=60, r=100),
             )
         except (KeyError, ValueError) as exc:
             logger.error("show_area_profile(tube=%s): %s", selected_tube, exc, exc_info=True)
@@ -440,32 +374,17 @@ class DashAppArea:
                         y=grouped["Area (mm²)"],
                         mode="lines+markers",
                         name=f"Tube {int(tube)}",
-                        hovertemplate="<b>Tube %{fullData.name}</b><br>"
-                        + "Date: %{x|%Y-%m-%d}<br>"
-                        + "Total Area: %{y:.2f} mm²<br>"
-                        + "<extra></extra>",
+                        hovertemplate=theme.hover("Tube %{fullData.name}", [
+                            ("Date", "%{x|%Y-%m-%d}"),
+                            ("Total Area", "%{y:.2f} mm²"),
+                        ]),
                     )
                 )
 
             fig.update_layout(
-                title=dict(
-                    text="Root Area Growth Over Time",
-                    font=dict(size=24)
-                ),
-                xaxis=dict(
-                    title=dict(text="Date", font=dict(size=18)),
-                    tickfont=dict(size=14),
-                ),
-                yaxis=dict(
-                    title=dict(text="Total Area (mm²)", font=dict(size=18)),
-                    tickfont=dict(size=14),
-                ),
-                showlegend=True,
-                autosize=True,
-                margin=dict(l=60, r=100, t=60, b=40),
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="white",
-                legend=dict(font=dict(size=14)),
+                title_text="Root Area Growth Over Time",
+                xaxis_title_text="Date",
+                yaxis_title_text="Total Area (mm²)",
             )
             return fig
         except (KeyError, ValueError) as exc:

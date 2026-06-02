@@ -7,15 +7,15 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
     QHBoxLayout,
+    QVBoxLayout,
     QSplitter,
     QStatusBar,
     QMessageBox,
     QStackedWidget,
     QFileDialog,
-    QProgressBar,
     QApplication,
 )
-from PyQt6.QtGui import QColor, QIcon, QCloseEvent
+from PyQt6.QtGui import QColor, QIcon, QCloseEvent, QShortcut, QKeySequence
 from PyQt6.QtCore import Qt, pyqtSignal
 from .image_manager import ImageManager
 from .display_controller import DisplayController
@@ -24,10 +24,49 @@ from .skeleton_correction_interface import SkeletonCorrectionInterface
 from . import ui_panels
 from . import file_tree_manager
 from . import visualization_manager
+from .task_progress import TaskProgressWidget
+from .empty_state import ShortcutsDialog
 import logging
 import os
 
 logger = logging.getLogger(__name__)
+
+
+class _ProgressBarShim:
+    """Compat facade exposing the legacy QProgressBar API on TaskProgressWidget.
+
+    The status-bar QProgressBar was replaced by TaskProgressWidget. The mask and
+    skeleton *generation* handlers still call the old bar API
+    (setValue/show/hide/setFormat/setTextVisible); this shim maps those onto the
+    new widget so they keep working unchanged.
+    """
+
+    def __init__(self, tp):
+        self._tp = tp
+
+    def setValue(self, v):
+        self._tp.set_progress(v)
+
+    def show(self):
+        # Legacy callers call show() then setValue() repeatedly; start with a
+        # generic op name so the labelled widget actually appears.
+        if not self._tp.isVisible():
+            self._tp.start("Working")
+
+    def hide(self):
+        self._tp.finish()
+
+    def setFormat(self, *_a, **_k):
+        pass  # text-on-bar disabled; the label carries the text now
+
+    def setTextVisible(self, *_a, **_k):
+        pass
+
+    def setRange(self, *_a, **_k):
+        pass
+
+    def setMinimumWidth(self, *_a, **_k):
+        pass
 
 
 class MainWindow(QMainWindow):
@@ -77,6 +116,21 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
 
+        # Keyboard-shortcut help dialog (F1 / ?).
+        self._help_shortcut_f1 = QShortcut(QKeySequence("F1"), self)
+        self._help_shortcut_f1.activated.connect(lambda: ShortcutsDialog(self).exec())
+        self._help_shortcut_q = QShortcut(QKeySequence("?"), self)
+        self._help_shortcut_q.activated.connect(lambda: ShortcutsDialog(self).exec())
+
+    @property
+    def loading_progress_bar(self):
+        """Legacy QProgressBar facade backed by the TaskProgressWidget.
+
+        Lets the mask/skeleton generation handlers keep calling the old bar API
+        unchanged while the nicer status-bar widget is what actually renders.
+        """
+        return _ProgressBarShim(self.task_progress)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         """Stop Dash server threads before the window (and embedded viz widgets) are destroyed."""
         try:
@@ -89,26 +143,22 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         super().closeEvent(event)
 
-    def init_ui(self):
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout(main_widget)
+    def _build_body(self) -> QWidget:
+        """Build the left/right splitter body (presentation extract of init_ui).
+
+        Returns a container widget holding the QSplitter. PRESERVES the four
+        ``right_panel.addWidget`` calls in their fixed index order
+        (0=display, 1=mask_tracing, 2=visualization, 3=skeleton_correction).
+        """
+        body = QWidget()
+        main_layout = QHBoxLayout(body)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         main_layout.addWidget(splitter)
 
-        # Set splitter properties
+        # Set splitter properties. Handle colour comes from the global SPROUTS
+        # QSS (QSplitter::handle -> --border), not an inline neon override.
         splitter.setHandleWidth(5)
-        splitter.setStyleSheet(
-            """
-            QSplitter::handle {
-                background-color: #ff79c6;
-            }
-            QSplitter::handle:hover {
-                background-color: #bd93f9;
-            }
-        """
-        )
 
         # Left Panel - use extracted module
         left_panel = ui_panels.create_left_panel(self)
@@ -124,18 +174,95 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self.right_panel)
 
         splitter.setSizes([400, 800])
+        return body
 
-        # Status Bar with Progress Bar
+    def _build_shell(self) -> QWidget:
+        """Build the guided shell: titlebar / ribbon / action-bar over the body
+        (stretch) over the statusline. Returns the shell container.
+
+        Presentation wrapper only — the body (and its four right_panel indices)
+        is unchanged; the chrome bands forward to existing handlers.
+        """
+        from . import shell_chrome
+
+        shell = QWidget()
+        col = QVBoxLayout(shell)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+
+        col.addWidget(shell_chrome.build_titlebar(self))
+        col.addWidget(shell_chrome.build_ribbon(self))
+        col.addWidget(shell_chrome.build_action_bar(self))
+        col.addWidget(self._build_body(), 1)
+        col.addWidget(shell_chrome.build_statusline(self))
+
+        # Populate the stage-aware action bar now that the body (and the real
+        # stage buttons created in create_left_panel) exists; then show the
+        # default Library stage.
+        if callable(getattr(self, "_populate_action_bar", None)):
+            self._populate_action_bar()
+        if callable(getattr(self, "_activate_action_stage", None)):
+            self._activate_action_stage("Library")
+        return shell
+
+    # Sentinel: presence signals the PR4 guided shell (app_stack) is wired, used
+    # by the shell smoke test to gate the MainWindow contract assertions.
+    _pr4_shell_ready = True
+
+    def init_ui(self):
+        # Guided app shell: a QStackedWidget that flips between the Welcome
+        # screen (index 0) and the working shell/body (index 1). The window
+        # starts on Welcome; load_images flips to the shell (T4.6).
+        from app.gui.welcome_screen import WelcomeWidget
+        from app.gui.loading_overlay import LoadingOverlay
+
+        self.app_stack = QStackedWidget()
+        self.welcome = WelcomeWidget(
+            on_get_started=self.load_images, on_open_recent=self.open_path
+        )
+        self.app_stack.addWidget(self.welcome)          # index 0
+
+        shell = self._build_shell()
+        self.app_stack.addWidget(shell)                 # index 1
+
+        self.setCentralWidget(self.app_stack)
+        self.app_stack.setCurrentIndex(0)
+
+        # Full-window loading overlay (parented to the window), hidden until a
+        # directory is chosen.
+        self.loading_overlay = LoadingOverlay(self)
+        self.loading_overlay.hide()
+
+        # Status Bar with first-class task-progress widget.
+        # Replaces the old cramped status-bar QProgressBar (text-on-bar). The
+        # legacy loading_progress_bar API is preserved via the _ProgressBarShim
+        # exposed by the loading_progress_bar property, so generation handlers
+        # are unchanged.
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
 
-        # Add loading progress bar
-        self.loading_progress_bar = QProgressBar()
-        self.loading_progress_bar.setTextVisible(True)
-        self.loading_progress_bar.setRange(0, 100)
-        self.loading_progress_bar.setMinimumWidth(400)
-        self.loading_progress_bar.hide()
-        self.status_bar.addPermanentWidget(self.loading_progress_bar)
+        self.task_progress = TaskProgressWidget()
+        self.status_bar.addPermanentWidget(self.task_progress)
+
+        # Transient success/feedback toasts (bottom-right of the window). Hard
+        # errors keep using QMessageBox.critical; this is additive.
+        from app.gui.widgets import ToastManager
+        self.toasts = ToastManager(self)
+
+    def notify(self, message: str, kind: str = "success", timeout: int = 3200) -> None:
+        """Show a transient toast. ``kind`` in success/info/warn/danger."""
+        toasts = getattr(self, "toasts", None)
+        if toasts is not None:
+            toasts.show(message, kind=kind, timeout=timeout)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        toasts = getattr(self, "toasts", None)
+        if toasts is not None:
+            toasts.reposition()
+        overlay = getattr(self, "loading_overlay", None)
+        if overlay is not None:
+            overlay.reposition()
 
     def set_opengl_viewports_enabled(self, enabled: bool) -> None:
         """Enable/disable QOpenGLWidget-based viewports across the app.
@@ -238,41 +365,108 @@ class MainWindow(QMainWindow):
     # ==================== Image Loading ====================
     
     def load_images(self):
+        """Open the directory dialog, then load the chosen folder."""
         dir_name = QFileDialog.getExistingDirectory(self, "Select Image Directory")
         if dir_name:
-            # Show progress bar before loading
-            self.loading_progress_bar.setValue(0)
-            self.loading_progress_bar.show()
+            self.open_path(dir_name)
 
-            # Clear undo/redo stacks if mask tracing interface exists
-            if hasattr(self, "mask_tracing_interface"):
-                self.mask_tracing_interface.undo_stack.clear()
-                self.mask_tracing_interface.redo_stack.clear()
-                self.mask_tracing_interface.last_point = None
-                self.mask_tracing_interface.drawing = False
-                if (
-                    hasattr(self.mask_tracing_interface, "mask_pixmap")
-                    and self.mask_tracing_interface.mask_pixmap
-                ):
-                    self.mask_tracing_interface.mask_pixmap.fill(
-                        Qt.GlobalColor.transparent
-                    )
+    def open_path(self, dir_name):
+        """Load a directory of images (no dialog).
 
-            # Load images through image manager
-            self.image_manager.load_images(dir_name)
+        Shared by ``load_images`` (after the dialog) and the Welcome screen's
+        recent-projects rows. Flips to the working shell, shows the loading
+        overlay, and kicks off ``image_manager.load_images``.
+        """
+        if not dir_name:
+            return
+        # Stash for on_loading_finished so it can persist a recent entry.
+        self._last_loaded_dir = dir_name
+
+        # Leave the Welcome screen for the working shell and show the
+        # full-window loading overlay (PR4 T4.6).
+        if getattr(self, "app_stack", None) is not None:
+            self.app_stack.setCurrentIndex(1)
+        if getattr(self, "loading_overlay", None) is not None:
+            self.loading_overlay.start("Loading images")
+
+        # Show progress before loading.
+        self.task_progress.start("Loading images")
+
+        # Clear undo/redo stacks if mask tracing interface exists
+        if hasattr(self, "mask_tracing_interface"):
+            self.mask_tracing_interface.undo_stack.clear()
+            self.mask_tracing_interface.redo_stack.clear()
+            self.mask_tracing_interface.last_point = None
+            self.mask_tracing_interface.drawing = False
+            if (
+                hasattr(self.mask_tracing_interface, "mask_pixmap")
+                and self.mask_tracing_interface.mask_pixmap
+            ):
+                self.mask_tracing_interface.mask_pixmap.fill(
+                    Qt.GlobalColor.transparent
+                )
+
+        # Load images through image manager
+        self.image_manager.load_images(dir_name)
 
     def update_loading_progress(self, value):
         """Update the loading progress bar"""
-        if hasattr(self, "loading_progress_bar"):
-            self.loading_progress_bar.setValue(value)
-            if value == 100:
-                self.loading_progress_bar.hide()
+        self.task_progress.set_progress(value)
+        if getattr(self, "loading_overlay", None) is not None:
+            self.loading_overlay.set_progress(value)
 
     def on_loading_finished(self, images, fake_images, masks, has_fake_real_pairs):
         """Handle completion of image loading"""
-        self.loading_progress_bar.hide()
+        self.task_progress.finish(f"Loaded {len(images)} images")
+        if getattr(self, "loading_overlay", None) is not None:
+            self.loading_overlay.hide()
         self.populate_file_list()
         self.status_bar.showMessage(f"Loaded {len(images)} images", 5000)
+        self.notify(f"Loaded {len(images)} images")
+
+        # Swap the index-0 display page from the empty state to the real display
+        # area now that images exist.
+        if images and getattr(self, "display_page_stack", None) is not None:
+            self.display_page_stack.setCurrentIndex(0)
+
+        # Persist a recent-projects entry for the Welcome screen (FIX2).
+        if images:
+            self._record_recent_project(len(images))
+
+    def _record_recent_project(self, count):
+        """Append the just-loaded dir to QSettings recent_projects (MRU, cap 8)."""
+        dir_name = getattr(self, "_last_loaded_dir", None)
+        if not dir_name:
+            return
+        try:
+            import json
+            from datetime import datetime
+            from PyQt6.QtCore import QSettings
+
+            settings = QSettings("LeakeyLab", "SPROUTS")
+            raw = settings.value("recent_projects", "[]")
+            try:
+                entries = json.loads(raw) if isinstance(raw, str) else list(raw)
+            except (ValueError, TypeError):
+                entries = []
+            if not isinstance(entries, list):
+                entries = []
+
+            entry = {
+                "name": os.path.basename(os.path.normpath(dir_name)),
+                "path": dir_name,
+                "count": int(count),
+                "ts": datetime.now().isoformat(),
+            }
+            # Dedup by path, most-recent-first, cap 8.
+            entries = [
+                e for e in entries
+                if isinstance(e, dict) and e.get("path") != dir_name
+            ]
+            entries.insert(0, entry)
+            settings.setValue("recent_projects", json.dumps(entries[:8]))
+        except Exception:
+            logger.exception("Failed to record recent project")
 
     # ==================== Tree Item Selection ====================
     
@@ -363,6 +557,7 @@ class MainWindow(QMainWindow):
             self.view_mode_combo.setCurrentText(self.view_mode_combo.currentText())
 
         self.status_bar.showMessage("Results loaded successfully.", 5000)
+        self.notify("Results loaded successfully")
 
     # ==================== Mask Tracing ====================
     
@@ -463,6 +658,7 @@ class MainWindow(QMainWindow):
             if item:
                 item.setForeground(0, QColor("green"))
             self.status_bar.showMessage(f"Mask saved for {image_name}", 3000)
+            self.notify(f"Mask saved for {image_name}")
 
     def on_mask_cleared(self, image_path):
         # Always emit the signal

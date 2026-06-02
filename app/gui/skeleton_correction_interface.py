@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import QColor, QImage, QKeyEvent, QPixmap, QKeySequence, QShortcut, QPainterPath
 from PyQt6.QtGui import QPen, QBrush
 from PyQt6.QtWidgets import (
@@ -30,7 +30,6 @@ from PyQt6.QtWidgets import (
     QSlider,
     QLabel,
     QButtonGroup,
-    QGroupBox,
     QFileDialog,
     QMessageBox,
     QGraphicsScene,
@@ -38,12 +37,21 @@ from PyQt6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsPathItem,
     QGraphicsLineItem,
+    QFrame,
 )
 
 from .skeleton_correction_graphics_view import SkeletonCorrectionGraphicsView
 from .skeleton_graph_model import SkeletonCorrectionModel
 from .image_normalization_interface import ImageNormalization, NormalizationControls
 from .mask_cursor_utils import create_brush_cursor
+from app.gui.widgets import (
+    ToolRail,
+    FloatingDock,
+    EnhancePopover,
+    IconButton,
+    load_icon,
+    tokens,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -179,7 +187,7 @@ class SkeletonCorrectionInterface(QWidget):
         # lifetime of the displayed pixmap to avoid a use-after-free on the
         # raw numpy pointer handed to QImage.
         self._overlay_color_table = [0] * 256
-        self._overlay_color_table[255] = QColor(57, 255, 20).rgba()  # neon green
+        self._overlay_color_table[255] = QColor("#f0a868").rgba()  # skeleton warm orange
         self._overlay_qimage_buffer: Optional[np.ndarray] = None
 
         self._build_ui()
@@ -211,42 +219,46 @@ class SkeletonCorrectionInterface(QWidget):
         self.skeleton_item.setOpacity(self.overlay_opacity)
         self.scene.addItem(self.skeleton_item)
 
-        # Bottom controls
-        control_panel = self._create_control_panel()
-        main_layout.addWidget(control_panel)
+        # Floating in-window overlays (parented to the graphics view). Built
+        # before the control panel so tool widgets can be constructed straight
+        # into the rail.
+        self._build_overlays()
+
+        # Construct controls and wire signals (controls live in the overlays).
+        self._create_control_panel()
 
         self.setLayout(main_layout)
 
-    def _create_control_panel(self) -> QWidget:
-        control_panel = QWidget()
-        control_panel.setStyleSheet(
-            """
-            QWidget { background-color: #1e1e1e; }
-            QGroupBox {
-                border: 1px solid #333333;
-                border-radius: 4px;
-                margin-top: 4px;
-                padding-top: 12px;
-                color: white;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 7px;
-                padding: 0px 5px 0px 5px;
-            }
+    def _build_overlays(self) -> None:
+        """Build the floating in-window overlays (presentation only).
+
+        Creates a left vertical ``ToolRail``, a bottom-centre ``FloatingDock``,
+        a top-right ``EnhancePopover`` and a top-centre contextual polyline
+        prompt, all parented to the graphics view (matching the SPROUTS canvas
+        layout). Controls are reparented into these in later tasks.
         """
-        )
+        self.tool_rail = ToolRail(self.graphics_view)
+        self.dock = FloatingDock(self.graphics_view)
+        self.enhance_popover = EnhancePopover(self.graphics_view)
 
-        layout = QHBoxLayout(control_panel)
-        layout.setSpacing(4)
-        layout.setContentsMargins(2, 1, 2, 1)
+        # Top-centre contextual polyline prompt (Finish/Cancel), shown only
+        # while a polyline is in progress.
+        self.polyline_prompt = QFrame(self.graphics_view)
+        self.polyline_prompt.setObjectName("polylinePrompt")
+        self.polyline_prompt.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.polyline_prompt.setStyleSheet(f"""
+            QFrame#polylinePrompt {{
+                background-color: {tokens.BG_1};
+                border: 1px solid {tokens.BORDER_STRONG};
+                border-radius: 13px;
+            }}
+        """)
+        self._polyline_prompt_layout = QHBoxLayout(self.polyline_prompt)
+        self._polyline_prompt_layout.setContentsMargins(6, 6, 6, 6)
+        self._polyline_prompt_layout.setSpacing(3)
+        self.polyline_prompt.hide()
 
-        tools_group = QGroupBox("Tools")
-        tools_group.setFixedWidth(140)
-        tools_layout = QVBoxLayout()
-        tools_layout.setSpacing(2)
-        tools_layout.setContentsMargins(4, 2, 4, 2)
-
+        # --- Tools -> ToolRail ---
         btn_style = """
             QPushButton {
                 background-color: #2d2d2d;
@@ -278,16 +290,18 @@ class SkeletonCorrectionInterface(QWidget):
             b.setStyleSheet(btn_style)
             b.setCheckable(True)
             self.tool_group.addButton(b)
-            tools_layout.addWidget(b)
+            self.tool_rail.add_widget(b)
 
         self.select_button.setChecked(True)
 
-        # Add mode toggle button to tools group
+        self.tool_rail.add_separator()
+
+        # Mode toggle (Draw/Pan)
         self.mode_toggle = QPushButton("🔒 Draw")
         self.mode_toggle.setStyleSheet(btn_style)
         self.mode_toggle.setCheckable(True)
         self.mode_toggle.setChecked(True)
-        tools_layout.addWidget(self.mode_toggle)
+        self.tool_rail.add_widget(self.mode_toggle)
 
         # Polyline smoothing toggle (for curvable/bendable lines)
         self.smooth_polyline_toggle = QPushButton("〰 Smooth")
@@ -295,16 +309,62 @@ class SkeletonCorrectionInterface(QWidget):
         self.smooth_polyline_toggle.setCheckable(True)
         self.smooth_polyline_toggle.setChecked(False)
         self.smooth_polyline_toggle.setEnabled(False)  # enabled only in Polyline tool
-        tools_layout.addWidget(self.smooth_polyline_toggle)
+        self.tool_rail.add_widget(self.smooth_polyline_toggle)
 
-        tools_group.setLayout(tools_layout)
-        layout.addWidget(tools_group)
+        # Position overlays once the initial layout has settled.
+        QTimer.singleShot(0, self._reposition_overlays)
 
-        actions_group = QGroupBox("Actions")
-        actions_group.setFixedWidth(140)
-        actions_layout = QVBoxLayout()
-        actions_layout.setSpacing(2)
-        actions_layout.setContentsMargins(4, 2, 4, 2)
+    def _reposition_overlays(self) -> None:
+        """Reposition the floating overlays over the graphics-view bounds."""
+        if hasattr(self, "tool_rail"):
+            self.tool_rail.reposition()
+            self.tool_rail.raise_()
+        if hasattr(self, "dock"):
+            self.dock.reposition()
+            self.dock.raise_()
+        if hasattr(self, "enhance_popover"):
+            self.enhance_popover.reposition()
+            self.enhance_popover.raise_()
+        if hasattr(self, "polyline_prompt"):
+            self._reposition_polyline_prompt()
+            self.polyline_prompt.raise_()
+
+    def _reposition_polyline_prompt(self) -> None:
+        """Top-centre the contextual polyline prompt over the graphics view."""
+        parent = self.graphics_view
+        self.polyline_prompt.adjustSize()
+        pw = parent.width()
+        x = max(14, (pw - self.polyline_prompt.width()) // 2)
+        self.polyline_prompt.move(x, 14)
+
+    def resizeEvent(self, event):
+        """Keep floating overlays positioned (and raised) on widget resize."""
+        super().resizeEvent(event)
+        self._reposition_overlays()
+
+    def _create_control_panel(self) -> None:
+        """Construct the editor controls and wire signals.
+
+        Controls live in the floating overlays (ToolRail / FloatingDock /
+        EnhancePopover / polyline prompt) built by ``_build_overlays``; this
+        method constructs the remaining widgets and connects every signal.
+        There is no longer a bottom control-panel chrome widget.
+        """
+        # Tools (select/eraser/polyline/connect + mode/smooth toggles) live in
+        # the floating ToolRail, constructed in _build_overlays.
+        btn_style = """
+            QPushButton {
+                background-color: #2d2d2d;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                color: white;
+                min-height: 28px;
+                font-size: 12px;
+            }
+            QPushButton:checked { background-color: #404040; }
+            QPushButton:hover { background-color: #404040; }
+        """
 
         self.load_skeleton_button = QPushButton("📎 Load Skeleton…")
         self.save_skeleton_button = QPushButton("💾 Save Skeleton")
@@ -352,21 +412,12 @@ class SkeletonCorrectionInterface(QWidget):
             self.clear_button,
         ]:
             b.setStyleSheet(btn_style)
-            actions_layout.addWidget(b)
-        
-        # Add polyline buttons with special styling
+
+        # Polyline buttons styled here; reparented into the top-centre prompt.
         self.finish_polyline_button.setStyleSheet(polyline_btn_style)
         self.cancel_polyline_button.setStyleSheet(cancel_btn_style)
-        actions_layout.addWidget(self.finish_polyline_button)
-        actions_layout.addWidget(self.cancel_polyline_button)
-
-        actions_group.setLayout(actions_layout)
-        layout.addWidget(actions_group)
-
-        adj_group = QGroupBox("Adjustments")
-        adj_layout = QVBoxLayout()
-        adj_layout.setSpacing(2)
-        adj_layout.setContentsMargins(8, 2, 8, 2)
+        self._polyline_prompt_layout.addWidget(self.finish_polyline_button)
+        self._polyline_prompt_layout.addWidget(self.cancel_polyline_button)
 
         slider_style = """
             QSlider { max-height: 20px; }
@@ -394,13 +445,36 @@ class SkeletonCorrectionInterface(QWidget):
         self.opacity_slider.setRange(5, 100)
         self.opacity_slider.setValue(int(self.overlay_opacity * 100))
 
-        adj_layout.addWidget(self.eraser_label)
-        adj_layout.addWidget(self.eraser_slider)
-        adj_layout.addWidget(self.opacity_label)
-        adj_layout.addWidget(self.opacity_slider)
+        # ---- FloatingDock: eraser slider [eraser-only], opacity, actions, Save ----
+        # Eraser-size slider (label + slider); shown only when the eraser tool
+        # is active (toggled from _on_tool_changed).
+        self.eraser_container = QWidget(self)
+        eraser_box = QVBoxLayout(self.eraser_container)
+        eraser_box.setSpacing(1)
+        eraser_box.setContentsMargins(0, 0, 0, 0)
+        eraser_box.addWidget(self.eraser_label)
+        eraser_box.addWidget(self.eraser_slider)
+        self.eraser_container.setFixedWidth(150)
+        self.dock.add_widget(self.eraser_container)
+        self.eraser_container.setVisible(self.current_tool == self.TOOL_ERASER)
 
-        adj_group.setLayout(adj_layout)
-        layout.addWidget(adj_group)
+        # Overlay-opacity slider (label + slider) in a fixed-width container.
+        self.opacity_container = QWidget(self)
+        opacity_box = QVBoxLayout(self.opacity_container)
+        opacity_box.setSpacing(1)
+        opacity_box.setContentsMargins(0, 0, 0, 0)
+        opacity_box.addWidget(self.opacity_label)
+        opacity_box.addWidget(self.opacity_slider)
+        self.opacity_container.setFixedWidth(150)
+        self.dock.add_widget(self.opacity_container)
+
+        self.dock.add_separator()
+        self.dock.add_widget(self.load_skeleton_button)
+        self.dock.add_widget(self.undo_button)
+        self.dock.add_widget(self.redo_button)
+        self.dock.add_widget(self.clear_button)
+        self.dock.add_separator()
+        self.dock.add_widget(self.save_skeleton_button)
 
         # Signals
         self.tool_group.buttonClicked.connect(self._on_tool_changed)
@@ -416,24 +490,25 @@ class SkeletonCorrectionInterface(QWidget):
         self.mode_toggle.clicked.connect(self._on_mode_toggle)
         self.smooth_polyline_toggle.toggled.connect(self._on_smooth_polyline_toggled)
 
-        # Image enhancement controls (same as mask tracing)
+        # Image enhancement controls (same as mask tracing) -> top-right popover,
+        # toggled from a contrast IconButton on the rail.
         self.norm_controls = NormalizationControls(self)
         self.norm_controls.apply_button.clicked.connect(self.apply_normalization)
-        layout.addWidget(self.norm_controls)
+        self.enhance_popover.set_content(self.norm_controls)
+        self.enhance_button = IconButton(
+            "contrast", "Image enhancement", checkable=False
+        )
+        self.enhance_button.clicked.connect(self.enhance_popover.toggle)
+        self.tool_rail.add_separator()
+        self.tool_rail.add_widget(self.enhance_button)
 
-        # Status/hint label
-        status_group = QGroupBox("Status")
-        status_layout = QVBoxLayout()
-        status_layout.setSpacing(2)
-        status_layout.setContentsMargins(4, 2, 4, 2)
+        # Status/hint label -> bottom dock (separator + label).
         self.status_label = QLabel("Select an image, then load a skeleton to edit.")
         self.status_label.setStyleSheet("color: #8be9fd; font-size: 11px;")
         self.status_label.setWordWrap(True)
-        status_layout.addWidget(self.status_label)
-        status_group.setLayout(status_layout)
-        layout.addWidget(status_group)
-
-        return control_panel
+        self.status_label.setMaximumWidth(360)
+        self.dock.add_separator()
+        self.dock.add_widget(self.status_label)
 
     # -------------------- wiring --------------------
     def clamp_to_image(self, pt: QPoint) -> QPoint:
@@ -512,6 +587,12 @@ class SkeletonCorrectionInterface(QWidget):
         if hasattr(self, 'graphics_view'):
             self.graphics_view.update_cursor()
 
+        # Eraser-size slider is only relevant for the eraser tool.
+        if hasattr(self, 'eraser_container'):
+            self.eraser_container.setVisible(self.current_tool == self.TOOL_ERASER)
+            if hasattr(self, 'dock'):
+                self.dock.reposition()
+
         # Reset transient state when switching tools
         self._polyline_points.clear()
         self._polyline_dragging = False
@@ -551,7 +632,14 @@ class SkeletonCorrectionInterface(QWidget):
         self.finish_polyline_button.setEnabled(in_polyline and has_pts)
         self.cancel_polyline_button.setEnabled(in_polyline and has_any_pts)
         self.smooth_polyline_toggle.setEnabled(in_polyline)
-        
+
+        # Top-centre prompt is visible only while a polyline is in progress.
+        if hasattr(self, 'polyline_prompt'):
+            self.polyline_prompt.setVisible(in_polyline and has_any_pts)
+            if in_polyline and has_any_pts:
+                self._reposition_polyline_prompt()
+                self.polyline_prompt.raise_()
+
         # Update status label with helpful context
         self._update_status_label()
     
@@ -739,7 +827,7 @@ class SkeletonCorrectionInterface(QWidget):
 
         r = 5
         item = QGraphicsEllipseItem(pt.x() - r, pt.y() - r, r * 2, r * 2)
-        item.setPen(QPen(QColor("#8be9fd")))
+        item.setPen(QPen(QColor("#c39af6")))  # selection accent purple
         item.setBrush(QBrush(QColor(0, 0, 0, 0)))
         item.setZValue(4)
         self.scene.addItem(item)
@@ -747,7 +835,7 @@ class SkeletonCorrectionInterface(QWidget):
 
     def _clear_endpoint_highlights(self) -> None:
         for it in self._endpoint_items:
-            it.setBrush(QBrush(QColor("#ffb86c")))  # orange
+            it.setBrush(QBrush(QColor("#f0a868")))  # skeleton/endpoint warm orange
 
     def _refresh_endpoints(self) -> None:
         self._clear_endpoint_items()
@@ -756,7 +844,7 @@ class SkeletonCorrectionInterface(QWidget):
             r = 4
             item = QGraphicsEllipseItem(x - r, y - r, r * 2, r * 2)
             item.setPen(QPen(QColor("#282a36")))
-            item.setBrush(QBrush(QColor("#ffb86c")))
+            item.setBrush(QBrush(QColor("#f0a868")))  # skeleton/endpoint warm orange
             item.setZValue(3)
             self.scene.addItem(item)
             self._endpoint_items.append(item)
@@ -785,7 +873,7 @@ class SkeletonCorrectionInterface(QWidget):
         for it in self._endpoint_items:
             c = it.rect().center()
             if abs(c.x() - pt.x()) <= 1 and abs(c.y() - pt.y()) <= 1:
-                it.setBrush(QBrush(QColor("#50fa7b")))
+                it.setBrush(QBrush(QColor("#c39af6")))  # highlight accent purple
 
     # -------------------- actions --------------------
     def clear_skeleton(self) -> None:
@@ -1145,7 +1233,7 @@ class SkeletonCorrectionInterface(QWidget):
         """Draw a transient preview line for the Connect tool drag using vector graphics."""
         if self._connect_line_preview_item is None:
             self._connect_line_preview_item = QGraphicsLineItem()
-            pen = QPen(QColor("#50fa7b"))  # green
+            pen = QPen(QColor("#c39af6"))  # connect preview accent purple
             pen.setWidth(2)
             pen.setCosmetic(True)  # Keep width constant regardless of zoom
             self._connect_line_preview_item.setPen(pen)
@@ -1168,7 +1256,7 @@ class SkeletonCorrectionInterface(QWidget):
         for p in self._polyline_points:
             r = 4
             item = QGraphicsEllipseItem(p.x() - r, p.y() - r, r * 2, r * 2)
-            pen = QPen(QColor("#ff79c6"))  # pink
+            pen = QPen(QColor("#c39af6"))  # handle accent purple
             pen.setWidth(2)
             item.setPen(pen)
             item.setBrush(QBrush(QColor(0, 0, 0, 0)))
@@ -1275,7 +1363,7 @@ class SkeletonCorrectionInterface(QWidget):
 
         if self._polyline_preview_item is None:
             self._polyline_preview_item = QGraphicsPathItem()
-            pen = QPen(QColor("#8be9fd"))  # cyan
+            pen = QPen(QColor("#c39af6"))  # polyline preview accent purple
             pen.setWidth(2)
             pen.setCosmetic(True)
             self._polyline_preview_item.setPen(pen)
