@@ -126,6 +126,17 @@ def test_main_window_contract(app):
             assert hasattr(mw, attr), f"missing {attr}"
         assert mw.view_mode_combo.count() == 3
         assert mw.right_panel.count() == 4
+        # Track R: ribbon split into 7 explicit stages, in order.
+        assert list(mw.ribbon_buttons.keys()) == [
+            "Library",
+            "Generate Mask",
+            "Trace",
+            "Generate Skeleton",
+            "Correct",
+            "Measure",
+            "Visualize",
+        ]
+        assert len(mw.ribbon_buttons) == 7
         assert mw.app_stack.count() >= 2
         # FIX2: the dialog-free loader entry point exists for recent rows.
         assert callable(getattr(mw, "open_path", None))
