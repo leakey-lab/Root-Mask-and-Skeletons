@@ -209,7 +209,9 @@ class MainWindow(QMainWindow):
         from app.gui.loading_overlay import LoadingOverlay
 
         self.app_stack = QStackedWidget()
-        self.welcome = WelcomeWidget(on_get_started=self.load_images)
+        self.welcome = WelcomeWidget(
+            on_get_started=self.load_images, on_open_recent=self.open_path
+        )
         self.app_stack.addWidget(self.welcome)          # index 0
 
         shell = self._build_shell()
@@ -355,34 +357,49 @@ class MainWindow(QMainWindow):
     # ==================== Image Loading ====================
     
     def load_images(self):
+        """Open the directory dialog, then load the chosen folder."""
         dir_name = QFileDialog.getExistingDirectory(self, "Select Image Directory")
         if dir_name:
-            # Leave the Welcome screen for the working shell and show the
-            # full-window loading overlay (PR4 T4.6).
-            if getattr(self, "app_stack", None) is not None:
-                self.app_stack.setCurrentIndex(1)
-            if getattr(self, "loading_overlay", None) is not None:
-                self.loading_overlay.start("Loading images")
+            self.open_path(dir_name)
 
-            # Show progress before loading.
-            self.task_progress.start("Loading images")
+    def open_path(self, dir_name):
+        """Load a directory of images (no dialog).
 
-            # Clear undo/redo stacks if mask tracing interface exists
-            if hasattr(self, "mask_tracing_interface"):
-                self.mask_tracing_interface.undo_stack.clear()
-                self.mask_tracing_interface.redo_stack.clear()
-                self.mask_tracing_interface.last_point = None
-                self.mask_tracing_interface.drawing = False
-                if (
-                    hasattr(self.mask_tracing_interface, "mask_pixmap")
-                    and self.mask_tracing_interface.mask_pixmap
-                ):
-                    self.mask_tracing_interface.mask_pixmap.fill(
-                        Qt.GlobalColor.transparent
-                    )
+        Shared by ``load_images`` (after the dialog) and the Welcome screen's
+        recent-projects rows. Flips to the working shell, shows the loading
+        overlay, and kicks off ``image_manager.load_images``.
+        """
+        if not dir_name:
+            return
+        # Stash for on_loading_finished so it can persist a recent entry.
+        self._last_loaded_dir = dir_name
 
-            # Load images through image manager
-            self.image_manager.load_images(dir_name)
+        # Leave the Welcome screen for the working shell and show the
+        # full-window loading overlay (PR4 T4.6).
+        if getattr(self, "app_stack", None) is not None:
+            self.app_stack.setCurrentIndex(1)
+        if getattr(self, "loading_overlay", None) is not None:
+            self.loading_overlay.start("Loading images")
+
+        # Show progress before loading.
+        self.task_progress.start("Loading images")
+
+        # Clear undo/redo stacks if mask tracing interface exists
+        if hasattr(self, "mask_tracing_interface"):
+            self.mask_tracing_interface.undo_stack.clear()
+            self.mask_tracing_interface.redo_stack.clear()
+            self.mask_tracing_interface.last_point = None
+            self.mask_tracing_interface.drawing = False
+            if (
+                hasattr(self.mask_tracing_interface, "mask_pixmap")
+                and self.mask_tracing_interface.mask_pixmap
+            ):
+                self.mask_tracing_interface.mask_pixmap.fill(
+                    Qt.GlobalColor.transparent
+                )
+
+        # Load images through image manager
+        self.image_manager.load_images(dir_name)
 
     def update_loading_progress(self, value):
         """Update the loading progress bar"""
@@ -403,6 +420,45 @@ class MainWindow(QMainWindow):
         # area now that images exist.
         if images and getattr(self, "display_page_stack", None) is not None:
             self.display_page_stack.setCurrentIndex(0)
+
+        # Persist a recent-projects entry for the Welcome screen (FIX2).
+        if images:
+            self._record_recent_project(len(images))
+
+    def _record_recent_project(self, count):
+        """Append the just-loaded dir to QSettings recent_projects (MRU, cap 8)."""
+        dir_name = getattr(self, "_last_loaded_dir", None)
+        if not dir_name:
+            return
+        try:
+            import json
+            from datetime import datetime
+            from PyQt6.QtCore import QSettings
+
+            settings = QSettings("LeakeyLab", "SPROUTS")
+            raw = settings.value("recent_projects", "[]")
+            try:
+                entries = json.loads(raw) if isinstance(raw, str) else list(raw)
+            except (ValueError, TypeError):
+                entries = []
+            if not isinstance(entries, list):
+                entries = []
+
+            entry = {
+                "name": os.path.basename(os.path.normpath(dir_name)),
+                "path": dir_name,
+                "count": int(count),
+                "ts": datetime.now().isoformat(),
+            }
+            # Dedup by path, most-recent-first, cap 8.
+            entries = [
+                e for e in entries
+                if isinstance(e, dict) and e.get("path") != dir_name
+            ]
+            entries.insert(0, entry)
+            settings.setValue("recent_projects", json.dumps(entries[:8]))
+        except Exception:
+            logger.exception("Failed to record recent project")
 
     # ==================== Tree Item Selection ====================
     

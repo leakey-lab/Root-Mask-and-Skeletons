@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.gui.widgets import tokens
-from app.gui.widgets.icons import load_pixmap
+from app.gui.widgets.icons import load_pixmap, load_icon
 
 _STAGES = ["Library", "Mask", "Trace", "Skeleton", "Measure", "Visualize"]
 
@@ -63,9 +63,11 @@ class WelcomeWidget(QWidget):
     """Get-started landing page. ``on_get_started`` is a 0-arg callable."""
 
     def __init__(self, on_get_started: Callable[[], None],
+                 on_open_recent: Optional[Callable[[str], None]] = None,
                  parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._on_get_started = on_get_started
+        self._on_open_recent = on_open_recent
         self.setObjectName("welcome")
         self.setStyleSheet(f"QWidget#welcome {{ background-color: {tokens.BG_0}; }}")
 
@@ -155,14 +157,45 @@ class WelcomeWidget(QWidget):
         outer.addWidget(footer)
 
     # --------------------------------------------------------------------- #
-    def _build_recent_section(self) -> Optional[QWidget]:
+    def _load_recent_entries(self) -> List[dict]:
+        """Read the recent_projects MRU list from QSettings (JSON list of dicts)."""
+        import json
+
         settings = QSettings("LeakeyLab", "SPROUTS")
-        recent = settings.value("recent_dirs", [])
-        if isinstance(recent, str):
-            recent = [recent] if recent else []
-        if not recent:
+        raw = settings.value("recent_projects", "[]")
+        try:
+            entries = json.loads(raw) if isinstance(raw, str) else list(raw)
+        except (ValueError, TypeError):
+            entries = []
+        if not isinstance(entries, list):
+            return []
+        return [e for e in entries if isinstance(e, dict) and e.get("path")]
+
+    @staticmethod
+    def _relative_date(ts: str) -> str:
+        """ISO timestamp -> short relative-ish label (best effort)."""
+        from datetime import datetime
+
+        try:
+            dt = datetime.fromisoformat(ts)
+        except (ValueError, TypeError):
+            return ""
+        delta = datetime.now() - dt
+        secs = delta.total_seconds()
+        if secs < 60:
+            return "just now"
+        if secs < 3600:
+            return f"{int(secs // 60)}m ago"
+        if secs < 86400:
+            return f"{int(secs // 3600)}h ago"
+        if secs < 7 * 86400:
+            return f"{int(secs // 86400)}d ago"
+        return dt.strftime("%Y-%m-%d")
+
+    def _build_recent_section(self) -> Optional[QWidget]:
+        entries = self._load_recent_entries()
+        if not entries:
             return None
-        recent = list(recent)
 
         wrap = QWidget()
         col = QVBoxLayout(wrap)
@@ -170,14 +203,78 @@ class WelcomeWidget(QWidget):
         col.setSpacing(4)
         heading = QLabel("Recent projects")
         heading.setStyleSheet(f"color: {tokens.TEXT_FAINT}; font-size: 11px;")
-        heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
         col.addWidget(heading)
-        for path in recent[:5]:
-            lbl = QLabel(str(path))
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(f"color: {tokens.TEXT_MUTED}; font-size: 11.5px;")
-            col.addWidget(lbl)
+        for entry in entries[:8]:
+            col.addWidget(self._build_recent_row(entry))
         return wrap
+
+    def _build_recent_row(self, entry: dict) -> QWidget:
+        path = str(entry.get("path", ""))
+        name = str(entry.get("name") or path)
+        count = entry.get("count")
+        ts = entry.get("ts", "")
+
+        row_btn = QPushButton()
+        row_btn.setObjectName("recentRow")
+        row_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        row_btn.setIcon(load_icon("image", tokens.TEXT_MUTED, 15))
+        row_btn.setStyleSheet(f"""
+            QPushButton#recentRow {{
+                background-color: {tokens.BG_2};
+                border: 1px solid {tokens.BORDER};
+                border-radius: {tokens.RADIUS_SM}px;
+                padding: 8px 12px;
+                text-align: left;
+            }}
+            QPushButton#recentRow:hover {{
+                background-color: {tokens.BG_3};
+                border: 1px solid {tokens.BORDER_STRONG};
+            }}
+        """)
+
+        inner = QHBoxLayout(row_btn)
+        inner.setContentsMargins(8, 0, 8, 0)
+        inner.setSpacing(10)
+        inner.addSpacing(18)  # leave room for the button icon
+
+        meta = QVBoxLayout()
+        meta.setContentsMargins(0, 0, 0, 0)
+        meta.setSpacing(1)
+        name_lbl = QLabel(name)
+        name_lbl.setStyleSheet(
+            f"color: {tokens.TEXT}; font-size: 12.5px; font-weight: 600; "
+            f"background: transparent; border: none;"
+        )
+        path_lbl = QLabel(path)
+        path_lbl.setStyleSheet(
+            f"color: {tokens.TEXT_FAINT}; font-family: {tokens.MONO}; "
+            f"font-size: 10.5px; background: transparent; border: none;"
+        )
+        meta.addWidget(name_lbl)
+        meta.addWidget(path_lbl)
+        inner.addLayout(meta, 1)
+
+        bits = []
+        if count is not None:
+            bits.append(f"{count} images")
+        rel = self._relative_date(ts)
+        if rel:
+            bits.append(rel)
+        if bits:
+            info = QLabel("  ·  ".join(bits))
+            info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            info.setStyleSheet(
+                f"color: {tokens.TEXT_MUTED}; font-size: 11px; "
+                f"background: transparent; border: none;"
+            )
+            inner.addWidget(info)
+
+        row_btn.clicked.connect(lambda _=False, p=path: self._handle_open_recent(p))
+        return row_btn
+
+    def _handle_open_recent(self, path: str) -> None:
+        if path and callable(self._on_open_recent):
+            self._on_open_recent(path)
 
     def _build_stage_chips(self) -> QWidget:
         wrap = QWidget()

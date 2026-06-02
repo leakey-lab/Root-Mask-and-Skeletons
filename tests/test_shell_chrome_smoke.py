@@ -30,8 +30,15 @@ def test_welcome_widget_imports(app):
     from app.gui.welcome_screen import WelcomeWidget
 
     calls = []
-    w = WelcomeWidget(on_get_started=lambda: calls.append(1))
+    opened = []
+    w = WelcomeWidget(
+        on_get_started=lambda: calls.append(1),
+        on_open_recent=lambda p: opened.append(p),
+    )
     assert w is not None
+    # The open-recent forwarder routes to the supplied callback.
+    w._handle_open_recent("C:/some/dir")
+    assert opened == ["C:/some/dir"]
 
 
 def test_welcome_get_started_callback(app):
@@ -90,6 +97,8 @@ def test_main_window_contract(app):
         assert mw.view_mode_combo.count() == 3
         assert mw.right_panel.count() == 4
         assert mw.app_stack.count() >= 2
+        # FIX2: the dialog-free loader entry point exists for recent rows.
+        assert callable(getattr(mw, "open_path", None))
     finally:
         mw.close()
         mw.deleteLater()
