@@ -220,14 +220,16 @@ class SkeletonCorrectionInterface(QWidget):
         self.skeleton_item.setOpacity(self.overlay_opacity)
         self.scene.addItem(self.skeleton_item)
 
+        # Floating in-window overlays (parented to the graphics view). Built
+        # before the control panel so tool widgets can be constructed straight
+        # into the rail.
+        self._build_overlays()
+
         # Bottom controls
         control_panel = self._create_control_panel()
         main_layout.addWidget(control_panel)
 
         self.setLayout(main_layout)
-
-        # Floating in-window overlays (parented to the graphics view).
-        self._build_overlays()
 
     def _build_overlays(self) -> None:
         """Build the floating in-window overlays (presentation only).
@@ -257,6 +259,59 @@ class SkeletonCorrectionInterface(QWidget):
         self._polyline_prompt_layout.setContentsMargins(6, 6, 6, 6)
         self._polyline_prompt_layout.setSpacing(3)
         self.polyline_prompt.hide()
+
+        # --- Tools -> ToolRail ---
+        btn_style = """
+            QPushButton {
+                background-color: #2d2d2d;
+                border: none;
+                border-radius: 4px;
+                padding: 4px;
+                color: white;
+                min-height: 28px;
+                font-size: 12px;
+            }
+            QPushButton:checked { background-color: #404040; }
+            QPushButton:hover { background-color: #404040; }
+        """
+
+        self.tool_group = QButtonGroup(self)
+        self.tool_group.setExclusive(True)
+
+        self.select_button = QPushButton("🖱️ Select")
+        self.eraser_button = QPushButton("🧽 Eraser")
+        self.polyline_button = QPushButton("📏 Polyline")
+        self.connect_button = QPushButton("🔗 Connect")
+
+        for b in [
+            self.select_button,
+            self.eraser_button,
+            self.polyline_button,
+            self.connect_button,
+        ]:
+            b.setStyleSheet(btn_style)
+            b.setCheckable(True)
+            self.tool_group.addButton(b)
+            self.tool_rail.add_widget(b)
+
+        self.select_button.setChecked(True)
+
+        self.tool_rail.add_separator()
+
+        # Mode toggle (Draw/Pan)
+        self.mode_toggle = QPushButton("🔒 Draw")
+        self.mode_toggle.setStyleSheet(btn_style)
+        self.mode_toggle.setCheckable(True)
+        self.mode_toggle.setChecked(True)
+        self.tool_rail.add_widget(self.mode_toggle)
+
+        # Polyline smoothing toggle (for curvable/bendable lines)
+        self.smooth_polyline_toggle = QPushButton("〰 Smooth")
+        self.smooth_polyline_toggle.setStyleSheet(btn_style)
+        self.smooth_polyline_toggle.setCheckable(True)
+        self.smooth_polyline_toggle.setChecked(False)
+        self.smooth_polyline_toggle.setEnabled(False)  # enabled only in Polyline tool
+        self.tool_rail.add_widget(self.smooth_polyline_toggle)
 
         # Position overlays once the initial layout has settled.
         QTimer.singleShot(0, self._reposition_overlays)
@@ -308,12 +363,8 @@ class SkeletonCorrectionInterface(QWidget):
         layout.setSpacing(4)
         layout.setContentsMargins(2, 1, 2, 1)
 
-        tools_group = QGroupBox("Tools")
-        tools_group.setFixedWidth(140)
-        tools_layout = QVBoxLayout()
-        tools_layout.setSpacing(2)
-        tools_layout.setContentsMargins(4, 2, 4, 2)
-
+        # Tools (select/eraser/polyline/connect + mode/smooth toggles) live in
+        # the floating ToolRail, constructed in _build_overlays.
         btn_style = """
             QPushButton {
                 background-color: #2d2d2d;
@@ -327,45 +378,6 @@ class SkeletonCorrectionInterface(QWidget):
             QPushButton:checked { background-color: #404040; }
             QPushButton:hover { background-color: #404040; }
         """
-
-        self.tool_group = QButtonGroup(self)
-        self.tool_group.setExclusive(True)
-
-        self.select_button = QPushButton("🖱️ Select")
-        self.eraser_button = QPushButton("🧽 Eraser")
-        self.polyline_button = QPushButton("📏 Polyline")
-        self.connect_button = QPushButton("🔗 Connect")
-
-        for b in [
-            self.select_button,
-            self.eraser_button,
-            self.polyline_button,
-            self.connect_button,
-        ]:
-            b.setStyleSheet(btn_style)
-            b.setCheckable(True)
-            self.tool_group.addButton(b)
-            tools_layout.addWidget(b)
-
-        self.select_button.setChecked(True)
-
-        # Add mode toggle button to tools group
-        self.mode_toggle = QPushButton("🔒 Draw")
-        self.mode_toggle.setStyleSheet(btn_style)
-        self.mode_toggle.setCheckable(True)
-        self.mode_toggle.setChecked(True)
-        tools_layout.addWidget(self.mode_toggle)
-
-        # Polyline smoothing toggle (for curvable/bendable lines)
-        self.smooth_polyline_toggle = QPushButton("〰 Smooth")
-        self.smooth_polyline_toggle.setStyleSheet(btn_style)
-        self.smooth_polyline_toggle.setCheckable(True)
-        self.smooth_polyline_toggle.setChecked(False)
-        self.smooth_polyline_toggle.setEnabled(False)  # enabled only in Polyline tool
-        tools_layout.addWidget(self.smooth_polyline_toggle)
-
-        tools_group.setLayout(tools_layout)
-        layout.addWidget(tools_group)
 
         actions_group = QGroupBox("Actions")
         actions_group.setFixedWidth(140)
