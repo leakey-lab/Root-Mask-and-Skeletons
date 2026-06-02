@@ -62,25 +62,6 @@ def build_titlebar(mw) -> QWidget:
 
     row.addStretch(1)
 
-    load_btn = QPushButton("Load Images")
-    load_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    load_btn.setIcon(load_icon("load", tokens.ACCENT_INK, 15))
-    load_btn.setStyleSheet(f"""
-        QPushButton {{
-            background-color: {tokens.ACCENT};
-            color: {tokens.ACCENT_INK};
-            border: none;
-            border-radius: 7px;
-            padding: 6px 16px;
-            font-weight: 600;
-            font-size: 12.5px;
-        }}
-        QPushButton:hover {{ background-color: {tokens.ACCENT_PRESS}; }}
-    """)
-    load_btn.clicked.connect(mw.load_images)
-    mw.titlebar_load_button = load_btn
-    row.addWidget(load_btn)
-
     return bar
 
 

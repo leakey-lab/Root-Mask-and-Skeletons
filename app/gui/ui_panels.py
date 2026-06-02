@@ -193,7 +193,9 @@ def create_left_panel(main_window) -> QWidget:
     main_window.load_images_button.setStyleSheet(primary_button_style)
     main_window.load_images_button.setToolTip("Load images from a directory")
     main_window.load_images_button.clicked.connect(main_window.load_images)
-    layout.addWidget(main_window.load_images_button)
+    # FIX1: Welcome screen is the sole load entry. The attr/connect stay alive
+    # for any code referencing them, but the button is not shown in the shell.
+    main_window.load_images_button.setVisible(False)
 
     # ========== TOP ROW: PROCESSING & CORRECTION/ANNOTATIONS ==========
     top_row_layout = QHBoxLayout()
