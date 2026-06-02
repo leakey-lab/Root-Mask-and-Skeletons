@@ -280,6 +280,7 @@ input[type=checkbox], input[type=radio]{ accent-color:var(--accent); }
 .viz-image-panel{
   flex:0 0 300px; width:300px; min-height:0;
   overflow-y:auto;
+  display:flex; flex-direction:column; gap:8px;
   background:var(--bg-2); border:1px solid var(--border);
   border-radius:var(--radius-sm); padding:8px;
 }

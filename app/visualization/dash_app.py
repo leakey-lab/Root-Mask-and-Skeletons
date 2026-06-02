@@ -784,16 +784,10 @@ class DashApp(DashVisualizations):
                 "overflow": "hidden",
             }
 
-            hidden_images_style = {
-                "width": "100%",
-                "display": "none",
-                "flexWrap": "wrap",
-                "justifyContent": "center",
-                "marginTop": "12px",
-                "padding": "12px",
-                "borderRadius": "8px",
-                "minHeight": "200px",
-            }
+            # Display-only: the .viz-image-panel CSS owns the side-panel size/
+            # layout (300px column, internal scroll). Inline width/flex-wrap here
+            # would override it and force the old below-chart strip.
+            hidden_images_style = {"display": "none"}
             
             if not ctx.triggered:
                 return (
@@ -828,16 +822,9 @@ class DashApp(DashVisualizations):
                     lines_graph_style["height"] = "80vh"
                     lines_graph_style["minHeight"] = "600px"
 
-                    visible_images_style = {
-                        "width": "100%",
-                        "display": "flex",
-                        "flexWrap": "wrap",
-                        "justifyContent": "center",
-                        "marginTop": "20px",
-                        "padding": "20px",
-                        "borderRadius": "8px",
-                        "minHeight": "200px",
-                    }
+                    # Display-only; .viz-image-panel CSS places it beside the
+                    # chart (300px right column) and stacks images vertically.
+                    visible_images_style = {"display": "flex"}
 
                     if trigger_id == "view-selector":
                         # Guard against empty/failed datasets so switching to the
