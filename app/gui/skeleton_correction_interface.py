@@ -432,9 +432,11 @@ class SkeletonCorrectionInterface(QWidget):
         ]:
             b.setStyleSheet(btn_style)
 
-        # Polyline buttons styled here; reparented into the polyline prompt.
+        # Polyline buttons styled here; reparented into the top-centre prompt.
         self.finish_polyline_button.setStyleSheet(polyline_btn_style)
         self.cancel_polyline_button.setStyleSheet(cancel_btn_style)
+        self._polyline_prompt_layout.addWidget(self.finish_polyline_button)
+        self._polyline_prompt_layout.addWidget(self.cancel_polyline_button)
 
         actions_group.setLayout(actions_layout)
 
@@ -657,7 +659,14 @@ class SkeletonCorrectionInterface(QWidget):
         self.finish_polyline_button.setEnabled(in_polyline and has_pts)
         self.cancel_polyline_button.setEnabled(in_polyline and has_any_pts)
         self.smooth_polyline_toggle.setEnabled(in_polyline)
-        
+
+        # Top-centre prompt is visible only while a polyline is in progress.
+        if hasattr(self, 'polyline_prompt'):
+            self.polyline_prompt.setVisible(in_polyline and has_any_pts)
+            if in_polyline and has_any_pts:
+                self._reposition_polyline_prompt()
+                self.polyline_prompt.raise_()
+
         # Update status label with helpful context
         self._update_status_label()
     
