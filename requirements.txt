@@ -40,4 +40,4 @@ plotly==6.7.0
 requests==2.34.2
 
 # --- Windows integration (PyInstaller builds, win shell) ---
-pywin32==308
+pywin32==308; sys_platform == "win32"
