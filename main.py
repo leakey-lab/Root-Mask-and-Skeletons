@@ -29,8 +29,10 @@ if _chromium_flags:
 # Logging must be configured before any app module is imported so that
 # module-level loggers (e.g. config._auto_skeleton_batch) are captured.
 from app.logging_config import setup_logging  # noqa: E402
+
 setup_logging()
 import logging  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 from PyQt6.QtGui import QColor, QIcon, QPalette  # noqa: E402
@@ -53,7 +55,7 @@ def resource_path(relative_path):
 
 def apply_stylesheet(app):
     theme_path = resource_path("resources/themes/dark_theme.qss")
-    with open(theme_path, "r") as f:
+    with open(theme_path) as f:
         stylesheet = f.read()
 
     app.setStyleSheet(stylesheet)
@@ -61,26 +63,31 @@ def apply_stylesheet(app):
     # Application palette — SPROUTS refined-dark tokens (styles.css :root),
     # purple accent #c39af6 primary, purple #b794f6 selection.
     palette = QPalette()
-    palette.setColor(QPalette.ColorRole.Window, QColor("#15161c"))           # --bg-0
-    palette.setColor(QPalette.ColorRole.WindowText, QColor("#eceef5"))       # --text
-    palette.setColor(QPalette.ColorRole.Base, QColor("#1b1c24"))             # --bg-1
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#21232e"))    # --bg-2
+    palette.setColor(QPalette.ColorRole.Window, QColor("#15161c"))  # --bg-0
+    palette.setColor(QPalette.ColorRole.WindowText, QColor("#eceef5"))  # --text
+    palette.setColor(QPalette.ColorRole.Base, QColor("#1b1c24"))  # --bg-1
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#21232e"))  # --bg-2
     palette.setColor(QPalette.ColorRole.ToolTipBase, QColor("#1b1c24"))
     palette.setColor(QPalette.ColorRole.ToolTipText, QColor("#eceef5"))
     palette.setColor(QPalette.ColorRole.Text, QColor("#eceef5"))
-    palette.setColor(QPalette.ColorRole.Disabled, QPalette.ColorRole.Text, QColor("#686c82"))  # --text-faint
-    palette.setColor(QPalette.ColorRole.Button, QColor("#282a37"))           # --bg-3
+    palette.setColor(QPalette.ColorRole.Button, QColor("#282a37"))  # --bg-3
     palette.setColor(QPalette.ColorRole.ButtonText, QColor("#eceef5"))
+    # Set Disabled text color (PyQt6 API change: use setColor(QPalette.ColorGroup, QPalette.ColorRole, QColor))
+    palette.setColor(
+        QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor("#686c82")
+    )  # --text-faint
     palette.setColor(QPalette.ColorRole.BrightText, QColor("#ffffff"))
-    palette.setColor(QPalette.ColorRole.Link, QColor("#79c0e8"))             # --info
-    palette.setColor(QPalette.ColorRole.Highlight, QColor("#b794f6"))        # --sel
+    palette.setColor(QPalette.ColorRole.Link, QColor("#79c0e8"))  # --info
+    palette.setColor(QPalette.ColorRole.Highlight, QColor("#b794f6"))  # --sel
     palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#15161c"))
 
     app.setPalette(palette)
 
 
 if __name__ == "__main__":
-    logger.info("Starting Root-Mask-and-Skeletons (QSG_RHI_BACKEND=%s)", os.environ.get("QSG_RHI_BACKEND"))
+    logger.info(
+        "Starting Root-Mask-and-Skeletons (QSG_RHI_BACKEND=%s)", os.environ.get("QSG_RHI_BACKEND")
+    )
     app = QApplication(sys.argv)
 
     # Set application icon

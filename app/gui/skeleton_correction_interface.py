@@ -15,49 +15,56 @@ import logging
 import math
 import os
 import time
-from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF, QTimer
-from PyQt6.QtGui import QColor, QImage, QKeyEvent, QPixmap, QKeySequence, QShortcut, QPainterPath
-from PyQt6.QtGui import QPen, QBrush
+from PyQt6.QtCore import QPoint, QRectF, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import (
+    QBrush,
+    QColor,
+    QImage,
+    QKeyEvent,
+    QKeySequence,
+    QPainterPath,
+    QPen,
+    QPixmap,
+    QShortcut,
+)
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QSlider,
-    QLabel,
     QButtonGroup,
     QFileDialog,
-    QMessageBox,
-    QGraphicsScene,
-    QGraphicsPixmapItem,
-    QGraphicsEllipseItem,
-    QGraphicsPathItem,
-    QGraphicsLineItem,
     QFrame,
+    QGraphicsEllipseItem,
+    QGraphicsLineItem,
+    QGraphicsPathItem,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .skeleton_correction_graphics_view import SkeletonCorrectionGraphicsView
-from .skeleton_graph_model import SkeletonCorrectionModel
-from .image_normalization_interface import ImageNormalization, NormalizationControls
-from .mask_cursor_utils import create_brush_cursor
 from app.gui.widgets import (
-    ToolRail,
-    FloatingDock,
     EnhancePopover,
+    FloatingDock,
     IconButton,
-    load_icon,
+    ToolRail,
     tokens,
 )
 
+from .image_normalization_interface import ImageNormalization, NormalizationControls
+from .mask_cursor_utils import create_brush_cursor
+from .skeleton_correction_graphics_view import SkeletonCorrectionGraphicsView
+from .skeleton_graph_model import SkeletonCorrectionModel
 
 logger = logging.getLogger(__name__)
 
 
-def _imread_unicode(path: str, flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
+def _imread_unicode(path: str, flags: int = cv2.IMREAD_COLOR) -> np.ndarray | None:
     """Unicode-safe replacement for ``cv2.imread`` (F-007).
 
     ``cv2.imread`` cannot open paths containing non-ASCII characters on Windows
@@ -122,11 +129,11 @@ class SkeletonCorrectionInterface(QWidget):
 
         self.current_image_path: str = ""
         self.current_image_name: str = ""
-        self.images_base_folder: Optional[str] = None
+        self.images_base_folder: str | None = None
 
-        self._save_size: Optional[Tuple[int, int]] = None  # (w,h) for _skeleton.png
-        self._loaded_skeleton_path: Optional[str] = None
-        self._original_image_pixmap: Optional[QPixmap] = None
+        self._save_size: tuple[int, int] | None = None  # (w,h) for _skeleton.png
+        self._loaded_skeleton_path: str | None = None
+        self._original_image_pixmap: QPixmap | None = None
 
         self.model = SkeletonCorrectionModel()
 
@@ -135,30 +142,30 @@ class SkeletonCorrectionInterface(QWidget):
         self.pan_mode = False
 
         # Polyline drawing state
-        self._polyline_points: List[QPoint] = []
-        self._polyline_preview_item: Optional[QGraphicsPathItem] = None
-        self._polyline_handle_items: List[QGraphicsEllipseItem] = []
+        self._polyline_points: list[QPoint] = []
+        self._polyline_preview_item: QGraphicsPathItem | None = None
+        self._polyline_handle_items: list[QGraphicsEllipseItem] = []
         self._polyline_dragging: bool = False
-        self._polyline_drag_index: Optional[int] = None  # dragging a control point
+        self._polyline_drag_index: int | None = None  # dragging a control point
         self._polyline_translate_dragging: bool = False  # shift-drag to move the whole line
-        self._polyline_translate_anchor: Optional[QPoint] = None
-        self._polyline_translate_orig_points: List[QPoint] = []
+        self._polyline_translate_anchor: QPoint | None = None
+        self._polyline_translate_orig_points: list[QPoint] = []
         self._polyline_smooth: bool = False
         # When "Select" is used to pick an existing skeleton polyline to edit,
         # we store the original polyline points here so we can erase it on commit.
-        self._edit_original_polyline: Optional[List[Tuple[int, int]]] = None
+        self._edit_original_polyline: list[tuple[int, int]] | None = None
 
         # Connect tool state (drag-from-endpoint line drawing)
-        self._connect_first_endpoint: Optional[QPoint] = None
+        self._connect_first_endpoint: QPoint | None = None
         self._connect_dragging: bool = False  # True while dragging a line from endpoint
-        self._connect_line_preview_item: Optional[QGraphicsLineItem] = None
+        self._connect_line_preview_item: QGraphicsLineItem | None = None
 
         # Select tool state (for precise Delete-key cuts)
-        self._selected_point: Optional[QPoint] = None
-        self._selection_item: Optional[QGraphicsEllipseItem] = None
+        self._selected_point: QPoint | None = None
+        self._selection_item: QGraphicsEllipseItem | None = None
 
         # Endpoint markers
-        self._endpoint_items: List[QGraphicsEllipseItem] = []
+        self._endpoint_items: list[QGraphicsEllipseItem] = []
 
         # Controls
         # NOTE: For UX consistency with the mask editor, this slider value is treated as
@@ -167,7 +174,7 @@ class SkeletonCorrectionInterface(QWidget):
         self.eraser_radius = 20
         self.draw_thickness = 3
         self.overlay_opacity = 0.85
-        
+
         # Cursor state
         # Zoom-aware cursor: cursor pixmap is in screen pixels, while eraser works in image pixels.
         self._zoom_factor: float = 1.0
@@ -188,7 +195,7 @@ class SkeletonCorrectionInterface(QWidget):
         # raw numpy pointer handed to QImage.
         self._overlay_color_table = [0] * 256
         self._overlay_color_table[255] = QColor("#f0a868").rgba()  # skeleton warm orange
-        self._overlay_qimage_buffer: Optional[np.ndarray] = None
+        self._overlay_qimage_buffer: np.ndarray | None = None
 
         self._build_ui()
 
@@ -371,7 +378,7 @@ class SkeletonCorrectionInterface(QWidget):
         self.undo_button = QPushButton("⬅️ Undo (Ctrl+Z)")
         self.redo_button = QPushButton("➡️ Redo (Ctrl+Y)")
         self.clear_button = QPushButton("🗑️ Clear All")
-        
+
         # Polyline control buttons with distinctive styling
         polyline_btn_style = """
             QPushButton {
@@ -495,9 +502,7 @@ class SkeletonCorrectionInterface(QWidget):
         self.norm_controls = NormalizationControls(self)
         self.norm_controls.apply_button.clicked.connect(self.apply_normalization)
         self.enhance_popover.set_content(self.norm_controls)
-        self.enhance_button = IconButton(
-            "contrast", "Image enhancement", checkable=False
-        )
+        self.enhance_button = IconButton("contrast", "Image enhancement", checkable=False)
         self.enhance_button.clicked.connect(self.enhance_popover.toggle)
         self.tool_rail.add_separator()
         self.tool_rail.add_widget(self.enhance_button)
@@ -544,7 +549,7 @@ class SkeletonCorrectionInterface(QWidget):
             self.graphics_view.update_cursor()
 
     # -------------------- public API --------------------
-    def load_image(self, image_path: str, images_base_folder: Optional[str] = None) -> None:
+    def load_image(self, image_path: str, images_base_folder: str | None = None) -> None:
         """Load the base image and (if present) the last saved correction skeleton."""
         self.current_image_path = image_path
         self.current_image_name = os.path.splitext(os.path.basename(image_path))[0]
@@ -569,7 +574,7 @@ class SkeletonCorrectionInterface(QWidget):
             self._load_skeleton_from_path(correction_path)
         else:
             self._update_skeleton_display()
-        
+
         self._update_status_label()
 
     # -------------------- tool selection --------------------
@@ -584,13 +589,13 @@ class SkeletonCorrectionInterface(QWidget):
             self.current_tool = self.TOOL_CONNECT
 
         # Update cursor in view
-        if hasattr(self, 'graphics_view'):
+        if hasattr(self, "graphics_view"):
             self.graphics_view.update_cursor()
 
         # Eraser-size slider is only relevant for the eraser tool.
-        if hasattr(self, 'eraser_container'):
+        if hasattr(self, "eraser_container"):
             self.eraser_container.setVisible(self.current_tool == self.TOOL_ERASER)
-            if hasattr(self, 'dock'):
+            if hasattr(self, "dock"):
                 self.dock.reposition()
 
         # Reset transient state when switching tools
@@ -621,7 +626,7 @@ class SkeletonCorrectionInterface(QWidget):
             self.mode_toggle.setText("✋ Pan")
             self.pan_mode = True
             self.graphics_view.set_pan_mode(True)
-        
+
         # Ensure cursor is correct after mode toggle
         self.graphics_view.update_cursor()
 
@@ -634,7 +639,7 @@ class SkeletonCorrectionInterface(QWidget):
         self.smooth_polyline_toggle.setEnabled(in_polyline)
 
         # Top-centre prompt is visible only while a polyline is in progress.
-        if hasattr(self, 'polyline_prompt'):
+        if hasattr(self, "polyline_prompt"):
             self.polyline_prompt.setVisible(in_polyline and has_any_pts)
             if in_polyline and has_any_pts:
                 self._reposition_polyline_prompt()
@@ -642,34 +647,48 @@ class SkeletonCorrectionInterface(QWidget):
 
         # Update status label with helpful context
         self._update_status_label()
-    
+
     def _update_status_label(self) -> None:
         """Update the status label with context-sensitive hints."""
         if self.model.mask is None:
             self.status_label.setText("Select an image, then load a skeleton to edit.")
             return
-        
+
         tool = self.current_tool
         if tool == self.TOOL_ERASER:
-            self.status_label.setText("🧽 ERASER: Click+drag to erase skeleton pixels. Release to finish stroke.")
+            self.status_label.setText(
+                "🧽 ERASER: Click+drag to erase skeleton pixels. Release to finish stroke."
+            )
         elif tool == self.TOOL_POLYLINE:
             n = len(self._polyline_points)
             smooth_hint = ""
             if self._polyline_smooth and n < 3:
                 smooth_hint = " (Smooth needs 3+ points: Ctrl+click a segment to add a bend point)"
             if n == 0:
-                self.status_label.setText("📏 POLYLINE: Click to place points. Drag points to adjust. Ctrl+click a segment to add a bend. Shift+drag a segment to move the whole line. Enter/double-click to finish.")
+                self.status_label.setText(
+                    "📏 POLYLINE: Click to place points. Drag points to adjust. Ctrl+click a segment to add a bend. Shift+drag a segment to move the whole line. Enter/double-click to finish."
+                )
             elif n == 1:
-                self.status_label.setText(f"📏 POLYLINE: {n} point. Click to add more. Drag points to adjust. Ctrl+click segment to add a bend. Enter/double-click to finish, Esc to cancel.{smooth_hint}")
+                self.status_label.setText(
+                    f"📏 POLYLINE: {n} point. Click to add more. Drag points to adjust. Ctrl+click segment to add a bend. Enter/double-click to finish, Esc to cancel.{smooth_hint}"
+                )
             else:
-                self.status_label.setText(f"📏 POLYLINE: {n} points. Drag points to adjust. Ctrl+click segment to add a bend. Shift+drag segment to move line. Enter/double-click/Finish to commit, Esc/Cancel to discard.{smooth_hint}")
+                self.status_label.setText(
+                    f"📏 POLYLINE: {n} points. Drag points to adjust. Ctrl+click segment to add a bend. Shift+drag segment to move line. Enter/double-click/Finish to commit, Esc/Cancel to discard.{smooth_hint}"
+                )
         elif tool == self.TOOL_CONNECT:
             if self._connect_first_endpoint is None:
-                self.status_label.setText("🔗 CONNECT: Click near an endpoint (orange dot) to select first point.")
+                self.status_label.setText(
+                    "🔗 CONNECT: Click near an endpoint (orange dot) to select first point."
+                )
             else:
-                self.status_label.setText("🔗 CONNECT: Click near another endpoint to draw a connecting line.")
+                self.status_label.setText(
+                    "🔗 CONNECT: Click near another endpoint to draw a connecting line."
+                )
         elif tool == self.TOOL_SELECT:
-            self.status_label.setText("🖱️ SELECT: Click near an existing skeleton line to load it for editing (then drag points / Smooth / Enter to commit).")
+            self.status_label.setText(
+                "🖱️ SELECT: Click near an existing skeleton line to load it for editing (then drag points / Smooth / Enter to commit)."
+            )
         else:
             self.status_label.setText("Ready to edit skeleton.")
 
@@ -695,17 +714,17 @@ class SkeletonCorrectionInterface(QWidget):
         self.skeleton_item.setOpacity(self.overlay_opacity)
 
     # -------------------- skeleton IO --------------------
-    def _default_skeletons_dir(self) -> Optional[str]:
+    def _default_skeletons_dir(self) -> str | None:
         if not self.images_base_folder:
             return None
         return os.path.join(self.images_base_folder, "skeletons")
 
-    def _default_corrections_dir(self) -> Optional[str]:
+    def _default_corrections_dir(self) -> str | None:
         if not self.images_base_folder:
             return None
         return os.path.join(self.images_base_folder, "skeleton_corrections")
 
-    def _default_correction_path(self) -> Optional[str]:
+    def _default_correction_path(self) -> str | None:
         if not self.images_base_folder or not self.current_image_name:
             return None
         d = self._default_corrections_dir()
@@ -714,7 +733,10 @@ class SkeletonCorrectionInterface(QWidget):
     def load_skeleton_via_dialog(self) -> None:
         start_dir = self._default_skeletons_dir() or (self.images_base_folder or "")
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Skeleton File", start_dir, "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"
+            self,
+            "Select Skeleton File",
+            start_dir,
+            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)",
         )
         if not path:
             return
@@ -783,7 +805,7 @@ class SkeletonCorrectionInterface(QWidget):
 
     def _update_skeleton_display_throttled(self) -> None:
         """Throttled version of display update for use during continuous drawing (e.g., eraser).
-        
+
         Updates at most every _display_update_interval seconds.
         Hides endpoints during continuous strokes for better performance.
         """
@@ -816,7 +838,7 @@ class SkeletonCorrectionInterface(QWidget):
             self.scene.removeItem(it)
         self._endpoint_items.clear()
 
-    def _set_selected_point(self, pt: Optional[QPoint]) -> None:
+    def _set_selected_point(self, pt: QPoint | None) -> None:
         """Set/clear the current selection marker (select tool)."""
         if self._selection_item is not None:
             self.scene.removeItem(self._selection_item)
@@ -840,7 +862,7 @@ class SkeletonCorrectionInterface(QWidget):
     def _refresh_endpoints(self) -> None:
         self._clear_endpoint_items()
         topo = self.model.topology(simplify_epsilon=1.5)
-        for (x, y) in topo.endpoints:
+        for x, y in topo.endpoints:
             r = 4
             item = QGraphicsEllipseItem(x - r, y - r, r * 2, r * 2)
             item.setPen(QPen(QColor("#282a36")))
@@ -849,13 +871,13 @@ class SkeletonCorrectionInterface(QWidget):
             self.scene.addItem(item)
             self._endpoint_items.append(item)
 
-    def _nearest_endpoint(self, pos: QPoint, max_dist: int = 10) -> Optional[QPoint]:
+    def _nearest_endpoint(self, pos: QPoint, max_dist: int = 10) -> QPoint | None:
         topo = self.model.topology(simplify_epsilon=1.5)
         if not topo.endpoints:
             return None
         best = None
         best_d2 = None
-        for (x, y) in topo.endpoints:
+        for x, y in topo.endpoints:
             dx = x - pos.x()
             dy = y - pos.y()
             d2 = dx * dx + dy * dy
@@ -945,9 +967,7 @@ class SkeletonCorrectionInterface(QWidget):
         # success if the bytes were actually written (F-051): cv2.imwrite/encode
         # can fail on permissions, disk-full, read-only or Unicode paths.
         if not _imwrite_unicode(out_path, rendered):
-            QMessageBox.critical(
-                self, "Error", f"Failed to save skeleton to:\n{out_path}"
-            )
+            QMessageBox.critical(self, "Error", f"Failed to save skeleton to:\n{out_path}")
             return
         self.status_label.setText(f"Saved skeleton: {out_path}")
         self.skeleton_saved.emit(out_path)
@@ -1000,7 +1020,9 @@ class SkeletonCorrectionInterface(QWidget):
                 if seg_idx is not None:
                     self._polyline_translate_dragging = True
                     self._polyline_translate_anchor = pos
-                    self._polyline_translate_orig_points = [QPoint(p) for p in self._polyline_points]
+                    self._polyline_translate_orig_points = [
+                        QPoint(p) for p in self._polyline_points
+                    ]
                     self._polyline_dragging = False
                     self._polyline_drag_index = None
                     return
@@ -1062,10 +1084,14 @@ class SkeletonCorrectionInterface(QWidget):
                 self._update_polyline_buttons_enabled()
                 return
 
-            if self._polyline_translate_dragging and self._polyline_translate_anchor is not None and self._polyline_translate_orig_points:
+            if (
+                self._polyline_translate_dragging
+                and self._polyline_translate_anchor is not None
+                and self._polyline_translate_orig_points
+            ):
                 dx = pos.x() - self._polyline_translate_anchor.x()
                 dy = pos.y() - self._polyline_translate_anchor.y()
-                new_pts: List[QPoint] = []
+                new_pts: list[QPoint] = []
                 for p0 in self._polyline_translate_orig_points:
                     new_pts.append(self.clamp_to_image(QPoint(p0.x() + dx, p0.y() + dy)))
                 self._polyline_points = new_pts
@@ -1078,7 +1104,11 @@ class SkeletonCorrectionInterface(QWidget):
             self._draw_polyline_preview(pos)
             return
 
-        if self.current_tool == self.TOOL_CONNECT and self._connect_dragging and self._connect_first_endpoint:
+        if (
+            self.current_tool == self.TOOL_CONNECT
+            and self._connect_dragging
+            and self._connect_first_endpoint
+        ):
             self._draw_connect_line_preview(self._connect_first_endpoint, pos)
             return
 
@@ -1103,7 +1133,11 @@ class SkeletonCorrectionInterface(QWidget):
                 self._draw_polyline_preview(pos)
             return
 
-        if self.current_tool == self.TOOL_CONNECT and self._connect_dragging and self._connect_first_endpoint:
+        if (
+            self.current_tool == self.TOOL_CONNECT
+            and self._connect_dragging
+            and self._connect_first_endpoint
+        ):
             # Commit the line from endpoint to release position
             first = self._connect_first_endpoint
             self._connect_dragging = False
@@ -1112,7 +1146,9 @@ class SkeletonCorrectionInterface(QWidget):
             self._clear_endpoint_highlights()
 
             self.model.push_undo()
-            self.model.draw_polyline([(first.x(), first.y()), (pos.x(), pos.y())], thickness=self.draw_thickness)
+            self.model.draw_polyline(
+                [(first.x(), first.y()), (pos.x(), pos.y())], thickness=self.draw_thickness
+            )
             self.model.skeletonize()
             self._update_skeleton_display()
             self._update_status_label()
@@ -1192,7 +1228,7 @@ class SkeletonCorrectionInterface(QWidget):
         self._update_polyline_buttons_enabled()
         self._update_status_label()
 
-    def _nearest_skeleton_pixel(self, pos: QPoint, max_dist: int = 10) -> Optional[QPoint]:
+    def _nearest_skeleton_pixel(self, pos: QPoint, max_dist: int = 10) -> QPoint | None:
         """Find a skeleton pixel near pos for selection, or None if none within radius."""
         if self.model.mask is None:
             return None
@@ -1239,8 +1275,10 @@ class SkeletonCorrectionInterface(QWidget):
             self._connect_line_preview_item.setPen(pen)
             self._connect_line_preview_item.setZValue(2)
             self.scene.addItem(self._connect_line_preview_item)
-        
-        self._connect_line_preview_item.setLine(float(start.x()), float(start.y()), float(end.x()), float(end.y()))
+
+        self._connect_line_preview_item.setLine(
+            float(start.x()), float(start.y()), float(end.x()), float(end.y())
+        )
 
     # -------------------- polyline preview/commit --------------------
     def _clear_polyline_handles(self) -> None:
@@ -1264,7 +1302,7 @@ class SkeletonCorrectionInterface(QWidget):
             self.scene.addItem(item)
             self._polyline_handle_items.append(item)
 
-    def _nearest_polyline_handle_index(self, pos: QPoint, max_dist: int = 8) -> Optional[int]:
+    def _nearest_polyline_handle_index(self, pos: QPoint, max_dist: int = 8) -> int | None:
         if not self._polyline_points:
             return None
         best_i = None
@@ -1282,12 +1320,14 @@ class SkeletonCorrectionInterface(QWidget):
             return best_i
         return None
 
-    def _nearest_polyline_segment_index(self, pos: QPoint, max_dist: int = 8) -> Optional[int]:
+    def _nearest_polyline_segment_index(self, pos: QPoint, max_dist: int = 8) -> int | None:
         """Return index i such that segment (i -> i+1) is closest to pos."""
         if len(self._polyline_points) < 2:
             return None
 
-        def dist2_point_to_segment(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+        def dist2_point_to_segment(
+            px: float, py: float, ax: float, ay: float, bx: float, by: float
+        ) -> float:
             abx = bx - ax
             aby = by - ay
             apx = px - ax
@@ -1309,7 +1349,9 @@ class SkeletonCorrectionInterface(QWidget):
         for i in range(len(self._polyline_points) - 1):
             a = self._polyline_points[i]
             b = self._polyline_points[i + 1]
-            d2 = dist2_point_to_segment(px, py, float(a.x()), float(a.y()), float(b.x()), float(b.y()))
+            d2 = dist2_point_to_segment(
+                px, py, float(a.x()), float(a.y()), float(b.x()), float(b.y())
+            )
             if best_d2 is None or d2 < best_d2:
                 best_d2 = d2
                 best_i = i
@@ -1324,7 +1366,7 @@ class SkeletonCorrectionInterface(QWidget):
             self.scene.removeItem(self._polyline_preview_item)
             self._polyline_preview_item = None
 
-    def _build_polyline_path(self, points: List[QPoint], cursor_pos: Optional[QPoint]) -> QPainterPath:
+    def _build_polyline_path(self, points: list[QPoint], cursor_pos: QPoint | None) -> QPainterPath:
         """Build a QPainterPath for the preview; supports smooth (curved) mode."""
         pts = list(points)
         if cursor_pos is not None and (not pts or cursor_pos != pts[-1]):
@@ -1370,7 +1412,9 @@ class SkeletonCorrectionInterface(QWidget):
             self._polyline_preview_item.setZValue(2)
             self.scene.addItem(self._polyline_preview_item)
 
-        self._polyline_preview_item.setPath(self._build_polyline_path(self._polyline_points, cursor_pos))
+        self._polyline_preview_item.setPath(
+            self._build_polyline_path(self._polyline_points, cursor_pos)
+        )
 
     def _commit_polyline(self) -> None:
         if self.model.mask is None or len(self._polyline_points) < 2:
@@ -1381,7 +1425,7 @@ class SkeletonCorrectionInterface(QWidget):
             self._update_polyline_buttons_enabled()
             return
 
-        pts: List[Tuple[int, int]]
+        pts: list[tuple[int, int]]
         if self._polyline_smooth and len(self._polyline_points) >= 3:
             pts = self._sample_smooth_polyline_points(self._polyline_points, step_px=0.75)
         else:
@@ -1389,11 +1433,19 @@ class SkeletonCorrectionInterface(QWidget):
 
         self.model.push_undo()
         # If we are editing an existing skeleton polyline (picked via Select), erase it first.
-        if self._edit_original_polyline and self.model.mask is not None and len(self._edit_original_polyline) >= 2:
+        if (
+            self._edit_original_polyline
+            and self.model.mask is not None
+            and len(self._edit_original_polyline) >= 2
+        ):
             try:
-                erase_pts = np.array(self._edit_original_polyline, dtype=np.int32).reshape((-1, 1, 2))
+                erase_pts = np.array(self._edit_original_polyline, dtype=np.int32).reshape(
+                    (-1, 1, 2)
+                )
                 erase_thickness = max(5, int(self.draw_thickness) + 6)
-                cv2.polylines(self.model.mask, [erase_pts], isClosed=False, color=0, thickness=erase_thickness)
+                cv2.polylines(
+                    self.model.mask, [erase_pts], isClosed=False, color=0, thickness=erase_thickness
+                )
             except (ValueError, cv2.error) as exc:
                 # Best-effort erase; if it fails we still draw the new polyline.
                 logger.warning("Failed to erase original polyline before re-draw: %s", exc)
@@ -1408,7 +1460,9 @@ class SkeletonCorrectionInterface(QWidget):
         self._update_polyline_buttons_enabled()
         self._update_status_label()
 
-    def _nearest_topology_polyline(self, pos: QPoint, max_dist: int = 12) -> Optional[List[Tuple[int, int]]]:
+    def _nearest_topology_polyline(
+        self, pos: QPoint, max_dist: int = 12
+    ) -> list[tuple[int, int]] | None:
         """Pick the nearest vectorized skeleton polyline (for Select->Edit)."""
         if self.model.mask is None:
             return None
@@ -1417,10 +1471,12 @@ class SkeletonCorrectionInterface(QWidget):
             return None
 
         px, py = float(pos.x()), float(pos.y())
-        best_poly: Optional[List[Tuple[int, int]]] = None
-        best_d2: Optional[float] = None
+        best_poly: list[tuple[int, int]] | None = None
+        best_d2: float | None = None
 
-        def dist2_point_to_segment(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+        def dist2_point_to_segment(
+            px: float, py: float, ax: float, ay: float, bx: float, by: float
+        ) -> float:
             abx = bx - ax
             aby = by - ay
             apx = px - ax
@@ -1439,7 +1495,7 @@ class SkeletonCorrectionInterface(QWidget):
         for poly in topo.polylines:
             if len(poly) < 2:
                 continue
-            local_best: Optional[float] = None
+            local_best: float | None = None
             for i in range(len(poly) - 1):
                 ax, ay = float(poly[i][0]), float(poly[i][1])
                 bx, by = float(poly[i + 1][0]), float(poly[i + 1][1])
@@ -1458,7 +1514,9 @@ class SkeletonCorrectionInterface(QWidget):
             return best_poly
         return None
 
-    def _sample_smooth_polyline_points(self, points: List[QPoint], *, step_px: float = 0.75) -> List[Tuple[int, int]]:
+    def _sample_smooth_polyline_points(
+        self, points: list[QPoint], *, step_px: float = 0.75
+    ) -> list[tuple[int, int]]:
         """Sample a Catmull–Rom spline through points into integer pixels for raster drawing."""
         if len(points) < 2:
             return []
@@ -1467,7 +1525,7 @@ class SkeletonCorrectionInterface(QWidget):
         if len(points) < 3:
             return [(p.x(), p.y()) for p in points]
 
-        out: List[Tuple[int, int]] = []
+        out: list[tuple[int, int]] = []
 
         def add_pt(ix: int, iy: int) -> None:
             pt = self.clamp_to_image(QPoint(ix, iy))
@@ -1496,14 +1554,28 @@ class SkeletonCorrectionInterface(QWidget):
                 x = 0.5 * (
                     (2.0 * float(P1.x()))
                     + (-float(P0.x()) + float(P2.x())) * t
-                    + (2.0 * float(P0.x()) - 5.0 * float(P1.x()) + 4.0 * float(P2.x()) - float(P3.x())) * t2
-                    + (-float(P0.x()) + 3.0 * float(P1.x()) - 3.0 * float(P2.x()) + float(P3.x())) * t3
+                    + (
+                        2.0 * float(P0.x())
+                        - 5.0 * float(P1.x())
+                        + 4.0 * float(P2.x())
+                        - float(P3.x())
+                    )
+                    * t2
+                    + (-float(P0.x()) + 3.0 * float(P1.x()) - 3.0 * float(P2.x()) + float(P3.x()))
+                    * t3
                 )
                 y = 0.5 * (
                     (2.0 * float(P1.y()))
                     + (-float(P0.y()) + float(P2.y())) * t
-                    + (2.0 * float(P0.y()) - 5.0 * float(P1.y()) + 4.0 * float(P2.y()) - float(P3.y())) * t2
-                    + (-float(P0.y()) + 3.0 * float(P1.y()) - 3.0 * float(P2.y()) + float(P3.y())) * t3
+                    + (
+                        2.0 * float(P0.y())
+                        - 5.0 * float(P1.y())
+                        + 4.0 * float(P2.y())
+                        - float(P3.y())
+                    )
+                    * t2
+                    + (-float(P0.y()) + 3.0 * float(P1.y()) - 3.0 * float(P2.y()) + float(P3.y()))
+                    * t3
                 )
                 add_pt(int(round(x)), int(round(y)))
 
@@ -1546,5 +1618,3 @@ class SkeletonCorrectionInterface(QWidget):
 
         self.image_item.setPixmap(pix)
         self.scene.setSceneRect(QRectF(pix.rect()))
-
-

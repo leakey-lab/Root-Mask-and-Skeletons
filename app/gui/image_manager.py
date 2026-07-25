@@ -1,8 +1,9 @@
-from PyQt6.QtWidgets import QFileDialog
-from PyQt6.QtCore import QThread, pyqtSignal
 import logging
 import os
 import re
+
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import QFileDialog
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +33,16 @@ class ImageLoaderThread(QThread):
             if os.path.exists(mask_dir):
                 with os.scandir(mask_dir) as entries:
                     for entry in entries:
-                        if entry.is_file() and entry.name.lower().endswith((".png", ".jpg", ".jpeg")):
+                        if entry.is_file() and entry.name.lower().endswith(
+                            (".png", ".jpg", ".jpeg")
+                        ):
                             base_name = os.path.splitext(entry.name)[0]
                             masks[base_name] = entry.path
 
             self.progress.emit(100)
             self.finished.emit(images, {}, masks, False)
 
-        except OSError as e:
+        except OSError:
             logger.exception("Failed to scan image folder %s", self.folder_path)
             self.progress.emit(100)
             self.finished.emit({}, {}, {}, False)
@@ -62,9 +65,7 @@ class ImageManager:
 
     def load_images(self, folder_path=None):
         if folder_path is None:
-            folder_path = QFileDialog.getExistingDirectory(
-                None, "Select Image Directory"
-            )
+            folder_path = QFileDialog.getExistingDirectory(None, "Select Image Directory")
 
         if folder_path:
             self.original_folder = folder_path
@@ -77,9 +78,7 @@ class ImageManager:
 
             self.loader_thread = ImageLoaderThread(folder_path)
             if self.main_window:
-                self.loader_thread.progress.connect(
-                    self.main_window.update_loading_progress
-                )
+                self.loader_thread.progress.connect(self.main_window.update_loading_progress)
                 self.loader_thread.finished.connect(self.on_loading_finished)
             self.loader_thread.start()
 
@@ -96,10 +95,7 @@ class ImageManager:
         if name in self.fake_images:
             return self.fake_images[name]
 
-        if (
-            self.current_view_mode in ["Overlay", "Side by Side"]
-            and self.processed_base_path
-        ):
+        if self.current_view_mode in ["Overlay", "Side by Side"] and self.processed_base_path:
             fake_path = os.path.join(self.processed_base_path, f"{name}_fake.png")
             if os.path.exists(fake_path):
                 self.fake_images[name] = fake_path
@@ -174,7 +170,7 @@ class ImageManager:
                 field_name = parts[0]
                 # Remove camera suffixes like cam1, CAM1, cam2, etc. from the end of field name
                 # This handles cases like xyzcam1, xyzCAM1, etc.
-                field_name = re.sub(r'cam\d+$', '', field_name, flags=re.IGNORECASE)
+                field_name = re.sub(r"cam\d+$", "", field_name, flags=re.IGNORECASE)
                 info["field"] = field_name
 
             # Extract tube number (T followed by numbers)
@@ -217,7 +213,7 @@ class ImageManager:
         """
         Organize images into a hierarchical structure:
         Field → Tube → Date → Images (with L prefix)
-        
+
         Cached for performance - only recalculated when images change.
 
         Returns a nested dictionary structure.
@@ -225,7 +221,7 @@ class ImageManager:
         # Return cached result if valid
         if self._hierarchy_cache_valid and self._hierarchy_cache is not None:
             return self._hierarchy_cache
-        
+
         hierarchy = {}
 
         for image_name in self.images.keys():
@@ -233,11 +229,7 @@ class ImageManager:
 
             # Use parsed values or fallbacks
             field = info["field"] or "Unknown"
-            tube = (
-                f"T{info['tube_number']}"
-                if info["tube_number"] is not None
-                else "No Tube"
-            )
+            tube = f"T{info['tube_number']}" if info["tube_number"] is not None else "No Tube"
             date = info["date"] or "No Date"
 
             # Build hierarchy (no separate depth level)
@@ -249,11 +241,7 @@ class ImageManager:
                 hierarchy[field][tube][date] = []
 
             # Store image with its depth info for sorting
-            depth = (
-                info["length_position"]
-                if info["length_position"] is not None
-                else float("inf")
-            )
+            depth = info["length_position"] if info["length_position"] is not None else float("inf")
             hierarchy[field][tube][date].append((depth, image_name))
 
         # Sort images by depth within each date

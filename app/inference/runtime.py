@@ -22,13 +22,13 @@ Public API:
   get_skeleton_model(device) -> SkeletonModel  (cached singleton, maxsize=1)
   warmup(model=None) -> None              (optional latency pre-pay)
 """
+
 from __future__ import annotations
 
 import functools
 import importlib.util
 import logging
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import torch
 
@@ -56,7 +56,7 @@ def _triton_available() -> bool:
         return False
 
 
-def _detect_amp_dtype(is_cuda: bool) -> Optional[torch.dtype]:
+def _detect_amp_dtype(is_cuda: bool) -> torch.dtype | None:
     """Choose the autocast dtype for the detected device.
 
     bfloat16 on CUDA when supported (better numerical range, no loss scaling),
@@ -93,14 +93,14 @@ class RuntimeConfig:
     """
 
     device: torch.device
-    amp_dtype: Optional[torch.dtype]
+    amp_dtype: torch.dtype | None
     use_channels_last: bool
     pin_memory: bool
     num_workers: int
     should_compile: bool
     device_name: str = "cpu"
     bf16_supported: bool = False
-    compute_capability: Optional[tuple[int, int]] = None
+    compute_capability: tuple[int, int] | None = None
 
     @property
     def is_cuda(self) -> bool:
@@ -142,7 +142,7 @@ def get_runtime() -> RuntimeConfig:
             device_name = "cuda"
         try:
             cc = torch.cuda.get_device_capability(device)
-            compute_capability: Optional[tuple[int, int]] = (int(cc[0]), int(cc[1]))
+            compute_capability: tuple[int, int] | None = (int(cc[0]), int(cc[1]))
         except (RuntimeError, AssertionError):
             compute_capability = None
 
@@ -157,9 +157,7 @@ def get_runtime() -> RuntimeConfig:
     amp_dtype = _detect_amp_dtype(is_cuda)
     bf16_supported = amp_dtype is torch.bfloat16
 
-    should_compile = bool(
-        _torch_major_ge_2() and _triton_available()
-    )
+    should_compile = bool(_torch_major_ge_2() and _triton_available())
 
     config = RuntimeConfig(
         device=device,
@@ -189,7 +187,7 @@ def get_runtime() -> RuntimeConfig:
     return config
 
 
-def maybe_compile(model: "torch.nn.Module") -> "torch.nn.Module":
+def maybe_compile(model: torch.nn.Module) -> torch.nn.Module:
     """torch.compile the model when supported, else return it unchanged.
 
     Guarded by both the runtime's should_compile gate and a try/except so a
@@ -211,7 +209,7 @@ def maybe_compile(model: "torch.nn.Module") -> "torch.nn.Module":
 # Skeleton model singleton factory
 # ---------------------------------------------------------------------------
 @functools.lru_cache(maxsize=1)
-def get_skeleton_model(device: Optional[torch.device] = None):
+def get_skeleton_model(device: torch.device | None = None):
     """Return a cached singleton SkeletonModel for skeleton inference.
 
     The heavy generator network and its checkpoint are loaded exactly once per

@@ -19,6 +19,7 @@ Usage in ``app/gui/__init__.py``::
 
 ``__all__`` is preserved so ``dir(app.gui)`` and tab-completion keep working.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -68,9 +69,7 @@ def __getattr__(name: str) -> Any:
     try:
         return getattr(module, name)
     except AttributeError as exc:  # pragma: no cover - mapping bug guard
-        raise AttributeError(
-            f"submodule {module_name!r} does not define {name!r}"
-        ) from exc
+        raise AttributeError(f"submodule {module_name!r} does not define {name!r}") from exc
 
 
 def __dir__() -> list[str]:

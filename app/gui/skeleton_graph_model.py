@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Deque, Iterable, List, Optional, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -26,19 +26,19 @@ from skimage.morphology import skeletonize
 
 logger = logging.getLogger(__name__)
 
-Point = Tuple[int, int]  # (x, y)
+Point = tuple[int, int]  # (x, y)
 
 
 @dataclass(frozen=True)
 class SkeletonTopology:
     """Derived topology information from a 1px skeleton mask."""
 
-    endpoints: List[Point]
-    junctions: List[Point]
-    polylines: List[List[Point]]
+    endpoints: list[Point]
+    junctions: list[Point]
+    polylines: list[list[Point]]
 
 
-def _neighbors8() -> List[Tuple[int, int]]:
+def _neighbors8() -> list[tuple[int, int]]:
     return [
         (-1, -1),
         (-1, 0),
@@ -65,16 +65,14 @@ def _skeletonize_uint8(mask: np.ndarray) -> np.ndarray:
     """Skeletonize a uint8 0/255 foreground mask to 1px (uint8 0/255)."""
     mask = _ensure_uint8_binary(mask)
     skel_bool = skeletonize(mask > 0)
-    return (skel_bool.astype(np.uint8) * 255)
+    return skel_bool.astype(np.uint8) * 255
 
 
 # 3x3 kernel that sums all 8 neighbors (center weight = 0) -- used by
 # _compute_degree_map to count the 8-connected neighbor degree in one
 # scipy convolution instead of eight array-slicing iterations (F-096 / Perf).
 _NEIGHBOR_KERNEL = np.array(
-    [[1, 1, 1],
-     [1, 0, 1],
-     [1, 1, 1]],
+    [[1, 1, 1], [1, 0, 1], [1, 1, 1]],
     dtype=np.uint8,
 )
 
@@ -98,7 +96,7 @@ def _compute_degree_map(skel_bool: np.ndarray) -> np.ndarray:
     return deg.astype(np.uint8)
 
 
-def _rdp_simplify(points: Sequence[Point], epsilon: float) -> List[Point]:
+def _rdp_simplify(points: Sequence[Point], epsilon: float) -> list[Point]:
     """Ramer-Douglas-Peucker polyline simplification."""
     if len(points) < 3:
         return list(points)
@@ -161,7 +159,7 @@ def vectorize_skeleton(mask_1px: np.ndarray, *, simplify_epsilon: float = 1.5) -
         visited_edges.add((a, b))
         visited_edges.add((b, a))
 
-    polylines: List[List[Point]] = []
+    polylines: list[list[Point]] = []
 
     # Trace from each node along each unvisited neighbor direction
     for n in list(nodes):
@@ -230,11 +228,11 @@ class SkeletonCorrectionModel:
     """
 
     def __init__(self):
-        self.mask: Optional[np.ndarray] = None
+        self.mask: np.ndarray | None = None
         self.max_stack_size = 25
         # F-019: Use deque(maxlen=...) for O(1) bounded push -- replaces list.pop(0).
-        self._undo_stack: Deque[np.ndarray] = deque(maxlen=self.max_stack_size)
-        self._redo_stack: Deque[np.ndarray] = deque(maxlen=self.max_stack_size)
+        self._undo_stack: deque[np.ndarray] = deque(maxlen=self.max_stack_size)
+        self._redo_stack: deque[np.ndarray] = deque(maxlen=self.max_stack_size)
 
     # -------------------- undo/redo --------------------
     def push_undo(self) -> None:
@@ -272,7 +270,7 @@ class SkeletonCorrectionModel:
         self._redo_stack.clear()
 
     # -------------------- load / transform --------------------
-    def set_empty(self, size: Tuple[int, int]) -> None:
+    def set_empty(self, size: tuple[int, int]) -> None:
         w, h = size
         self.mask = np.zeros((h, w), dtype=np.uint8)
         self.clear_history()
@@ -281,7 +279,7 @@ class SkeletonCorrectionModel:
         self,
         raster_gray: np.ndarray,
         *,
-        target_size: Tuple[int, int],
+        target_size: tuple[int, int],
         threshold: str = "otsu",
     ) -> None:
         """Load skeleton from a grayscale raster image into `mask` at target_size."""
@@ -330,7 +328,7 @@ class SkeletonCorrectionModel:
         return vectorize_skeleton(self.mask, simplify_epsilon=simplify_epsilon)
 
     # -------------------- save --------------------
-    def render_to_size(self, size: Tuple[int, int]) -> np.ndarray:
+    def render_to_size(self, size: tuple[int, int]) -> np.ndarray:
         """
         Render current mask to a different size (uint8 0/255) using nearest neighbor.
         """

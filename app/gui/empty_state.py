@@ -14,13 +14,13 @@ Public API
 - ``ShortcutsDialog(parent=None)``: a modal dialog listing the real editor
   keyboard shortcuts. Open it from a ``QShortcut`` bound to ``F1``/``?``.
 """
+
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -35,14 +35,14 @@ from PyQt6.QtWidgets import (
 )
 
 # SPROUTS refined-dark tokens (mirrors app.gui.widgets.tokens / dark_theme.qss).
-_BG = "#15161c"           # --bg-0
-_BG_ALT = "#21232e"       # --bg-2
-_SURFACE = "#282a37"      # --bg-3
-_SURFACE_HI = "#373a4c"   # --border-strong
-_BORDER = "#2a2c39"       # --border
-_TEXT = "#eceef5"         # --text
-_TEXT_MUTED = "#9498ad"   # --text-muted
-_ACCENT = "#c39af6"       # --accent (purple)
+_BG = "#15161c"  # --bg-0
+_BG_ALT = "#21232e"  # --bg-2
+_SURFACE = "#282a37"  # --bg-3
+_SURFACE_HI = "#373a4c"  # --border-strong
+_BORDER = "#2a2c39"  # --border
+_TEXT = "#eceef5"  # --text
+_TEXT_MUTED = "#9498ad"  # --text-muted
+_ACCENT = "#c39af6"  # --accent (purple)
 _ACCENT_PRESS = "#ab87d8"
 _ACCENT_INK = "#1a1322"
 _ACCENT_CYAN = "#79c0e8"  # --info (key-cap text)
@@ -81,7 +81,7 @@ QPushButton:hover {{
 """
 
 
-def _icon_path(icon_name: str) -> Optional[str]:
+def _icon_path(icon_name: str) -> str | None:
     """Return an absolute path to a resources/icons/<icon_name> file if present."""
     base_path = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     candidate = os.path.join(base_path, "resources", "icons", icon_name)
@@ -105,7 +105,7 @@ _SHORTCUTS = [
 class EmptyStateWidget(QWidget):
     """Centered placeholder shown when no images are loaded."""
 
-    def __init__(self, on_load: Callable[[], None], parent: Optional[QWidget] = None):
+    def __init__(self, on_load: Callable[[], None], parent: QWidget | None = None):
         super().__init__(parent)
         self._on_load = on_load
         self.setObjectName("emptyState")
@@ -120,9 +120,10 @@ class EmptyStateWidget(QWidget):
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         try:
             from app.gui.widgets import load_pixmap
+
             icon_label.setPixmap(load_pixmap("sprouts_logo", _ACCENT, 72))
         except Exception:
-            icon_label.setText("\U0001F331")
+            icon_label.setText("\U0001f331")
             icon_label.setStyleSheet(f"color: {_ACCENT}; font-size: 56pt;")
         outer.addWidget(icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -138,9 +139,7 @@ class EmptyStateWidget(QWidget):
         subtitle = QLabel("Load a folder of root images to begin.")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setWordWrap(True)
-        subtitle.setStyleSheet(
-            f"color: {_TEXT_MUTED}; font-size: 9pt; margin-top: 4px;"
-        )
+        subtitle.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 9pt; margin-top: 4px;")
         outer.addWidget(subtitle)
 
         # --- Primary action button ---
@@ -150,6 +149,7 @@ class EmptyStateWidget(QWidget):
         self.load_button.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         try:
             from app.gui.widgets import load_icon
+
             self.load_button.setIcon(load_icon("load", _ACCENT_INK, 17))
         except Exception:
             pass
@@ -179,7 +179,7 @@ class EmptyStateWidget(QWidget):
 class ShortcutsDialog(QDialog):
     """Modal dialog listing the real editor keyboard shortcuts."""
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("Keyboard Shortcuts")
         self.setModal(True)
@@ -193,9 +193,7 @@ class ShortcutsDialog(QDialog):
         heading.setStyleSheet(f"color: {_ACCENT}; font-size: 12pt; font-weight: bold;")
         layout.addWidget(heading)
 
-        intro = QLabel(
-            "These apply in the Mask Tracing and Skeleton Correction editors."
-        )
+        intro = QLabel("These apply in the Mask Tracing and Skeleton Correction editors.")
         intro.setWordWrap(True)
         intro.setStyleSheet(f"color: {_TEXT_MUTED}; font-size: 9pt;")
         layout.addWidget(intro)
@@ -213,9 +211,7 @@ class ShortcutsDialog(QDialog):
 
         for row, (keys, desc) in enumerate(_SHORTCUTS):
             key_label = QLabel(keys)
-            key_label.setAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
-            )
+            key_label.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             key_label.setStyleSheet(
                 f"QLabel {{ background-color: {_SURFACE}; color: {_ACCENT_CYAN}; "
                 f"border: 1px solid {_SURFACE_HI}; border-radius: 4px; "

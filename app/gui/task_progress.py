@@ -20,6 +20,7 @@ It is hidden by default; ``start`` shows it, ``finish``/``fail`` hide it.
 Styled with inline QSS matching the app's Dracula palette (self-contained — no
 external theme dependency).
 """
+
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -33,13 +34,13 @@ from PyQt6.QtWidgets import (
 )
 
 # SPROUTS refined-dark tokens (mirrors app.gui.widgets.tokens / dark_theme.qss).
-_BG_ALT = "#21232e"       # --bg-2
-_SURFACE = "#282a37"      # --bg-3
-_SURFACE_HI = "#373a4c"   # --border-strong
-_BORDER = "#2a2c39"       # --border
-_TEXT = "#eceef5"         # --text
-_ACCENT = "#c39af6"       # --accent (purple)
-_DANGER = "#ec6a78"       # --danger (cancel hover)
+_BG_ALT = "#21232e"  # --bg-2
+_SURFACE = "#282a37"  # --bg-3
+_SURFACE_HI = "#373a4c"  # --border-strong
+_BORDER = "#2a2c39"  # --border
+_TEXT = "#eceef5"  # --text
+_ACCENT = "#c39af6"  # --accent (purple)
+_DANGER = "#ec6a78"  # --danger (cancel hover)
 
 _LABEL_QSS = f"color: {_TEXT}; font-size: 9pt; font-weight: 600;"
 

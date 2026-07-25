@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
-from PyQt6.QtCore import QByteArray, Qt, QRectF
+from PyQt6.QtCore import QByteArray, QRectF, Qt
 from PyQt6.QtGui import QIcon, QPainter, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
@@ -19,7 +19,9 @@ from . import tokens
 
 _ICON_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-    "resources", "icons", "sprouts",
+    "resources",
+    "icons",
+    "sprouts",
 )
 
 
@@ -36,7 +38,7 @@ def _render(name: str, color: str, px: int) -> QPixmap:
     path = icon_path(name)
     if not os.path.exists(path):
         return QPixmap()
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         svg = f.read()
     svg = svg.replace("currentColor", color)
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))

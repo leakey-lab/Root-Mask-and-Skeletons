@@ -8,10 +8,10 @@ purple is accent + selection only.
 from __future__ import annotations
 
 # --- surfaces ---
-BG_0 = "#15161c"          # deepest — canvas / app behind
-BG_1 = "#1b1c24"          # chrome / rails
-BG_2 = "#21232e"          # panels
-BG_3 = "#282a37"          # raised cards / inputs
+BG_0 = "#15161c"  # deepest — canvas / app behind
+BG_1 = "#1b1c24"  # chrome / rails
+BG_2 = "#21232e"  # panels
+BG_3 = "#282a37"  # raised cards / inputs
 BG_HOVER = "#2f3242"
 BG_ACTIVE = "#363a4d"
 
@@ -26,7 +26,7 @@ TEXT_FAINT = "#686c82"
 # --- accent (purple, chosen direction) ---
 ACCENT = "#c39af6"
 ACCENT_PRESS = "#ab87d8"
-ACCENT_INK = "#1a1322"            # dark text on accent fills
+ACCENT_INK = "#1a1322"  # dark text on accent fills
 ACCENT_SOFT = "rgba(195, 154, 246, 0.14)"
 ACCENT_LINE = "rgba(195, 154, 246, 0.30)"
 
@@ -38,8 +38,8 @@ SEL_SOFT = "rgba(183, 148, 246, 0.16)"
 WARN = "#e8b25e"
 INFO = "#79c0e8"
 DANGER = "#ec6a78"
-MASK = "#5fd6a0"          # mask overlay = green
-SKEL = "#f0a868"          # skeleton = warm orange
+MASK = "#5fd6a0"  # mask overlay = green
+SKEL = "#f0a868"  # skeleton = warm orange
 OK = "#5fd6a0"
 
 # --- radii ---

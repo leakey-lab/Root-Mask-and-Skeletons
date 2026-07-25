@@ -1,0 +1,40 @@
+# Claude Code ignore — keep heavy/irrelevant files out of context
+
+# Python caches & artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.spec
+*.spec.*
+build/
+dist/
+.pytest_cache/
+
+# Virtualenv & models (large, binary)
+venv/
+checkpoints/
+checkpoints.zip
+*.pth
+*.pt
+*.onnx
+*.ckpt
+*.safetensors
+
+# Tooling / IDE
+.vscode/
+.idea/
+.cursor/
+.cursorignore
+
+# Generated tooling artifacts
+graphify-out/
+.graphify_*
+.workflow-*.js
+_capture_golden.py
+
+# Large data / media (uncomment/adjust as needed)
+# *.tif
+# *.tiff
+# *.png
+# *.jpg

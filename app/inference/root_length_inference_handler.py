@@ -1,4 +1,5 @@
 """Root-length calculation thread (thin wrapper over app.inference.metrics)."""
+
 import logging
 import os
 import time
@@ -42,8 +43,13 @@ def process_single_image(name, path):
     except Exception as e:
         logger.error("Length metric failed for %r: %s", name, e)
         return {
-            "Image": name, "Tube": None, "Position": None, "Date": None,
-            "Time": None, "Length (mm)": 0, "Error": str(e),
+            "Image": name,
+            "Tube": None,
+            "Position": None,
+            "Date": None,
+            "Time": None,
+            "Length (mm)": 0,
+            "Error": str(e),
         }
 
 
@@ -63,7 +69,8 @@ class RootLengthCalculatorThread(QThread):
             return
         logger.info(
             "RootLengthCalculatorThread: processing %d images → %s",
-            len(self.fake_images), self.output_dir,
+            len(self.fake_images),
+            self.output_dir,
         )
         t0 = time.monotonic()
         results = run_metric_pool(self.fake_images, process_single_image, self.progress.emit)
@@ -71,6 +78,7 @@ class RootLengthCalculatorThread(QThread):
         write_metric_csv(results, csv_path, LENGTH_CSV_HEADERS)
         logger.info(
             "RootLengthCalculatorThread: done in %.1fs, wrote %s",
-            time.monotonic() - t0, csv_path,
+            time.monotonic() - t0,
+            csv_path,
         )
         self.finished.emit(csv_path)

@@ -67,14 +67,6 @@ image/mask resolution, so they are resolution-independent:
 If your imaging system has a different FOV, change it in one place:
 `app/config.py`.
 
-## Code review
-
-A full multi-agent code review of this codebase lives in
-[`CODE_REVIEW.md`](CODE_REVIEW.md), with machine-readable findings in
-`code_review_findings.json` and an interactive knowledge graph in
-`code_review_graph/graph.html`. The hardening work it drove is summarized in
-[`REMEDIATION_REPORT.md`](REMEDIATION_REPORT.md).
-
 ## Project layout
 
 ```

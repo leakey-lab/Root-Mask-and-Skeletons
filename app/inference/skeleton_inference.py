@@ -10,18 +10,18 @@ This script contains all necessary components for running skeleton inference:
 All constants are hardcoded for the skeletonizer model.
 """
 
+import functools
 import logging
 import os
-import functools
 
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from PIL import Image
 import torchvision.transforms as transforms
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 
-from app.config import SKELETONIZER_DIR, SKELETON_BATCH_SIZE
+from app.config import SKELETON_BATCH_SIZE, SKELETONIZER_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ class ImageDataset(Dataset):
         img_path = self.image_paths[idx]
         try:
             img = Image.open(img_path).convert("RGB")
-        except (OSError, IOError) as exc:
+        except OSError as exc:
             raise RuntimeError(f"Cannot open image {img_path!r}: {exc}") from exc
 
         if self.transform:
@@ -160,9 +160,7 @@ def get_transform(grayscale=False):
 
     # Resize
     osize = [LOAD_SIZE, LOAD_SIZE]
-    transform_list.append(
-        transforms.Resize(osize, transforms.InterpolationMode.BICUBIC)
-    )
+    transform_list.append(transforms.Resize(osize, transforms.InterpolationMode.BICUBIC))
 
     # Convert to tensor and normalize
     transform_list.append(transforms.ToTensor())
@@ -187,13 +185,9 @@ class Identity(nn.Module):
 def get_norm_layer(norm_type="instance"):
     """Return a normalization layer."""
     if norm_type == "batch":
-        norm_layer = functools.partial(
-            nn.BatchNorm2d, affine=True, track_running_stats=True
-        )
+        norm_layer = functools.partial(nn.BatchNorm2d, affine=True, track_running_stats=True)
     elif norm_type == "instance":
-        norm_layer = functools.partial(
-            nn.InstanceNorm2d, affine=False, track_running_stats=False
-        )
+        norm_layer = functools.partial(nn.InstanceNorm2d, affine=False, track_running_stats=False)
     elif norm_type == "none":
 
         def norm_layer(x):
@@ -222,7 +216,7 @@ class ResnetBlock(nn.Module):
     """ResNet block with skip connections."""
 
     def __init__(self, dim, padding_type, norm_layer, use_dropout, use_bias):
-        super(ResnetBlock, self).__init__()
+        super().__init__()
         self.conv_block = self.build_conv_block(
             dim, padding_type, norm_layer, use_dropout, use_bias
         )
@@ -272,7 +266,7 @@ class SELayer(nn.Module):
     """Squeeze-and-Excitation layer."""
 
     def __init__(self, channel, reduction=16):
-        super(SELayer, self).__init__()
+        super().__init__()
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
             nn.Linear(channel, channel // reduction, bias=False),
@@ -292,7 +286,7 @@ class DilatedConvBlock(nn.Module):
     """Dilated convolution block."""
 
     def __init__(self, in_channels, out_channels, norm_layer, stride=1):
-        super(DilatedConvBlock, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(
             in_channels,
             out_channels,
@@ -327,9 +321,7 @@ class DilatedConvBlock(nn.Module):
 
         if stride != 1 or in_channels != out_channels:
             self.downsample = nn.Sequential(
-                nn.Conv2d(
-                    in_channels, out_channels, kernel_size=1, stride=stride, bias=False
-                ),
+                nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
                 norm_layer(out_channels),
             )
         else:
@@ -368,7 +360,7 @@ class EnhancedResnetGenerator(nn.Module):
         padding_type="reflect",
         use_attention=True,
     ):
-        super(EnhancedResnetGenerator, self).__init__()
+        super().__init__()
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func == nn.InstanceNorm2d
         else:
@@ -390,9 +382,7 @@ class EnhancedResnetGenerator(nn.Module):
         n_downsampling = 2
         for i in range(n_downsampling):
             mult = 2**i
-            model += [
-                DilatedConvBlock(ngf * mult, ngf * mult * 2, norm_layer, stride=2)
-            ]
+            model += [DilatedConvBlock(ngf * mult, ngf * mult * 2, norm_layer, stride=2)]
 
         # ResNet blocks with SE attention
         mult = 2**n_downsampling
@@ -447,9 +437,7 @@ class SkeletonModel:
 
     def __init__(self, gpu_ids=[]):
         self.gpu_ids = gpu_ids
-        self.device = (
-            torch.device(f"cuda:{gpu_ids[0]}") if gpu_ids else torch.device("cpu")
-        )
+        self.device = torch.device(f"cuda:{gpu_ids[0]}") if gpu_ids else torch.device("cpu")
 
         # Create generator network
         norm_layer = get_norm_layer(norm_type=NORM)
@@ -486,9 +474,7 @@ class SkeletonModel:
 
         logger.info("Loading skeleton model from %s", load_path)
         try:
-            state_dict = torch.load(
-                load_path, map_location=str(self.device), weights_only=True
-            )
+            state_dict = torch.load(load_path, map_location=str(self.device), weights_only=True)
         except (FileNotFoundError, RuntimeError) as exc:
             raise RuntimeError(
                 f"Failed to load skeleton model weights from {load_path!r}: {exc}"
@@ -517,9 +503,7 @@ class SkeletonModel:
             ):
                 state_dict.pop(".".join(keys))
         else:
-            self._patch_instance_norm_state_dict(
-                state_dict, getattr(module, key), keys, i + 1
-            )
+            self._patch_instance_norm_state_dict(state_dict, getattr(module, key), keys, i + 1)
 
     def run(self, input_tensor):
         """Run inference on input tensor.
@@ -560,9 +544,7 @@ class SkeletonModel:
 # =============================================================================
 
 
-def run_inference(
-    input_dir: str, output_dir: str, progress_callback=None, batch_size=None
-):
+def run_inference(input_dir: str, output_dir: str, progress_callback=None, batch_size=None):
     """
     Run skeleton inference on all images in input_dir using batch processing.
 
@@ -632,7 +614,8 @@ def run_inference(
         except torch.cuda.OutOfMemoryError:
             logger.error(
                 "CUDA OOM on batch %d (size %d) — skipping; try a smaller batch_size",
-                batch_idx, current_batch_size,
+                batch_idx,
+                current_batch_size,
             )
             torch.cuda.empty_cache()
             if progress_callback:

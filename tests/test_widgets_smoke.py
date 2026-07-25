@@ -30,8 +30,18 @@ def test_tokens_rgba():
 
 
 def test_icons_present(app):
-    for name in ("brush", "erase", "fill", "save", "trash", "polyline",
-                 "link", "cursor", "contrast", "sprouts_logo"):
+    for name in (
+        "brush",
+        "erase",
+        "fill",
+        "save",
+        "trash",
+        "polyline",
+        "link",
+        "cursor",
+        "contrast",
+        "sprouts_logo",
+    ):
         assert widgets.has_icon(name), f"missing icon {name}"
         assert not widgets.load_icon(name, tokens.ACCENT, 18).isNull()
         assert not widgets.load_pixmap(name, tokens.MASK, 20).isNull()
@@ -39,8 +49,13 @@ def test_icons_present(app):
 
 def test_segmented_control(app):
     seg = widgets.SegmentedControl(
-        [("single", "Single", "single"), ("overlay", "Overlay", "overlay"),
-         ("split", "Side by side", "split")], value="overlay")
+        [
+            ("single", "Single", "single"),
+            ("overlay", "Overlay", "overlay"),
+            ("split", "Side by side", "split"),
+        ],
+        value="overlay",
+    )
     assert seg.value() == "overlay"
     got = []
     seg.valueChanged.connect(got.append)

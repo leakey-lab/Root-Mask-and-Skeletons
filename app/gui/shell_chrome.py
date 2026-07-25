@@ -1,9 +1,26 @@
-"""SPROUTS guided-shell chrome builders (presentation-only).
+"""SPROUTS guided-shell chrome (presentation-only).
 
-Each ``build_*`` function returns a styled QWidget band. They reparent / wire to
-the EXISTING ``MainWindow`` handlers and attrs — no computed data, signals, or
-QStackedWidget contracts change here. The ribbon stage buttons forward to the
-same toggle/switch handlers the left panel already uses.
+ONE chrome band instead of three. ``build_topbar`` merges what used to be the
+titlebar (48px, a logo and nothing else), the stage ribbon (52px) and the action
+bar (52px, the left half of it a hint sentence restating the stage already
+highlighted in the ribbon above it) into a single 46px row:
+
+    [logo SPROUTS] | Library  Generate  Correct Mask  … | <stage actions> | [load]
+
+152px of chrome becomes 46px. On the 1200x700 window that is ~19% of the window
+height handed back to the image canvas. Every stage button keeps its name and
+icon — no step numbers, nothing collapsed to a bare glyph — and the per-stage
+explanation that used to occupy the action bar now lives in each button's
+tooltip.
+
+The pipeline is also six stages instead of seven: mask and skeleton generation
+are one button (``mw.generate_all_button``), and the two corrections are
+separate stages because they open different editors.
+
+Wiring is unchanged. Stage buttons forward to the same MainWindow handlers,
+``mw.ribbon_buttons`` keeps its six canonical keys in order, and
+``mw._populate_action_bar`` / ``mw._activate_action_stage`` keep their names and
+contracts.
 """
 
 from __future__ import annotations
@@ -14,15 +31,16 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QStackedWidget,
     QToolButton,
-    QVBoxLayout,
     QWidget,
 )
 
 from app.gui.widgets import SegmentedControl, tokens
 from app.gui.widgets.icons import load_icon, load_pixmap
+
+TOPBAR_HEIGHT = 46
+STATUSLINE_HEIGHT = 28
 
 
 def _band(object_name: str, *, height: int | None = None) -> QFrame:
@@ -35,21 +53,102 @@ def _band(object_name: str, *, height: int | None = None) -> QFrame:
             border: none;
             border-bottom: 1px solid {tokens.BORDER};
         }}
+        QLabel {{ background: transparent; }}
     """)
     if height is not None:
         band.setFixedHeight(height)
     return band
 
 
+def _vrule() -> QFrame:
+    rule = QFrame()
+    rule.setFixedSize(1, 18)
+    rule.setStyleSheet(f"background-color: {tokens.BORDER};")
+    return rule
+
+
 # --------------------------------------------------------------------------- #
-def build_titlebar(mw) -> QWidget:
-    bar = _band("shellTitlebar", height=48)
+#  Stage table: (canonical key, displayed name, icon, tooltip blurb)
+#
+#  Six stages, not seven: mask + skeleton generation is ONE step (one button,
+#  one run), and the two corrections are separate stages because they are
+#  separate editors. Displayed names are full words — no step numbers, nothing
+#  collapsed to a bare glyph. The tooltip carries the sentence that used to
+#  live in the deleted hint band.
+# --------------------------------------------------------------------------- #
+_STAGES = [
+    ("Library", "Library", "image", "Browse and select minirhizotron images from the tree."),
+    (
+        "Generate",
+        "Generate",
+        "cpu",
+        "Generate masks and skeletons for all loaded images in one pass.",
+    ),
+    (
+        "Correct Mask",
+        "Correct Mask",
+        "brush",
+        "Paint, erase and fill to fix the segmentation mask.",
+    ),
+    (
+        "Correct Skeleton",
+        "Correct Skeleton",
+        "skeleton",
+        "Move, connect and prune skeleton nodes and branches.",
+    ),
+    ("Measure", "Measure", "ruler", "Compute root length (mm) and area (mm²)."),
+    ("Visualize", "Visualize", "chart", "Explore length & area trends across the trial."),
+]
+
+# Every stage button shows its NAME plus its icon — no step numbers, nothing
+# collapsed to a glyph. The row stays inside the 1200px default window because
+# the padding is tight (9px) and the stage-action labels on the right are short
+# ("Length" / "Area", not "Calculate Root Length").
+
+_STEP_QSS = f"""
+    QToolButton {{
+        background-color: transparent;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        color: {tokens.TEXT_MUTED};
+        padding: 4px 9px;
+        font-size: 12px;
+        font-weight: 500;
+    }}
+    QToolButton:hover {{
+        background-color: {tokens.BG_2};
+        color: {tokens.TEXT};
+    }}
+    QToolButton:checked {{
+        background-color: {tokens.rgba(tokens.ACCENT, 0.14)};
+        color: {tokens.ACCENT};
+        border: 1px solid {tokens.rgba(tokens.ACCENT, 0.28)};
+    }}
+"""
+
+_ICONBTN_QSS = f"""
+    QToolButton {{
+        background-color: transparent;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        padding: 5px;
+    }}
+    QToolButton:hover {{
+        background-color: {tokens.BG_2};
+        border: 1px solid {tokens.BORDER};
+    }}
+"""
+
+
+def build_topbar(mw) -> QWidget:
+    """The single chrome row: brand, stage stepper, stage actions, load."""
+    bar = _band("shellTopbar", height=TOPBAR_HEIGHT)
     row = QHBoxLayout(bar)
-    row.setContentsMargins(16, 0, 16, 0)
-    row.setSpacing(10)
+    row.setContentsMargins(14, 0, 12, 0)
+    row.setSpacing(8)
 
     logo = QLabel()
-    logo.setPixmap(load_pixmap("sprouts_logo", tokens.ACCENT, 22))
+    logo.setPixmap(load_pixmap("sprouts_logo", tokens.ACCENT, 20))
     row.addWidget(logo)
 
     wordmark = QLabel(
@@ -58,133 +157,66 @@ def build_titlebar(mw) -> QWidget:
         f'<span style="color:{tokens.TEXT}">TS</span>'
     )
     wordmark.setTextFormat(Qt.TextFormat.RichText)
-    wordmark.setStyleSheet("font-size: 15px; font-weight: 800; letter-spacing: 1px;")
+    wordmark.setStyleSheet("font-size: 14px; font-weight: 800; letter-spacing: 1px;")
     row.addWidget(wordmark)
 
-    row.addStretch(1)
+    row.addSpacing(4)
+    row.addWidget(_vrule())
+    row.addSpacing(4)
 
-    return bar
-
-
-# --------------------------------------------------------------------------- #
-_RIBBON_STAGES = [
-    ("Library", "image"),
-    ("Generate Mask", "cpu"),
-    ("Trace", "brush"),
-    ("Generate Skeleton", "skeleton"),
-    ("Correct", "node"),
-    ("Measure", "ruler"),
-    ("Visualize", "chart"),
-]
-
-
-def build_ribbon(mw) -> QWidget:
-    bar = _band("shellRibbon", height=52)
-    row = QHBoxLayout(bar)
-    row.setContentsMargins(16, 8, 16, 8)
-    row.setSpacing(6)
-
+    # ---- stage stepper ---------------------------------------------------- #
     group = QButtonGroup(bar)
     group.setExclusive(True)
-    mw.ribbon = bar
+    mw.ribbon = bar  # legacy attr name kept for any external reference
     mw.ribbon_buttons = {}
 
     base_handlers = {
         "Library": lambda: mw.switch_right_panel("display"),
-        "Generate Mask": lambda: mw.switch_right_panel("display"),
-        "Trace": mw.toggle_mask_tracing,
-        "Generate Skeleton": lambda: mw.switch_right_panel("display"),
-        "Correct": mw.toggle_skeleton_correction,
+        "Generate": lambda: mw.switch_right_panel("display"),
+        "Correct Mask": mw.toggle_mask_tracing,
+        "Correct Skeleton": mw.toggle_skeleton_correction,
         "Measure": lambda: mw.switch_right_panel("display"),
         "Visualize": lambda: mw.switch_right_panel("display"),
     }
 
-    def _make_handler(stage_label, base):
+    def _make_handler(stage_key, base):
         def _h():
             base()
-            # Swap the action-bar page + hint for this stage (FIX4). Safe no-op
-            # until the action bar is populated.
             activate = getattr(mw, "_activate_action_stage", None)
             if callable(activate):
-                activate(stage_label)
+                activate(stage_key)
+
         return _h
 
-    handlers = {
-        label: _make_handler(label, base) for label, base in base_handlers.items()
-    }
+    steps = QWidget()
+    steps_row = QHBoxLayout(steps)
+    steps_row.setContentsMargins(0, 0, 0, 0)
+    steps_row.setSpacing(2)
 
-    for label, icon in _RIBBON_STAGES:
-        btn = QToolButton(bar)
+    for key, label, icon_name, tip in _STAGES:
+        btn = QToolButton(steps)
         btn.setText(label)
+        btn.setIcon(load_icon(icon_name, tokens.TEXT_MUTED, 15))
+        btn.setIconSize(QSize(15, 15))
+        btn.setToolTip(f"{label} — {tip}")
         btn.setCheckable(True)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        btn.setIcon(load_icon(icon, tokens.TEXT_MUTED, 16))
-        btn.setIconSize(QSize(16, 16))
-        btn.setStyleSheet(f"""
-            QToolButton {{
-                background-color: {tokens.BG_2};
-                border: 1px solid {tokens.BORDER};
-                border-radius: 9px;
-                color: {tokens.TEXT_MUTED};
-                padding: 5px 12px;
-                font-size: 12.5px;
-                font-weight: 500;
-            }}
-            QToolButton:hover {{
-                background-color: {tokens.BG_3};
-                color: {tokens.TEXT};
-                border: 1px solid {tokens.BORDER_STRONG};
-            }}
-            QToolButton:checked {{
-                background-color: {tokens.rgba(tokens.ACCENT, 0.14)};
-                color: {tokens.ACCENT};
-                border: 1px solid {tokens.rgba(tokens.ACCENT, 0.30)};
-            }}
-        """)
-        btn.clicked.connect(lambda _=False, h=handlers[label]: h())
+        btn.setStyleSheet(_STEP_QSS)
+        btn.clicked.connect(
+            lambda _=False, h=_make_handler(key, base_handlers[key]): h()
+        )
         group.addButton(btn)
-        row.addWidget(btn)
-        mw.ribbon_buttons[label] = btn
+        steps_row.addWidget(btn)
+        mw.ribbon_buttons[key] = btn
 
-    # Default selection: Library.
     mw.ribbon_buttons["Library"].setChecked(True)
-    row.addStretch(1)
-    return bar
-
-
-# --------------------------------------------------------------------------- #
-# Per-stage hint text shown at the left of the action bar.
-_STAGE_HINTS = {
-    "Library": "<b>Library.</b> Browse and select images from the tree.",
-    "Generate Mask": "<b>Generate Mask.</b> Segment roots from images with the ML model.",
-    "Trace": "<b>Trace.</b> Manually paint or refine the root mask.",
-    "Generate Skeleton": "<b>Generate Skeleton.</b> Extract the medial-axis skeleton from masks.",
-    "Correct": "<b>Correct.</b> Manually edit and repair the root skeleton.",
-    "Measure": "<b>Measure.</b> Compute root length and area.",
-    "Visualize": "<b>Visualize.</b> Explore length / area dashboards.",
-}
-
-
-def build_action_bar(mw) -> QWidget:
-    bar = _band("shellActionBar", height=52)
-    row = QHBoxLayout(bar)
-    row.setContentsMargins(16, 8, 16, 8)
-    row.setSpacing(10)
-
-    hint = QLabel(_STAGE_HINTS["Library"])
-    hint.setTextFormat(Qt.TextFormat.RichText)
-    hint.setStyleSheet(f"color: {tokens.TEXT_MUTED}; font-size: 12px;")
-    mw.action_bar_hint = hint
-    row.addWidget(hint)
+    row.addWidget(steps)
 
     row.addStretch(1)
 
-    # Visualize stage: Length/Area segmented control forwarding to the same
-    # visualization toggle handlers the left panel uses.
-    viz_seg = SegmentedControl(
-        [("length", "Length"), ("area", "Area")], value="length"
-    )
+    # ---- stage-aware actions (right) -------------------------------------- #
+    viz_seg = SegmentedControl([("length", "Length"), ("area", "Area")], value="length")
 
     def _on_viz(value: str):
         if value == "length":
@@ -195,13 +227,22 @@ def build_action_bar(mw) -> QWidget:
     viz_seg.valueChanged.connect(_on_viz)
     mw.action_bar_viz_seg = viz_seg
 
-    # Stage-aware action widgets live in a QStackedWidget on the right of the
-    # action bar. Pages are built once the real buttons exist (after the body is
-    # constructed); build_action_bar only erects the skeleton + the populate
-    # callable, which _build_shell invokes post-body.
     stack = QStackedWidget()
+    stack.setFixedHeight(32)
     mw.action_bar_stack = stack
     row.addWidget(stack)
+
+    row.addWidget(_vrule())
+
+    load_btn = QToolButton(bar)
+    load_btn.setIcon(load_icon("load", tokens.TEXT_MUTED, 17))
+    load_btn.setIconSize(QSize(17, 17))
+    load_btn.setToolTip("Load images from another directory")
+    load_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    load_btn.setStyleSheet(_ICONBTN_QSS)
+    load_btn.clicked.connect(mw.load_images)
+    mw.topbar_load_button = load_btn
+    row.addWidget(load_btn)
 
     def _page(*widgets) -> QWidget:
         page = QWidget()
@@ -215,8 +256,8 @@ def build_action_bar(mw) -> QWidget:
         return page
 
     def _populate():
-        # Display-mode cosmetic segmented control (forwards into the hidden live
-        # view_mode_combo; reverse-synced to avoid drift).
+        # Cosmetic display-mode control; forwards into the hidden live
+        # view_mode_combo (still the single source of truth) and reverse-syncs.
         view_seg = SegmentedControl(
             [("single", "Single"), ("overlay", "Overlay"), ("split", "Side by side")],
             value="single",
@@ -239,29 +280,29 @@ def build_action_bar(mw) -> QWidget:
 
         mw.view_mode_combo.currentIndexChanged.connect(_on_combo)
 
-        # Trace stage: reuse the mask-tracing clear button if exposed.
-        trace_clear = getattr(
-            getattr(mw, "mask_tracing_interface", None), "clear_button", None
+        trace_clear = getattr(getattr(mw, "mask_tracing_interface", None), "clear_button", None)
+        skel_reset = getattr(
+            getattr(mw, "skeleton_correction_interface", None), "reset_button", None
         )
 
         pages = {
             "Library": _page(view_seg),
-            "Generate Mask": _page(mw.generate_mask_button),
-            "Trace": _page(trace_clear),
-            "Generate Skeleton": _page(mw.generate_button),
-            "Correct": _page(),
-            "Measure": _page(
-                mw.calculate_length_button, mw.calculate_area_button
-            ),
+            # ONE generate button — masks then skeletons, single run.
+            "Generate": _page(mw.generate_all_button),
+            "Correct Mask": _page(trace_clear),
+            "Correct Skeleton": _page(skel_reset),
+            "Measure": _page(mw.calculate_length_button, mw.calculate_area_button),
             "Visualize": _page(viz_seg),
         }
         mw._action_bar_pages = {}
-        for label, page in pages.items():
-            mw._action_bar_pages[label] = stack.addWidget(page)
+        for key, page in pages.items():
+            mw._action_bar_pages[key] = stack.addWidget(page)
 
-    def _activate_action_stage(label: str):
-        hint.setText(_STAGE_HINTS.get(label, ""))
-        idx = getattr(mw, "_action_bar_pages", {}).get(label)
+    def _activate_action_stage(key: str):
+        btn = mw.ribbon_buttons.get(key)
+        if btn is not None and not btn.isChecked():
+            btn.setChecked(True)
+        idx = getattr(mw, "_action_bar_pages", {}).get(key)
         if idx is not None:
             stack.setCurrentIndex(idx)
 
@@ -276,7 +317,7 @@ def build_statusline(mw) -> QWidget:
     band = QFrame()
     band.setObjectName("shellStatusline")
     band.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-    band.setFixedHeight(30)
+    band.setFixedHeight(STATUSLINE_HEIGHT)
     band.setStyleSheet(f"""
         QFrame#shellStatusline {{
             background-color: {tokens.BG_1};
@@ -302,10 +343,17 @@ def build_statusline(mw) -> QWidget:
     row.addStretch(1)
 
     info = QLabel("GPU · CUDA 12.8")
-    info.setStyleSheet(
-        f"color: {tokens.TEXT_FAINT}; font-family: {tokens.MONO}; font-size: 11px;"
-    )
+    info.setStyleSheet(f"color: {tokens.TEXT_FAINT}; font-family: {tokens.MONO}; font-size: 11px;")
     mw.statusline_info = info
     row.addWidget(info)
 
     return band
+
+
+# --------------------------------------------------------------------------- #
+# Back-compat shims. ``build_titlebar`` / ``build_ribbon`` / ``build_action_bar``
+# collapsed into build_topbar; these keep any stale caller alive. Prefer
+# build_topbar — _build_shell now calls it directly.
+# --------------------------------------------------------------------------- #
+def build_ribbon(mw) -> QWidget:  # pragma: no cover - compat
+    return build_topbar(mw)

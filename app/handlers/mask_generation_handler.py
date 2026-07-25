@@ -23,9 +23,7 @@ class ImageDataset(data.Dataset):
         self.image_dir = image_dir
         self.transform = transform
         self.image_files = [
-            f
-            for f in os.listdir(image_dir)
-            if f.lower().endswith((".png", ".jpg", ".jpeg"))
+            f for f in os.listdir(image_dir) if f.lower().endswith((".png", ".jpg", ".jpeg"))
         ]
 
     def __len__(self):
@@ -125,9 +123,7 @@ class MaskGenerationThread(QThread):
                             try:
                                 mask_pil.save(output_path, "PNG")
                             except OSError as save_exc:
-                                logger.error(
-                                    "Failed to save mask for %s: %s", filename, save_exc
-                                )
+                                logger.error("Failed to save mask for %s: %s", filename, save_exc)
                                 failed_images.append(filename)
                                 continue
 
@@ -143,9 +139,7 @@ class MaskGenerationThread(QThread):
                         # Narrow per-batch except: log the failure, collect names, continue
                         # with the remaining batches rather than silently swallowing (F-021).
                         names = list(batch_filenames)
-                        logger.error(
-                            "Batch processing failed for images %s: %s", names, batch_exc
-                        )
+                        logger.error("Batch processing failed for images %s: %s", names, batch_exc)
                         failed_images.extend(names)
                         # Free GPU memory before next batch when on CUDA (F-022).
                         if self.device.type == "cuda":
@@ -192,9 +186,7 @@ class MaskGenerationHandler:
         try:
             self.model = ResNetSkeleton(num_classes=1, pretrained=False)
             # weights_only=True prevents arbitrary code execution via pickle (F-023 / SS-01).
-            state_dict = torch.load(
-                weights_path, map_location=self.device, weights_only=True
-            )
+            state_dict = torch.load(weights_path, map_location=self.device, weights_only=True)
             self.model.load_state_dict(state_dict)
             # Move the model to its device once at load time; never reload per call (F-022).
             self.model = self.model.to(self.device)
@@ -202,14 +194,10 @@ class MaskGenerationHandler:
             rt = runtime.get_runtime()
             if rt.use_channels_last and self.device.type == "cuda":
                 self.model = self.model.to(memory_format=torch.channels_last)
-            logger.info(
-                "Mask model loaded from %s on device %s", weights_path, self.device
-            )
+            logger.info("Mask model loaded from %s on device %s", weights_path, self.device)
         except (RuntimeError, OSError, ValueError) as exc:
             # Log the specific exception so the init failure is visible (F-102).
-            logger.exception(
-                "Failed to load mask model weights from %s: %s", weights_path, exc
-            )
+            logger.exception("Failed to load mask model weights from %s: %s", weights_path, exc)
             self.model = None
 
     def generate_masks(self):
@@ -233,9 +221,7 @@ class MaskGenerationHandler:
         # Guard against re-entry: a second click would orphan the running QThread and
         # interleave writes to the same mask dir (bug).
         if self.generation_thread is not None and self.generation_thread.isRunning():
-            self.main_window.status_bar.showMessage(
-                "Mask generation already in progress...", 5000
-            )
+            self.main_window.status_bar.showMessage("Mask generation already in progress...", 5000)
             return
 
         try:
@@ -244,9 +230,7 @@ class MaskGenerationHandler:
             if getattr(self.main_window.image_manager, "original_folder", None):
                 input_dir = self.main_window.image_manager.original_folder
             else:
-                first_image_path = next(
-                    iter(self.main_window.image_manager.images.values())
-                )
+                first_image_path = next(iter(self.main_window.image_manager.images.values()))
                 input_dir = os.path.dirname(first_image_path)
 
             output_dir = os.path.join(input_dir, "mask")

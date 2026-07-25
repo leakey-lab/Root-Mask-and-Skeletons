@@ -4,6 +4,7 @@ Pins that write_metric_csv persists the 'Error' text already attached by the
 per-image workers on failure, and that DataProcessor tolerates the extra
 trailing 'Error' column (it selects by value_column name, so it is harmless).
 """
+
 import csv
 
 from app.config import LENGTH_CSV_HEADERS
@@ -18,8 +19,12 @@ def test_error_column_persisted_and_dataprocessor_tolerates_it(tmp_path):
             raise RuntimeError("boom")
         info_pos = int(name)  # "a"->fails below; we use numeric names for success rows
         return {
-            "Image": name, "Tube": 1, "Position": info_pos, "Date": "2024.01.01",
-            "Time": "00:00:01", "Length (mm)": round(float(info_pos), 2),
+            "Image": name,
+            "Tube": 1,
+            "Position": info_pos,
+            "Date": "2024.01.01",
+            "Time": "00:00:01",
+            "Length (mm)": round(float(info_pos), 2),
         }
 
     # Failure handler mirrors process_single_image's failure dict (sets 'Error').
@@ -28,8 +33,13 @@ def test_error_column_persisted_and_dataprocessor_tolerates_it(tmp_path):
             return worker(name, path)
         except Exception as e:  # noqa: BLE001
             return {
-                "Image": name, "Tube": None, "Position": None, "Date": None,
-                "Time": None, "Length (mm)": 0, "Error": str(e),
+                "Image": name,
+                "Tube": None,
+                "Position": None,
+                "Date": None,
+                "Time": None,
+                "Length (mm)": 0,
+                "Error": str(e),
             }
 
     images = {"10": "p10", "b": "pb", "20": "p20"}

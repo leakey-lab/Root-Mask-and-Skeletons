@@ -1,17 +1,18 @@
+import logging
+
+import cv2
+import numpy as np
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QSlider,
-    QLabel,
     QComboBox,
     QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-import cv2
-import logging
-import numpy as np
+
 from resources.resource_utils import get_resource_path
 
 logger = logging.getLogger(__name__)
@@ -50,9 +51,7 @@ class ImageNormalization:
             for channel in channels:
                 lower = np.percentile(channel, lower_percentile)
                 upper = np.percentile(channel, upper_percentile)
-                normalized = np.clip(
-                    (channel - lower) * 255.0 / (upper - lower), 0, 255
-                )
+                normalized = np.clip((channel - lower) * 255.0 / (upper - lower), 0, 255)
                 normalized_channels.append(normalized.astype(np.uint8))
 
             return cv2.merge(normalized_channels)
@@ -94,7 +93,6 @@ class NormalizationControls(QGroupBox):
 
         # Save to file
         import json
-        import os
 
         save_path = get_resource_path("config/normalization_defaults.json")
         try:
@@ -111,7 +109,7 @@ class NormalizationControls(QGroupBox):
         save_path = get_resource_path("config/normalization_defaults.json")
         try:
             if os.path.exists(save_path):
-                with open(save_path, "r") as f:
+                with open(save_path) as f:
                     loaded_defaults = json.load(f)
                     self.default_values.update(loaded_defaults)
         except (OSError, ValueError) as e:
@@ -138,9 +136,7 @@ class NormalizationControls(QGroupBox):
 
         # Clip limit slider
         clip_layout = QHBoxLayout()
-        self.clip_label = QLabel(
-            f"Clip Limit: {self.default_values['clahe_clip'] / 10.0:.1f}"
-        )
+        self.clip_label = QLabel(f"Clip Limit: {self.default_values['clahe_clip'] / 10.0:.1f}")
         self.clip_slider = QSlider(Qt.Orientation.Horizontal)
         self.clip_slider.setRange(1, 50)
         self.clip_slider.setValue(self.default_values["clahe_clip"])
@@ -169,9 +165,7 @@ class NormalizationControls(QGroupBox):
 
         # Percentile sliders
         lower_layout = QHBoxLayout()
-        self.lower_label = QLabel(
-            f"Lower Percentile: {self.default_values['contrast_lower']}%"
-        )
+        self.lower_label = QLabel(f"Lower Percentile: {self.default_values['contrast_lower']}%")
         self.lower_slider = QSlider(Qt.Orientation.Horizontal)
         self.lower_slider.setRange(0, 49)
         self.lower_slider.setValue(self.default_values["contrast_lower"])
@@ -180,9 +174,7 @@ class NormalizationControls(QGroupBox):
         contrast_layout.addLayout(lower_layout)
 
         upper_layout = QHBoxLayout()
-        self.upper_label = QLabel(
-            f"Upper Percentile: {self.default_values['contrast_upper']}%"
-        )
+        self.upper_label = QLabel(f"Upper Percentile: {self.default_values['contrast_upper']}%")
         self.upper_slider = QSlider(Qt.Orientation.Horizontal)
         self.upper_slider.setRange(51, 100)
         self.upper_slider.setValue(self.default_values["contrast_upper"])

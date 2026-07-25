@@ -9,22 +9,22 @@ IMPORTANT: The calibration constants encoded as golden values below reflect the
 behavior at the start of the hardening branch. The R5 scientific-correctness fix
 (arc-length calibration) will INTENTIONALLY change the length golden values; when
 that happens, update LEN_PER_PX here together with a documented justification in
-REMEDIATION_REPORT.md. Until then, every other phase must keep these green.
+the commit message. Until then, every other phase must keep these green.
 """
+
 import csv
-import os
 
 import numpy as np
 import pytest
 
+from app.data_processing.data_processor import DataProcessor
+from app.gui.skeleton_graph_model import SkeletonCorrectionModel, vectorize_skeleton
+from app.inference.root_area_inference_handler import calculate_root_area
 from app.inference.root_length_inference_handler import (
     calculate_root_length,
     parse_image_name,
     process_single_image,
 )
-from app.inference.root_area_inference_handler import calculate_root_area
-from app.gui.skeleton_graph_model import vectorize_skeleton, SkeletonCorrectionModel
-from app.data_processing.data_processor import DataProcessor
 
 # --- Calibration (physical field of view). Metrics are now resolution-independent:
 # they map the FOV onto the *actual* image/mask shape. See R5 / metrics.py. ---
@@ -39,6 +39,7 @@ def _row_skeleton(n_px, h=20, w=120):
 
 
 # ---------------- Length (arc-length, R5 corrected) ----------------
+
 
 @pytest.mark.parametrize("n_px", [2, 10, 25, 100])
 def test_horizontal_length_uses_x_pitch(n_px):
@@ -56,6 +57,7 @@ def test_diagonal_uses_euclidean_step_and_exceeds_orthogonal():
     # Arc-length fix: a diagonal of N pixels costs (N-1) Euclidean diagonal steps,
     # which is strictly more than the old raw pixel count would have given.
     import math
+
     n = 20
     horiz = np.zeros((40, 40), dtype=np.uint8)
     horiz[20, 0:n] = 255
@@ -79,6 +81,7 @@ def test_length_resolution_invariant_full_width_line():
 
 # ---------------- Area (resolution-independent, R5 corrected F-002) ----------------
 
+
 @pytest.mark.parametrize("n_px", [1, 100, 200, 1000])
 def test_area_scales_with_pixel_count_at_fixed_resolution(n_px):
     w = h = 40
@@ -92,12 +95,13 @@ def test_area_resolution_invariant_full_mask():
     # A fully-root mask always measures the whole FOV area, at ANY resolution.
     # This is the core F-002 fix: previously a non-640x480 mask was wrong by the
     # square of the resolution ratio.
-    for (h, w) in [(480, 640), (960, 1280), (240, 320)]:
+    for h, w in [(480, 640), (960, 1280), (240, 320)]:
         m = np.full((h, w), 255, dtype=np.uint8)
         assert calculate_root_area(m) == pytest.approx(FOV_W_MM * FOV_H_MM, rel=1e-9)
 
 
 # ---------------- Filename parsing ----------------
+
 
 def test_parse_image_name_full():
     info = parse_image_name("scan_T005_L030_2024.03.15_143022_fake.png")
@@ -117,6 +121,7 @@ def test_parse_image_name_missing_fields():
 
 
 # ---------------- Skeleton vectorization topology ----------------
+
 
 def test_vectorize_cross_topology_endpoints():
     cr = np.zeros((11, 11), dtype=np.uint8)
@@ -150,8 +155,10 @@ def test_undo_stack_is_bounded():
 
 # ---------------- CSV schema (length pipeline) ----------------
 
+
 def test_process_single_image_row_schema(tmp_path):
     import cv2
+
     sk = _row_skeleton(40)
     # process_single_image reads from disk; write a binary image it will threshold/skeletonize
     img = np.zeros((20, 120), dtype=np.uint8)
@@ -165,13 +172,34 @@ def test_process_single_image_row_schema(tmp_path):
 
 # ---------------- DataProcessor ----------------
 
+
 def test_data_processor_loads_and_filters(tmp_path):
     csv_path = tmp_path / "root_lengths.csv"
     with open(csv_path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["Image", "Tube", "Position", "Date", "Time", "Length (mm)"])
+        w = csv.DictWriter(
+            f, fieldnames=["Image", "Tube", "Position", "Date", "Time", "Length (mm)"]
+        )
         w.writeheader()
-        w.writerow({"Image": "a", "Tube": 1, "Position": 10, "Date": "2024.01.01", "Time": "00:00:01", "Length (mm)": 5.5})
-        w.writerow({"Image": "b", "Tube": 2, "Position": 20, "Date": "2024.01.02", "Time": "00:00:02", "Length (mm)": 7.0})
+        w.writerow(
+            {
+                "Image": "a",
+                "Tube": 1,
+                "Position": 10,
+                "Date": "2024.01.01",
+                "Time": "00:00:01",
+                "Length (mm)": 5.5,
+            }
+        )
+        w.writerow(
+            {
+                "Image": "b",
+                "Tube": 2,
+                "Position": 20,
+                "Date": "2024.01.02",
+                "Time": "00:00:02",
+                "Length (mm)": 7.0,
+            }
+        )
     dp = DataProcessor(str(csv_path))
     assert list(dp.get_unique_tubes()) == [1, 2]
     assert len(dp.get_unique_positions()) == 2

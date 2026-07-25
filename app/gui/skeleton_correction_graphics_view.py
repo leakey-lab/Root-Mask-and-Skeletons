@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import logging
 import os
-from PyQt6.QtCore import Qt, QPointF, QPoint
-from PyQt6.QtGui import QPainter, QWheelEvent, QMouseEvent, QKeyEvent
+
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QKeyEvent, QMouseEvent, QPainter, QWheelEvent
 from PyQt6.QtWidgets import QGraphicsView, QWidget
 
 logger = logging.getLogger(__name__)
+
 
 # See notes in other views: enabling QOpenGLWidget can break embedded QtWebEngine.
 def _env_bool(name: str, *, default: bool) -> bool:
@@ -27,13 +29,12 @@ def _env_bool(name: str, *, default: bool) -> bool:
 
 
 # Enabled by default; temporarily disabled when showing QtWebEngine visualizations.
-DEFAULT_OPENGL_VIEWPORT_ENABLED = _env_bool(
-    "ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT", default=True
-)
+DEFAULT_OPENGL_VIEWPORT_ENABLED = _env_bool("ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT", default=True)
 
 # Try to use OpenGL viewport for GPU-accelerated rendering
 try:
     from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+
     HAS_OPENGL = True
 except ImportError:
     HAS_OPENGL = False
@@ -105,9 +106,11 @@ class SkeletonCorrectionGraphicsView(QGraphicsView):
         else:
             self.setDragMode(QGraphicsView.DragMode.NoDrag)
             # Use brush cursor for Eraser tool
-            if (self.skeleton_interface and 
-                hasattr(self.skeleton_interface, 'current_tool') and 
-                self.skeleton_interface.current_tool == self.skeleton_interface.TOOL_ERASER):
+            if (
+                self.skeleton_interface
+                and hasattr(self.skeleton_interface, "current_tool")
+                and self.skeleton_interface.current_tool == self.skeleton_interface.TOOL_ERASER
+            ):
                 self.viewport().setCursor(self.skeleton_interface.brush_cursor)
             else:
                 self.viewport().setCursor(Qt.CursorShape.CrossCursor)
@@ -166,10 +169,10 @@ class SkeletonCorrectionGraphicsView(QGraphicsView):
         # Check if we should forward:
         # 1. We are drawing (Left button held from a press)
         # 2. Or we are tracking mouse (hover) and want to update previews (Polyline)
-        
-        # Note: self.drawing is set in mousePress. 
+
+        # Note: self.drawing is set in mousePress.
         # If we just move without press, self.drawing is False.
-        
+
         should_forward = False
         if self.drawing and (event.buttons() & Qt.MouseButton.LeftButton):
             should_forward = True
@@ -184,7 +187,7 @@ class SkeletonCorrectionGraphicsView(QGraphicsView):
                 event.accept()
                 return
             # If hovering, we usually still want to propagate to super to allow cursor updates etc,
-            # but if we handled it meaningfully we might accept. 
+            # but if we handled it meaningfully we might accept.
             # For now, let's just forward and then call super if not drawing.
 
         super().mouseMoveEvent(event)
@@ -225,5 +228,3 @@ class SkeletonCorrectionGraphicsView(QGraphicsView):
                 event.accept()
                 return
         super().keyPressEvent(event)
-
-

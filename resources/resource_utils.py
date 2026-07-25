@@ -2,8 +2,8 @@
 Utility for resolving resource paths in both development and PyInstaller environments
 """
 
-import sys
 import os
+import sys
 
 
 def get_resource_path(relative_path):

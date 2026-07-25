@@ -9,7 +9,7 @@ dialog directly.
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 from PyQt6.QtCore import QSettings, Qt
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.gui.widgets import tokens
-from app.gui.widgets.icons import load_pixmap, load_icon
+from app.gui.widgets.icons import load_icon, load_pixmap
 
 _STAGES = ["Library", "Mask", "Trace", "Skeleton", "Measure", "Visualize"]
 
@@ -62,9 +62,12 @@ class _Dropzone(QFrame):
 class WelcomeWidget(QWidget):
     """Get-started landing page. ``on_get_started`` is a 0-arg callable."""
 
-    def __init__(self, on_get_started: Callable[[], None],
-                 on_open_recent: Optional[Callable[[str], None]] = None,
-                 parent: Optional[QWidget] = None):
+    def __init__(
+        self,
+        on_get_started: Callable[[], None],
+        on_open_recent: Callable[[str], None] | None = None,
+        parent: QWidget | None = None,
+    ):
         super().__init__(parent)
         self._on_get_started = on_get_started
         self._on_open_recent = on_open_recent
@@ -108,7 +111,9 @@ class WelcomeWidget(QWidget):
 
         dz_hint = QLabel("Drop a folder of root images here")
         dz_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dz_hint.setStyleSheet(f"color: {tokens.TEXT_MUTED}; font-size: 12.5px; border: none; background: transparent;")
+        dz_hint.setStyleSheet(
+            f"color: {tokens.TEXT_MUTED}; font-size: 12.5px; border: none; background: transparent;"
+        )
         dz_box.addWidget(dz_hint)
 
         self.browse_button = QPushButton("Browse…")
@@ -147,9 +152,7 @@ class WelcomeWidget(QWidget):
         outer.addStretch(1)
 
         # --- Footer ---
-        footer = QLabel(
-            "GPU · CUDA 12.8 · resnet_mask_v5 · pix2pix_skeletonizer · v2.0"
-        )
+        footer = QLabel("GPU · CUDA 12.8 · resnet_mask_v5 · pix2pix_skeletonizer · v2.0")
         footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         footer.setStyleSheet(
             f"color: {tokens.TEXT_FAINT}; font-family: {tokens.MONO}; font-size: 11px;"
@@ -157,7 +160,7 @@ class WelcomeWidget(QWidget):
         outer.addWidget(footer)
 
     # --------------------------------------------------------------------- #
-    def _load_recent_entries(self) -> List[dict]:
+    def _load_recent_entries(self) -> list[dict]:
         """Read the recent_projects MRU list from QSettings (JSON list of dicts)."""
         import json
 
@@ -192,7 +195,7 @@ class WelcomeWidget(QWidget):
             return f"{int(secs // 86400)}d ago"
         return dt.strftime("%Y-%m-%d")
 
-    def _build_recent_section(self) -> Optional[QWidget]:
+    def _build_recent_section(self) -> QWidget | None:
         entries = self._load_recent_entries()
         if not entries:
             return None

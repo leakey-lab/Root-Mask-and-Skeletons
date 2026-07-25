@@ -17,6 +17,7 @@ fixes the calibration science:
   ~15-20% (F-003). The estimator also uses the per-axis pixel pitch, so the
   near-isotropic (<4%) x/y difference is handled exactly rather than averaged.
 """
+
 from __future__ import annotations
 
 import csv
@@ -24,8 +25,8 @@ import logging
 import math
 import os
 import re
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +36,8 @@ from skimage.morphology import skeletonize
 
 from app.config import CALIBRATION
 
-
 # --------------------------- image -> binary -------------------------------
+
 
 def preprocess_image(image_path: str) -> np.ndarray:
     """Read an image and return its 1px skeleton (uint8 0/255)."""
@@ -61,14 +62,16 @@ def load_mask(image_path: str) -> np.ndarray:
 
 # ----------------------------- metrics -------------------------------------
 
+
 def skeleton_arc_length_px(skeleton: np.ndarray) -> tuple[float, float, float]:
     """Return (orthogonal_x_steps, orthogonal_y_steps, diagonal_steps) counted as
     edges in the 8-connected pixel graph of the skeleton."""
     s = skeleton > 0
-    orth_x = int(np.count_nonzero(s[:, :-1] & s[:, 1:]))   # horizontal neighbors
-    orth_y = int(np.count_nonzero(s[:-1, :] & s[1:, :]))   # vertical neighbors
-    diag = (int(np.count_nonzero(s[:-1, :-1] & s[1:, 1:]))
-            + int(np.count_nonzero(s[:-1, 1:] & s[1:, :-1])))
+    orth_x = int(np.count_nonzero(s[:, :-1] & s[:, 1:]))  # horizontal neighbors
+    orth_y = int(np.count_nonzero(s[:-1, :] & s[1:, :]))  # vertical neighbors
+    diag = int(np.count_nonzero(s[:-1, :-1] & s[1:, 1:])) + int(
+        np.count_nonzero(s[:-1, 1:] & s[1:, :-1])
+    )
     return orth_x, orth_y, diag
 
 
@@ -99,6 +102,7 @@ def calculate_root_area(mask: np.ndarray) -> float:
 
 # ----------------------------- filename ------------------------------------
 
+
 def parse_image_name(name: str) -> dict:
     """Parse ``..._T{tube}_L{pos}_YYYY.MM.DD_HHMMSS_...`` into its fields."""
     info = {
@@ -109,14 +113,14 @@ def parse_image_name(name: str) -> dict:
         "time": None,
     }
     try:
-        if (m := re.search(r"T(\d+)", name)):
+        if m := re.search(r"T(\d+)", name):
             info["tube_number"] = int(m.group(1))
-        if (m := re.search(r"L(\d+)", name)):
+        if m := re.search(r"L(\d+)", name):
             info["length_position"] = int(m.group(1))
-        if (m := re.search(r"(\d{4})\.(\d{2})\.(\d{2})", name)):
+        if m := re.search(r"(\d{4})\.(\d{2})\.(\d{2})", name):
             y, mo, d = m.groups()
             info["date"] = f"{y}.{mo}.{d}"
-        if (m := re.search(r"_(\d{6})(?:_|$)", name)):
+        if m := re.search(r"_(\d{6})(?:_|$)", name):
             t = m.group(1)
             info["time"] = f"{t[:2]}:{t[2:4]}:{t[4:]}"
     except (ValueError, AttributeError) as exc:
@@ -125,6 +129,7 @@ def parse_image_name(name: str) -> dict:
 
 
 # ----------------------------- CSV -----------------------------------------
+
 
 def write_metric_csv(results: list[dict], filename: str, headers: list[str]) -> None:
     try:

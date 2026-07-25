@@ -6,11 +6,15 @@ callers can forward to existing handlers without behaviour changes.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QButtonGroup, QHBoxLayout, QPushButton, QToolButton, QWidget,
+    QButtonGroup,
+    QHBoxLayout,
+    QPushButton,
+    QToolButton,
+    QWidget,
 )
 
 from . import tokens
@@ -113,10 +117,18 @@ class IconButton(QToolButton):
     the checked state without relying on QSS ``currentColor`` (unsupported).
     """
 
-    def __init__(self, icon_name: str, tooltip: str = "", *, size: int = 30,
-                 icon_px: int = 17, checkable: bool = False,
-                 color: str = tokens.TEXT_MUTED, on_color: str = tokens.ACCENT,
-                 parent=None):
+    def __init__(
+        self,
+        icon_name: str,
+        tooltip: str = "",
+        *,
+        size: int = 30,
+        icon_px: int = 17,
+        checkable: bool = False,
+        color: str = tokens.TEXT_MUTED,
+        on_color: str = tokens.ACCENT,
+        parent=None,
+    ):
         super().__init__(parent)
         self._icon_name = icon_name
         self._color = color

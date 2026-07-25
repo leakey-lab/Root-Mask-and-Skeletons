@@ -1,18 +1,20 @@
-from PyQt6.QtWidgets import (
-    QVBoxLayout,
-    QGraphicsView,
-    QGraphicsScene,
-    QGraphicsPixmapItem,
-    QWidget,
-)
-from PyQt6.QtGui import QPixmap, QImage, QPainter, QWheelEvent, QColor
-from PyQt6.QtCore import Qt
-import cv2
-import numpy as np
 import logging
 import os
 
+import cv2
+import numpy as np
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QImage, QPainter, QPixmap, QWheelEvent
+from PyQt6.QtWidgets import (
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QGraphicsView,
+    QVBoxLayout,
+    QWidget,
+)
+
 logger = logging.getLogger(__name__)
+
 
 def _env_bool(name: str, *, default: bool) -> bool:
     v = os.environ.get(name, None)
@@ -25,12 +27,11 @@ def _env_bool(name: str, *, default: bool) -> bool:
 # NOTE (Qt6): QtWebEngine (QWebEngineView) uses a QQuickWidget internally and cannot
 # share a top-level window with any QOpenGLWidget. We temporarily disable these
 # viewports when opening the embedded visualizations.
-DEFAULT_OPENGL_VIEWPORT_ENABLED = _env_bool(
-    "ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT", default=True
-)
+DEFAULT_OPENGL_VIEWPORT_ENABLED = _env_bool("ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT", default=True)
 
 try:
     from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+
     HAS_OPENGL = True
 except ImportError:
     HAS_OPENGL = False
@@ -40,18 +41,18 @@ class MagnifyingGraphicsView(QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        
+
         # Set up high-quality rendering
         self.setup_high_quality_rendering()
 
         self._opengl_viewport_enabled = False
         self.set_opengl_viewport_enabled(DEFAULT_OPENGL_VIEWPORT_ENABLED)
-        
+
         # Zoom control
         self.zoom = 1.0
         self.min_zoom = 0.1
         self.max_zoom = 10.0
-        
+
         # Set transformation anchor for better zoom quality
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -92,10 +93,10 @@ class MagnifyingGraphicsView(QGraphicsView):
             | QPainter.RenderHint.LosslessImageRendering
             | QPainter.RenderHint.TextAntialiasing
         )
-        
+
         # Enable caching for better performance
         self.setCacheMode(QGraphicsView.CacheModeFlag.CacheBackground)
-        
+
         # Optimize for interactive use
         self.setOptimizationFlags(
             QGraphicsView.OptimizationFlag.DontSavePainterState
@@ -107,7 +108,7 @@ class MagnifyingGraphicsView(QGraphicsView):
         # Check for Ctrl modifier for zoom
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             zoom_in = event.angleDelta().y() > 0
-            
+
             if zoom_in and self.zoom < self.max_zoom:
                 factor = 1.25
                 self.zoom *= factor
@@ -117,7 +118,7 @@ class MagnifyingGraphicsView(QGraphicsView):
             else:
                 event.ignore()
                 return
-            
+
             # Apply high-quality scaling
             self.scale_with_quality(factor)
             event.accept()
@@ -131,40 +132,42 @@ class MagnifyingGraphicsView(QGraphicsView):
         if self.scene():
             for item in self.scene().items():
                 if isinstance(item, QGraphicsPixmapItem):
-                    item.setTransformationMode(
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                    item.setCacheMode(
-                        QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache
-                    )
-        
+                    item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+                    item.setCacheMode(QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache)
+
         # Apply the scaling
         self.scale(factor, factor)
-        
+
         # Force a high-quality update
         self.viewport().update()
-    
+
     def reset_zoom(self):
         """Reset zoom to fit the scene"""
         self.resetTransform()
         self.zoom = 1.0
         if self.scene():
             self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
-    
+
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts for zoom control"""
         if event.key() == Qt.Key.Key_0 and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             # Ctrl+0 to reset zoom
             self.reset_zoom()
             event.accept()
-        elif event.key() == Qt.Key.Key_Plus and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+        elif (
+            event.key() == Qt.Key.Key_Plus
+            and event.modifiers() == Qt.KeyboardModifier.ControlModifier
+        ):
             # Ctrl++ to zoom in
             if self.zoom < self.max_zoom:
                 factor = 1.25
                 self.zoom *= factor
                 self.scale_with_quality(factor)
             event.accept()
-        elif event.key() == Qt.Key.Key_Minus and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+        elif (
+            event.key() == Qt.Key.Key_Minus
+            and event.modifiers() == Qt.KeyboardModifier.ControlModifier
+        ):
             # Ctrl+- to zoom out
             if self.zoom > self.min_zoom:
                 factor = 0.8
@@ -187,12 +190,12 @@ class DisplayController:
 
         self.magnifying_view = MagnifyingGraphicsView()
         layout.addWidget(self.magnifying_view)
-        
+
         # Show helpful message about zoom controls
-        if self.main_window and hasattr(self.main_window, 'status_bar'):
+        if self.main_window and hasattr(self.main_window, "status_bar"):
             self.main_window.status_bar.showMessage(
-                "Tip: Use Ctrl+Mouse Wheel to zoom, Ctrl+0 to reset, Ctrl+/- for keyboard zoom", 
-                10000
+                "Tip: Use Ctrl+Mouse Wheel to zoom, Ctrl+0 to reset, Ctrl+/- for keyboard zoom",
+                10000,
             )
 
     def display_selected_image(self, item):
@@ -207,9 +210,7 @@ class DisplayController:
         view_mode = self.main_window.view_mode_combo.currentText()
         if view_mode in ["Overlay", "Side by Side"]:
             # Lazy load the processed image when needed
-            self.current_fake_image = (
-                self.main_window.image_manager.get_fake_image_path(name)
-            )
+            self.current_fake_image = self.main_window.image_manager.get_fake_image_path(name)
 
             if not self.current_fake_image:
                 self.main_window.status_bar.showMessage(
@@ -260,18 +261,16 @@ class DisplayController:
         # Load processed image if needed
         if not self.current_fake_image:
             base_name = os.path.splitext(os.path.basename(self.current_image))[0]
-            self.current_fake_image = (
-                self.main_window.image_manager.get_fake_image_path(base_name)
-            )
+            self.current_fake_image = self.main_window.image_manager.get_fake_image_path(base_name)
 
         # 1. Base Image
         real_pixmap = QPixmap(self.current_image)
         if real_pixmap.isNull():
             return
-            
+
         real_item = QGraphicsPixmapItem(real_pixmap)
         real_item.setZValue(0)
-        
+
         items = [real_item]
 
         # 2. Overlay Image (if available)
@@ -282,9 +281,12 @@ class DisplayController:
                 _, binary_mask = cv2.threshold(
                     fake_image_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
                 )
-                
+
                 # Resize if needed
-                if (real_pixmap.width(), real_pixmap.height()) != (binary_mask.shape[1], binary_mask.shape[0]):
+                if (real_pixmap.width(), real_pixmap.height()) != (
+                    binary_mask.shape[1],
+                    binary_mask.shape[0],
+                ):
                     binary_mask = cv2.resize(
                         binary_mask,
                         (real_pixmap.width(), real_pixmap.height()),
@@ -292,7 +294,7 @@ class DisplayController:
                     )
 
                 # Ensure mask is contiguous for QImage
-                if not binary_mask.flags['C_CONTIGUOUS']:
+                if not binary_mask.flags["C_CONTIGUOUS"]:
                     binary_mask = np.ascontiguousarray(binary_mask)
 
                 height, width = binary_mask.shape
@@ -336,7 +338,7 @@ class DisplayController:
                 overlay_item.setZValue(1)
                 items.append(overlay_item)
             else:
-                 logger.warning(
+                logger.warning(
                     "Failed to load fake image data for %s",
                     os.path.basename(self.current_image),
                 )
@@ -357,56 +359,52 @@ class DisplayController:
         real_pixmap = QPixmap(self.current_image)
         if real_pixmap.isNull():
             return
-            
+
         real_item = QGraphicsPixmapItem(real_pixmap)
         real_item.setZValue(0)
-        
+
         items = [real_item]
 
         # Try to lazy load the processed image if needed
         if not self.current_fake_image:
             base_name = os.path.splitext(os.path.basename(self.current_image))[0]
-            self.current_fake_image = (
-                self.main_window.image_manager.get_fake_image_path(base_name)
-            )
+            self.current_fake_image = self.main_window.image_manager.get_fake_image_path(base_name)
 
         # Processed Image
         if self.current_fake_image:
             # Convert _fake.png to _real.png for the processed image
-            real_processed_path = self.current_fake_image.replace(
-                "_fake.png", "_real.png"
-            )
-            
+            real_processed_path = self.current_fake_image.replace("_fake.png", "_real.png")
+
             # Note: The original code loaded 'real_processed_path' as 'real_pixmap' for the right side?
             # Re-reading original logic: "painter.drawPixmap(0, 0, real_pixmap); painter.drawPixmap(width, 0, fake_pixmap)"
             # Wait, the original code loaded `real_pixmap = QPixmap(real_processed_path)` which overrode the variable.
             # So left image = processed_real, right image = processed_fake.
-            
+
             # Let's verify exactly what "Side by Side" usually means in this context.
             # Usually it's Real vs Fake.
             # The previous code did:
             # real_pixmap = QPixmap(real_processed_path)  <-- This is the "real" input to the model
             # fake_pixmap = QPixmap(self.current_fake_image) <-- This is the output
-            
+
             right_pixmap = QPixmap(self.current_fake_image)
             left_pixmap = QPixmap(real_processed_path)
-            
+
             if not left_pixmap.isNull():
                 left_item = QGraphicsPixmapItem(left_pixmap)
                 left_item.setPos(0, 0)
-                items = [left_item] # Replace the original real_item since we are showing the specific pair
-            
+                items = [
+                    left_item
+                ]  # Replace the original real_item since we are showing the specific pair
+
             if not right_pixmap.isNull():
                 right_item = QGraphicsPixmapItem(right_pixmap)
                 # Position it to the right of the first image
                 width = left_pixmap.width() if not left_pixmap.isNull() else real_pixmap.width()
                 right_item.setPos(width, 0)
                 items.append(right_item)
-                
+
         else:
-            self.main_window.status_bar.showMessage(
-                "Processed image not available", 3000
-            )
+            self.main_window.status_bar.showMessage("Processed image not available", 3000)
 
         self.update_scene_items(items)
 
@@ -418,33 +416,31 @@ class DisplayController:
     def update_scene_items(self, items):
         """Update the scene with a list of graphics items"""
         scene = QGraphicsScene()
-        
+
         # Calculate bounding rect for all items to fit view
         total_rect = None
-        
+
         for item in items:
             # Set high-quality transformation mode
             if isinstance(item, QGraphicsPixmapItem):
                 item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
                 item.setCacheMode(QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache)
-            
+
             scene.addItem(item)
-            
+
             # Expand bounding rect
             item_rect = item.sceneBoundingRect()
             if total_rect is None:
                 total_rect = item_rect
             else:
                 total_rect = total_rect.united(item_rect)
-        
+
         self.magnifying_view.setScene(scene)
-        
+
         # Fit view while maintaining aspect ratio
         if total_rect:
-            self.magnifying_view.fitInView(
-                total_rect, Qt.AspectRatioMode.KeepAspectRatio
-            )
-        
+            self.magnifying_view.fitInView(total_rect, Qt.AspectRatioMode.KeepAspectRatio)
+
         # Reset zoom level when setting new image
         self.magnifying_view.zoom = 1.0
 

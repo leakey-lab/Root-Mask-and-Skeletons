@@ -3,28 +3,27 @@ Main Dash application for root length visualization.
 Orchestrates layout, callbacks, and visualization components.
 """
 
-
 import logging
 import os
 import re
 from typing import Any
 
-from dash import Dash, dcc, html, Input, Output, State
 import dash
 import dash_bootstrap_components as dbc
-import plotly.graph_objects as go
 import pandas as pd
+import plotly.graph_objects as go
+from dash import Dash, Input, Output, State, dcc, html
 
 from app.config import DASH_LENGTH_PORT
+
+from . import theme
 from .dash_data_cache import DataCache
 from .dash_image_utils import build_available_images_map, get_encoded_image
 from .dash_visualizations import DashVisualizations
-from . import theme
+
 theme.use("sprouts")
 
 logger = logging.getLogger(__name__)
-
-
 
 
 class DashApp(DashVisualizations):
@@ -50,9 +49,9 @@ class DashApp(DashVisualizations):
             update_title=None,
             compress=True,
         )
-        self.app.index_string = '''<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>
+        self.app.index_string = """<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-{%favicon%}{%css%}</head><body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>'''
+{%favicon%}{%css%}</head><body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>"""
 
         # Set up layout and callbacks
         self._setup_layout()
@@ -71,370 +70,485 @@ class DashApp(DashVisualizations):
                 {"label": "Growth Lines", "value": "lines"},
                 {"label": "Faceted Depth Profile", "value": "faceted"},
             ]
-            
+
             self.app.layout = html.Div(
                 className="sprouts-app viz-page",
                 children=[
-                # ---- header band: eyebrow + title + view selector ----
-                html.Div(
-                    className="viz-header",
-                    children=[
-                        html.Div(
-                            className="viz-header-left",
-                            children=[
-                                html.Div("INTERACTIVE DASHBOARD", className="viz-eyebrow"),
-                                html.H1("Root Length — trial overview", className="viz-title"),
-                            ],
-                        ),
-                        html.Div(
-                            className="viz-header-right",
-                            children=[
-                                dbc.RadioItems(
-                                    id="view-selector",
-                                    options=options,
-                                    value="stacked",
-                                    class_name="btn-group",
-                                    input_class_name="btn-check",
-                                    label_class_name="btn btn-outline-secondary",
-                                ),
-                            ],
-                        ),
-                    ],
-                ),
-                # ---- collapsible control strip ----
-                html.Div(
-                    className="viz-controls",
-                    children=[
-                        dbc.Button(
-                            [
-                                html.Span("▸", className="viz-controls-caret"),
-                                html.Span("Tube & date range"),
-                                html.Span("controls", className="viz-controls-summary"),
-                            ],
-                            id="viz-controls-toggle",
-                            n_clicks=0,
-                            className="viz-controls-toggle",
-                            color="link",
-                        ),
-                        dbc.Collapse(
-                            id="viz-controls-collapse",
-                            is_open=False,
-                            children=html.Div(
-                                className="viz-controls-body",
-                                children=[
-                # Tube selector (for Growth Lines view)
-                dcc.Dropdown(
-                    id="tube-selector",
-                    placeholder="Select Tube",
-                    className="mb-3",
-                    style={"display": "none", "fontSize": "16px"},
-                ),
-                dbc.Container(
-                    [
-                        # Tube Selection Panel (for Growth Over Time view)
-                        dbc.Row(
-                            dbc.Col(
-                                dbc.Card(
-                                    dbc.CardBody(
-                                        [
-                                            html.H4(
-                                                "Tube Selection",
-                                                className="card-title text-center",
-                                                style={"fontSize": "22px", "marginBottom": "20px"},
-                                            ),
-                                            dcc.Tabs(
-                                                id="tube-selection-tabs",
-                                                value="tab-multiselect",
-                                                children=[
-                                                    dcc.Tab(
-                                                        label="Multi-Select",
-                                                        value="tab-multiselect",
-                                                        children=[
-                                                            html.Div(
-                                                                [
-                                                                    html.Label("Select Tubes:", style={"fontWeight": "bold", "marginTop": "15px"}),
-                                                                    dcc.Dropdown(
-                                                                        id="tube-multiselect",
-                                                                        multi=True,
-                                                                        placeholder="Select tubes...",
-                                                                        style={"fontSize": "14px"},
-                                                                    ),
-                                                                ],
-                                                                style={"padding": "15px"},
-                                                            )
-                                                        ],
-                                                    ),
-                                                    dcc.Tab(
-                                                        label="Range",
-                                                        value="tab-range",
-                                                        children=[
-                                                            html.Div(
-                                                                [
-                                                                    html.Label("From:", style={"fontWeight": "bold", "marginTop": "15px", "marginRight": "10px"}),
-                                                                    dcc.Input(
-                                                                        id="tube-range-from",
-                                                                        type="number",
-                                                                        placeholder="Start",
-                                                                        style={"width": "100px", "marginRight": "20px", "fontSize": "14px"},
-                                                                    ),
-                                                                    html.Label("To:", style={"fontWeight": "bold", "marginRight": "10px"}),
-                                                                    dcc.Input(
-                                                                        id="tube-range-to",
-                                                                        type="number",
-                                                                        placeholder="End",
-                                                                        style={"width": "100px", "marginRight": "20px", "fontSize": "14px"},
-                                                                    ),
-                                                                    html.Button(
-                                                                        "Add Range",
-                                                                        id="add-range-btn",
-                                                                        n_clicks=0,
-                                                                        className="btn btn-primary",
-                                                                        style={"fontSize": "14px"},
-                                                                    ),
-                                                                ],
-                                                                style={"padding": "15px", "display": "flex", "alignItems": "center"},
-                                                            )
-                                                        ],
-                                                    ),
-                                                    dcc.Tab(
-                                                        label="Manual Entry",
-                                                        value="tab-manual",
-                                                        children=[
-                                                            html.Div(
-                                                                [
-                                                                    html.Label(
-                                                                        "Enter tube numbers (e.g., 1,3,5,10-15):",
-                                                                        style={"fontWeight": "bold", "marginTop": "15px", "marginBottom": "10px"},
-                                                                    ),
-                                                                    dcc.Input(
-                                                                        id="tube-manual-entry",
-                                                                        type="text",
-                                                                        placeholder="1,3,5,10-15",
-                                                                        style={"width": "100%", "fontSize": "14px"},
-                                                                    ),
-                                                                ],
-                                                                style={"padding": "15px"},
-                                                            )
-                                                        ],
-                                                    ),
-                                                ],
-                                                style={"fontSize": "16px"},
-                                            ),
-                                            html.Hr(style={"margin": "20px 0"}),
-                                            html.Div(
-                                                [
-                                                    html.Label("Selected Tubes:", style={"fontWeight": "bold", "marginBottom": "10px"}),
-                                                    html.Div(
-                                                        id="selected-tubes-display",
-                                                        style={
-                                                            "minHeight": "50px",
-                                                            "padding": "10px",
-                                                            "borderRadius": "5px",
-                                                            "marginBottom": "15px",
-                                                        },
-                                                    ),
-                                                    html.Div(
-                                                        [
-                                                            html.Button(
-                                                                "Clear All",
-                                                                id="clear-all-btn",
-                                                                n_clicks=0,
-                                                                className="btn btn-warning",
-                                                                style={"marginRight": "10px", "fontSize": "14px"},
-                                                            ),
-                                                            html.Button(
-                                                                "Select All",
-                                                                id="select-all-btn",
-                                                                n_clicks=0,
-                                                                className="btn btn-info",
-                                                                style={"fontSize": "14px"},
-                                                            ),
-                                                        ],
-                                                        style={"display": "flex", "gap": "10px"},
-                                                    ),
-                                                ]
-                                            ),
-                                        ]
-                                    ),
-                                    id="tube-selection-card",
-                                    style={"marginBottom": "30px", "padding": "20px", "display": "none"},
-                                ),
-                                md=12,
-                                className="mx-auto",
-                            ),
-                            className="mb-4 justify-content-center",
-                        ),
-                        # Visualization Options Panel (for Growth Over Time view)
-                        dbc.Row(
-                            dbc.Col(
-                                dbc.Card(
-                                    dbc.CardBody(
-                                        [
-                                            html.H4(
-                                                "Visualization Options",
-                                                className="card-title text-center",
-                                                style={"fontSize": "22px", "marginBottom": "20px"},
-                                            ),
-                                            dcc.Checklist(
-                                                id="growth-viz-options",
-                                                options=[
-                                                    {"label": " Show Field Average", "value": "show_field_avg"},
-                                                    {"label": " Show Field Variance Shading", "value": "show_field_var"},
-                                                ],
-                                                value=["show_field_avg", "show_field_var"],
-                                                style={"fontSize": "16px"},
-                                                labelStyle={"display": "block", "marginBottom": "10px"},
-                                            ),
-                                            html.Hr(style={"margin": "20px 0"}),
-                                            html.Button(
-                                                "Toggle Legend",
-                                                id="toggle-legend-btn",
-                                                n_clicks=0,
-                                                className="btn btn-secondary",
-                                                style={"width": "100%", "fontSize": "16px"},
-                                            ),
-                                        ]
-                                    ),
-                                    id="viz-options-card",
-                                    style={"marginBottom": "30px", "padding": "20px", "display": "none"},
-                                ),
-                                md=12,
-                                className="mx-auto",
-                            ),
-                            className="mb-4 justify-content-center",
-                        ),
-                        # Faceted View Options Panel
-                        dbc.Row(
-                            dbc.Col(
-                                dbc.Card(
-                                    dbc.CardBody(
-                                        [
-                                            html.H4(
-                                                "Faceted View Options",
-                                                className="card-title text-center",
-                                                style={"fontSize": "22px", "marginBottom": "20px"},
-                                            ),
-                                            html.Label(
-                                                "Select Dates for Rows:",
-                                                style={"fontWeight": "bold", "marginBottom": "10px"}
-                                            ),
-                                            dcc.Dropdown(
-                                                id="faceted-date-selector",
-                                                multi=True,
-                                                placeholder="Select dates (all if none selected)...",
-                                                style={"fontSize": "14px", "marginBottom": "15px"},
-                                            ),
-                                            html.Hr(style={"margin": "15px 0"}),
-                                            html.Label(
-                                                "Select Tubes for Columns (up to 6):",
-                                                style={"fontWeight": "bold", "marginBottom": "10px"}
-                                            ),
-                                            dcc.Dropdown(
-                                                id="faceted-tube-selector",
-                                                multi=True,
-                                                placeholder="Select up to 6 tubes...",
-                                                style={"fontSize": "14px", "marginBottom": "15px"},
-                                            ),
-                                            html.Div(
-                                                id="faceted-selection-info",
-                                                style={
-                                                    "padding": "10px",
-                                                    "borderRadius": "5px",
-                                                    "marginBottom": "15px",
-                                                },
-                                            ),
-                                            html.Hr(style={"margin": "15px 0"}),
-                                            html.Label(
-                                                "Tube-Date Availability:",
-                                                style={"fontWeight": "bold", "marginBottom": "10px"}
-                                            ),
-                                            html.Div(
-                                                id="tube-date-availability",
-                                                style={
-                                                    "padding": "10px",
-                                                    "borderRadius": "5px",
-                                                    "maxHeight": "200px",
-                                                    "overflowY": "auto",
-                                                    "fontSize": "12px",
-                                                },
-                                            ),
-                                        ]
-                                    ),
-                                    id="faceted-options-card",
-                                    style={"marginBottom": "30px", "padding": "20px", "display": "none"},
-                                ),
-                                md=12,
-                                className="mx-auto",
-                            ),
-                            className="mb-4 justify-content-center",
-                        ),
-                    ],
-                    fluid=True,
-                    className="px-2",
-                ),
-                                ],
-                            ),
-                        ),
-                    ],
-                ),
-                # ---- metric chips ----
-                html.Div(
-                    className="viz-metrics",
-                    children=[
-                        html.Div(id="click-data", className="metric"),
-                    ],
-                ),
-                # ---- chart card: full-bleed, fills remaining space ----
-                # Lines view renders chart + image panel side-by-side; other
-                # views are full-width chart. Both keep the same component ids.
-                html.Div(
-                    className="viz-chart-card",
-                    children=html.Div(
-                        className="viz-lines-row",
+                    # ---- header band: eyebrow + title + view selector ----
+                    html.Div(
+                        className="viz-header",
                         children=[
                             html.Div(
-                                className="viz-chart-pane",
-                                children=dcc.Loading(
-                                    type="default",
-                                    color="#5fd6a0",
-                                    children=dcc.Graph(
-                                        id="main-graph",
-                                        style={"width": "100%"},
-                                        config={
-                                            "scrollZoom": True,
-                                            "doubleClick": "reset",
-                                            "showTips": False,
-                                            "displayModeBar": True,
-                                            "watermark": False,
-                                            "responsive": True,
-                                            "autosizable": True,
-                                            "toImageButtonOptions": {
-                                                "format": "svg",
-                                                "filename": "root_length_plot",
-                                                "scale": 2,
-                                            },
-                                            "modeBarButtonsToAdd": ["downloadCsv"],
-                                        },
-                                    ),
-                                ),
+                                className="viz-header-left",
+                                children=[
+                                    html.Div("INTERACTIVE DASHBOARD", className="viz-eyebrow"),
+                                    html.H1("Root Length — trial overview", className="viz-title"),
+                                ],
                             ),
-                            # Growth-Lines hover images sit beside the chart.
                             html.Div(
-                                id="image-container",
-                                className="viz-image-panel",
+                                className="viz-header-right",
+                                children=[
+                                    dbc.RadioItems(
+                                        id="view-selector",
+                                        options=options,
+                                        value="stacked",
+                                        class_name="btn-group",
+                                        input_class_name="btn-check",
+                                        label_class_name="btn btn-outline-secondary",
+                                    ),
+                                ],
                             ),
                         ],
                     ),
-                ),
-                # no-op Output target for the clientside resize callback
-                dcc.Store(id="viz-resize-dummy"),
-                dcc.Store(id="cached-data"),
-                dcc.Store(id="selected-tubes-store", data=[]),
-                dcc.Store(id="legend-visible-store", data=True),
-                dcc.Store(id="faceted-tubes-store", data=[]),
-                dcc.Store(id="faceted-dates-store", data=[]),
-            ],
-        )
+                    # ---- collapsible control strip ----
+                    html.Div(
+                        className="viz-controls",
+                        children=[
+                            dbc.Button(
+                                [
+                                    html.Span("▸", className="viz-controls-caret"),
+                                    html.Span("Tube & date range"),
+                                    html.Span("controls", className="viz-controls-summary"),
+                                ],
+                                id="viz-controls-toggle",
+                                n_clicks=0,
+                                className="viz-controls-toggle",
+                                color="link",
+                            ),
+                            dbc.Collapse(
+                                id="viz-controls-collapse",
+                                is_open=False,
+                                children=html.Div(
+                                    className="viz-controls-body",
+                                    children=[
+                                        # Tube selector (for Growth Lines view)
+                                        dcc.Dropdown(
+                                            id="tube-selector",
+                                            placeholder="Select Tube",
+                                            className="mb-3",
+                                            style={"display": "none", "fontSize": "16px"},
+                                        ),
+                                        dbc.Container(
+                                            [
+                                                # Tube Selection Panel (for Growth Over Time view)
+                                                dbc.Row(
+                                                    dbc.Col(
+                                                        dbc.Card(
+                                                            dbc.CardBody(
+                                                                [
+                                                                    html.H4(
+                                                                        "Tube Selection",
+                                                                        className="card-title text-center",
+                                                                        style={
+                                                                            "fontSize": "22px",
+                                                                            "marginBottom": "20px",
+                                                                        },
+                                                                    ),
+                                                                    dcc.Tabs(
+                                                                        id="tube-selection-tabs",
+                                                                        value="tab-multiselect",
+                                                                        children=[
+                                                                            dcc.Tab(
+                                                                                label="Multi-Select",
+                                                                                value="tab-multiselect",
+                                                                                children=[
+                                                                                    html.Div(
+                                                                                        [
+                                                                                            html.Label(
+                                                                                                "Select Tubes:",
+                                                                                                style={
+                                                                                                    "fontWeight": "bold",
+                                                                                                    "marginTop": "15px",
+                                                                                                },
+                                                                                            ),
+                                                                                            dcc.Dropdown(
+                                                                                                id="tube-multiselect",
+                                                                                                multi=True,
+                                                                                                placeholder="Select tubes...",
+                                                                                                style={
+                                                                                                    "fontSize": "14px"
+                                                                                                },
+                                                                                            ),
+                                                                                        ],
+                                                                                        style={
+                                                                                            "padding": "15px"
+                                                                                        },
+                                                                                    )
+                                                                                ],
+                                                                            ),
+                                                                            dcc.Tab(
+                                                                                label="Range",
+                                                                                value="tab-range",
+                                                                                children=[
+                                                                                    html.Div(
+                                                                                        [
+                                                                                            html.Label(
+                                                                                                "From:",
+                                                                                                style={
+                                                                                                    "fontWeight": "bold",
+                                                                                                    "marginTop": "15px",
+                                                                                                    "marginRight": "10px",
+                                                                                                },
+                                                                                            ),
+                                                                                            dcc.Input(
+                                                                                                id="tube-range-from",
+                                                                                                type="number",
+                                                                                                placeholder="Start",
+                                                                                                style={
+                                                                                                    "width": "100px",
+                                                                                                    "marginRight": "20px",
+                                                                                                    "fontSize": "14px",
+                                                                                                },
+                                                                                            ),
+                                                                                            html.Label(
+                                                                                                "To:",
+                                                                                                style={
+                                                                                                    "fontWeight": "bold",
+                                                                                                    "marginRight": "10px",
+                                                                                                },
+                                                                                            ),
+                                                                                            dcc.Input(
+                                                                                                id="tube-range-to",
+                                                                                                type="number",
+                                                                                                placeholder="End",
+                                                                                                style={
+                                                                                                    "width": "100px",
+                                                                                                    "marginRight": "20px",
+                                                                                                    "fontSize": "14px",
+                                                                                                },
+                                                                                            ),
+                                                                                            html.Button(
+                                                                                                "Add Range",
+                                                                                                id="add-range-btn",
+                                                                                                n_clicks=0,
+                                                                                                className="btn btn-primary",
+                                                                                                style={
+                                                                                                    "fontSize": "14px"
+                                                                                                },
+                                                                                            ),
+                                                                                        ],
+                                                                                        style={
+                                                                                            "padding": "15px",
+                                                                                            "display": "flex",
+                                                                                            "alignItems": "center",
+                                                                                        },
+                                                                                    )
+                                                                                ],
+                                                                            ),
+                                                                            dcc.Tab(
+                                                                                label="Manual Entry",
+                                                                                value="tab-manual",
+                                                                                children=[
+                                                                                    html.Div(
+                                                                                        [
+                                                                                            html.Label(
+                                                                                                "Enter tube numbers (e.g., 1,3,5,10-15):",
+                                                                                                style={
+                                                                                                    "fontWeight": "bold",
+                                                                                                    "marginTop": "15px",
+                                                                                                    "marginBottom": "10px",
+                                                                                                },
+                                                                                            ),
+                                                                                            dcc.Input(
+                                                                                                id="tube-manual-entry",
+                                                                                                type="text",
+                                                                                                placeholder="1,3,5,10-15",
+                                                                                                style={
+                                                                                                    "width": "100%",
+                                                                                                    "fontSize": "14px",
+                                                                                                },
+                                                                                            ),
+                                                                                        ],
+                                                                                        style={
+                                                                                            "padding": "15px"
+                                                                                        },
+                                                                                    )
+                                                                                ],
+                                                                            ),
+                                                                        ],
+                                                                        style={"fontSize": "16px"},
+                                                                    ),
+                                                                    html.Hr(
+                                                                        style={"margin": "20px 0"}
+                                                                    ),
+                                                                    html.Div(
+                                                                        [
+                                                                            html.Label(
+                                                                                "Selected Tubes:",
+                                                                                style={
+                                                                                    "fontWeight": "bold",
+                                                                                    "marginBottom": "10px",
+                                                                                },
+                                                                            ),
+                                                                            html.Div(
+                                                                                id="selected-tubes-display",
+                                                                                style={
+                                                                                    "minHeight": "50px",
+                                                                                    "padding": "10px",
+                                                                                    "borderRadius": "5px",
+                                                                                    "marginBottom": "15px",
+                                                                                },
+                                                                            ),
+                                                                            html.Div(
+                                                                                [
+                                                                                    html.Button(
+                                                                                        "Clear All",
+                                                                                        id="clear-all-btn",
+                                                                                        n_clicks=0,
+                                                                                        className="btn btn-warning",
+                                                                                        style={
+                                                                                            "marginRight": "10px",
+                                                                                            "fontSize": "14px",
+                                                                                        },
+                                                                                    ),
+                                                                                    html.Button(
+                                                                                        "Select All",
+                                                                                        id="select-all-btn",
+                                                                                        n_clicks=0,
+                                                                                        className="btn btn-info",
+                                                                                        style={
+                                                                                            "fontSize": "14px"
+                                                                                        },
+                                                                                    ),
+                                                                                ],
+                                                                                style={
+                                                                                    "display": "flex",
+                                                                                    "gap": "10px",
+                                                                                },
+                                                                            ),
+                                                                        ]
+                                                                    ),
+                                                                ]
+                                                            ),
+                                                            id="tube-selection-card",
+                                                            style={
+                                                                "marginBottom": "30px",
+                                                                "padding": "20px",
+                                                                "display": "none",
+                                                            },
+                                                        ),
+                                                        md=12,
+                                                        className="mx-auto",
+                                                    ),
+                                                    className="mb-4 justify-content-center",
+                                                ),
+                                                # Visualization Options Panel (for Growth Over Time view)
+                                                dbc.Row(
+                                                    dbc.Col(
+                                                        dbc.Card(
+                                                            dbc.CardBody(
+                                                                [
+                                                                    html.H4(
+                                                                        "Visualization Options",
+                                                                        className="card-title text-center",
+                                                                        style={
+                                                                            "fontSize": "22px",
+                                                                            "marginBottom": "20px",
+                                                                        },
+                                                                    ),
+                                                                    dcc.Checklist(
+                                                                        id="growth-viz-options",
+                                                                        options=[
+                                                                            {
+                                                                                "label": " Show Field Average",
+                                                                                "value": "show_field_avg",
+                                                                            },
+                                                                            {
+                                                                                "label": " Show Field Variance Shading",
+                                                                                "value": "show_field_var",
+                                                                            },
+                                                                        ],
+                                                                        value=[
+                                                                            "show_field_avg",
+                                                                            "show_field_var",
+                                                                        ],
+                                                                        style={"fontSize": "16px"},
+                                                                        labelStyle={
+                                                                            "display": "block",
+                                                                            "marginBottom": "10px",
+                                                                        },
+                                                                    ),
+                                                                    html.Hr(
+                                                                        style={"margin": "20px 0"}
+                                                                    ),
+                                                                    html.Button(
+                                                                        "Toggle Legend",
+                                                                        id="toggle-legend-btn",
+                                                                        n_clicks=0,
+                                                                        className="btn btn-secondary",
+                                                                        style={
+                                                                            "width": "100%",
+                                                                            "fontSize": "16px",
+                                                                        },
+                                                                    ),
+                                                                ]
+                                                            ),
+                                                            id="viz-options-card",
+                                                            style={
+                                                                "marginBottom": "30px",
+                                                                "padding": "20px",
+                                                                "display": "none",
+                                                            },
+                                                        ),
+                                                        md=12,
+                                                        className="mx-auto",
+                                                    ),
+                                                    className="mb-4 justify-content-center",
+                                                ),
+                                                # Faceted View Options Panel
+                                                dbc.Row(
+                                                    dbc.Col(
+                                                        dbc.Card(
+                                                            dbc.CardBody(
+                                                                [
+                                                                    html.H4(
+                                                                        "Faceted View Options",
+                                                                        className="card-title text-center",
+                                                                        style={
+                                                                            "fontSize": "22px",
+                                                                            "marginBottom": "20px",
+                                                                        },
+                                                                    ),
+                                                                    html.Label(
+                                                                        "Select Dates for Rows:",
+                                                                        style={
+                                                                            "fontWeight": "bold",
+                                                                            "marginBottom": "10px",
+                                                                        },
+                                                                    ),
+                                                                    dcc.Dropdown(
+                                                                        id="faceted-date-selector",
+                                                                        multi=True,
+                                                                        placeholder="Select dates (all if none selected)...",
+                                                                        style={
+                                                                            "fontSize": "14px",
+                                                                            "marginBottom": "15px",
+                                                                        },
+                                                                    ),
+                                                                    html.Hr(
+                                                                        style={"margin": "15px 0"}
+                                                                    ),
+                                                                    html.Label(
+                                                                        "Select Tubes for Columns (up to 6):",
+                                                                        style={
+                                                                            "fontWeight": "bold",
+                                                                            "marginBottom": "10px",
+                                                                        },
+                                                                    ),
+                                                                    dcc.Dropdown(
+                                                                        id="faceted-tube-selector",
+                                                                        multi=True,
+                                                                        placeholder="Select up to 6 tubes...",
+                                                                        style={
+                                                                            "fontSize": "14px",
+                                                                            "marginBottom": "15px",
+                                                                        },
+                                                                    ),
+                                                                    html.Div(
+                                                                        id="faceted-selection-info",
+                                                                        style={
+                                                                            "padding": "10px",
+                                                                            "borderRadius": "5px",
+                                                                            "marginBottom": "15px",
+                                                                        },
+                                                                    ),
+                                                                    html.Hr(
+                                                                        style={"margin": "15px 0"}
+                                                                    ),
+                                                                    html.Label(
+                                                                        "Tube-Date Availability:",
+                                                                        style={
+                                                                            "fontWeight": "bold",
+                                                                            "marginBottom": "10px",
+                                                                        },
+                                                                    ),
+                                                                    html.Div(
+                                                                        id="tube-date-availability",
+                                                                        style={
+                                                                            "padding": "10px",
+                                                                            "borderRadius": "5px",
+                                                                            "maxHeight": "200px",
+                                                                            "overflowY": "auto",
+                                                                            "fontSize": "12px",
+                                                                        },
+                                                                    ),
+                                                                ]
+                                                            ),
+                                                            id="faceted-options-card",
+                                                            style={
+                                                                "marginBottom": "30px",
+                                                                "padding": "20px",
+                                                                "display": "none",
+                                                            },
+                                                        ),
+                                                        md=12,
+                                                        className="mx-auto",
+                                                    ),
+                                                    className="mb-4 justify-content-center",
+                                                ),
+                                            ],
+                                            fluid=True,
+                                            className="px-2",
+                                        ),
+                                    ],
+                                ),
+                            ),
+                        ],
+                    ),
+                    # click-data kept as a hidden callback target; the visible
+                    # metric band was an always-empty row and is removed.
+                    html.Div(id="click-data", style={"display": "none"}),
+                    # ---- chart card: full-bleed, fills remaining space ----
+                    # Lines view renders chart + image panel side-by-side; other
+                    # views are full-width chart. Both keep the same component ids.
+                    html.Div(
+                        className="viz-chart-card",
+                        children=html.Div(
+                            className="viz-lines-row",
+                            children=[
+                                html.Div(
+                                    className="viz-chart-pane",
+                                    children=dcc.Loading(
+                                        type="default",
+                                        color="#5fd6a0",
+                                        children=dcc.Graph(
+                                            id="main-graph",
+                                            style={"width": "100%"},
+                                            config={
+                                                "scrollZoom": True,
+                                                "doubleClick": "reset",
+                                                "showTips": False,
+                                                "displayModeBar": True,
+                                                "watermark": False,
+                                                "responsive": True,
+                                                "autosizable": True,
+                                                "toImageButtonOptions": {
+                                                    "format": "svg",
+                                                    "filename": "root_length_plot",
+                                                    "scale": 2,
+                                                },
+                                                "modeBarButtonsToAdd": ["downloadCsv"],
+                                            },
+                                        ),
+                                    ),
+                                ),
+                                # Growth-Lines hover images sit beside the chart.
+                                html.Div(
+                                    id="image-container",
+                                    className="viz-image-panel",
+                                ),
+                            ],
+                        ),
+                    ),
+                    # no-op Output target for the clientside resize callback
+                    dcc.Store(id="viz-resize-dummy"),
+                    dcc.Store(id="cached-data"),
+                    dcc.Store(id="selected-tubes-store", data=[]),
+                    dcc.Store(id="legend-visible-store", data=True),
+                    dcc.Store(id="faceted-tubes-store", data=[]),
+                    dcc.Store(id="faceted-dates-store", data=[]),
+                ],
+            )
         except Exception:
             logger.exception("Failed to build Dash length-visualization layout")
             raise
@@ -493,41 +607,41 @@ class DashApp(DashVisualizations):
                 {"label": f"Tube {int(tube)}", "value": int(tube)}
                 for tube in self.data_processor.get_unique_tubes()
             ]
-            
+
             date_options = [
                 {"label": date.strftime("%Y-%m-%d"), "value": date.isoformat()}
                 for date in sorted(self.data_processor.get_unique_dates())
             ]
-            
+
             visible_style = {"marginBottom": "30px", "padding": "20px", "display": "block"}
             hidden_style = {"marginBottom": "30px", "padding": "20px", "display": "none"}
-            
+
             if view_type == "time":
                 return (
                     visible_style,  # tube-selection-card
                     visible_style,  # viz-options-card
-                    tube_options,   # tube-multiselect options
-                    hidden_style,   # faceted-options-card
-                    [],             # faceted-tube-selector options
-                    [],             # faceted-date-selector options
+                    tube_options,  # tube-multiselect options
+                    hidden_style,  # faceted-options-card
+                    [],  # faceted-tube-selector options
+                    [],  # faceted-date-selector options
                 )
             elif view_type == "faceted":
                 return (
-                    hidden_style,   # tube-selection-card
-                    hidden_style,   # viz-options-card
-                    [],             # tube-multiselect options
+                    hidden_style,  # tube-selection-card
+                    hidden_style,  # viz-options-card
+                    [],  # tube-multiselect options
                     visible_style,  # faceted-options-card
-                    tube_options,   # faceted-tube-selector options
-                    date_options,   # faceted-date-selector options
+                    tube_options,  # faceted-tube-selector options
+                    date_options,  # faceted-date-selector options
                 )
             else:
                 return (
-                    hidden_style,   # tube-selection-card
-                    hidden_style,   # viz-options-card
-                    [],             # tube-multiselect options
-                    hidden_style,   # faceted-options-card
-                    [],             # faceted-tube-selector options
-                    [],             # faceted-date-selector options
+                    hidden_style,  # tube-selection-card
+                    hidden_style,  # viz-options-card
+                    [],  # tube-multiselect options
+                    hidden_style,  # faceted-options-card
+                    [],  # faceted-tube-selector options
+                    [],  # faceted-date-selector options
                 )
 
         # Callback to manage faceted selection and show availability
@@ -550,80 +664,134 @@ class DashApp(DashVisualizations):
                 selected_dates = [pd.Timestamp(d) for d in selected_dates]
             else:
                 selected_dates = []
-            
+
             # Validate tubes
             if not selected_tubes:
                 selected_tubes = []
             else:
                 selected_tubes = sorted(selected_tubes)
-            
+
             tube_count = len(selected_tubes)
             date_count = len(selected_dates)
-            
+
             # Create selection info message
             if tube_count == 0:
-                info_msg = html.Span("No tubes selected. Please select up to 6 tubes.", style={"color": "red"})
+                info_msg = html.Span(
+                    "No tubes selected. Please select up to 6 tubes.", style={"color": "red"}
+                )
             elif tube_count > 6:
                 info_msg = html.Span(
                     f"Too many tubes! {tube_count}/6 selected. Please remove {tube_count - 6} tubes.",
-                    style={"color": "red"}
+                    style={"color": "red"},
                 )
             else:
-                info_msg = html.Div([
-                    html.Span(f"Tubes: {tube_count}/6 selected", style={"color": "green" if tube_count <= 6 else "red"}),
-                    html.Br(),
-                    html.Span(f"Dates: {date_count} selected (all dates if none selected)", style={"color": "blue"}),
-                ])
-            
+                info_msg = html.Div(
+                    [
+                        html.Span(
+                            f"Tubes: {tube_count}/6 selected",
+                            style={"color": "green" if tube_count <= 6 else "red"},
+                        ),
+                        html.Br(),
+                        html.Span(
+                            f"Dates: {date_count} selected (all dates if none selected)",
+                            style={"color": "blue"},
+                        ),
+                    ]
+                )
+
             # Get availability info
             availability = self.get_tube_date_availability()
-            
+
             if selected_tubes and selected_dates:
                 # Show availability matrix for selected tubes and dates
                 availability_display = []
-                availability_display.append(html.Div("Availability Matrix (✓ = has data, ✗ = no data):", 
-                                                    style={"fontWeight": "bold", "marginBottom": "10px"}))
-                
+                availability_display.append(
+                    html.Div(
+                        "Availability Matrix (✓ = has data, ✗ = no data):",
+                        style={"fontWeight": "bold", "marginBottom": "10px"},
+                    )
+                )
+
                 # Create table
                 table_rows = []
                 # Header row
-                header = [html.Th("Tube/Date", style={"padding": "5px", "border": "1px solid #ccc"})]
+                header = [
+                    html.Th("Tube/Date", style={"padding": "5px", "border": "1px solid #ccc"})
+                ]
                 for date in sorted(selected_dates):
-                    header.append(html.Th(date.strftime("%m/%d"), 
-                                        style={"padding": "5px", "border": "1px solid #ccc", "fontSize": "10px"}))
+                    header.append(
+                        html.Th(
+                            date.strftime("%m/%d"),
+                            style={
+                                "padding": "5px",
+                                "border": "1px solid #ccc",
+                                "fontSize": "10px",
+                            },
+                        )
+                    )
                 table_rows.append(html.Tr(header))
-                
+
                 # Data rows
                 for tube in sorted(selected_tubes):
-                    row = [html.Td(f"T{int(tube)}", style={"padding": "5px", "border": "1px solid #ccc", "fontWeight": "bold"})]
+                    row = [
+                        html.Td(
+                            f"T{int(tube)}",
+                            style={
+                                "padding": "5px",
+                                "border": "1px solid #ccc",
+                                "fontWeight": "bold",
+                            },
+                        )
+                    ]
                     for date in sorted(selected_dates):
                         has_data = availability.get((tube, date), False)
                         symbol = "✓" if has_data else "✗"
                         color = "green" if has_data else "red"
-                        row.append(html.Td(symbol, style={"padding": "5px", "border": "1px solid #ccc", 
-                                                         "textAlign": "center", "color": color, "fontWeight": "bold"}))
+                        row.append(
+                            html.Td(
+                                symbol,
+                                style={
+                                    "padding": "5px",
+                                    "border": "1px solid #ccc",
+                                    "textAlign": "center",
+                                    "color": color,
+                                    "fontWeight": "bold",
+                                },
+                            )
+                        )
                     table_rows.append(html.Tr(row))
-                
+
                 availability_display.append(
                     html.Table(table_rows, style={"borderCollapse": "collapse", "width": "100%"})
                 )
             elif selected_tubes:
                 # Show which dates have data for selected tubes
                 availability_display = []
-                availability_display.append(html.Div("Dates with data for selected tubes:", 
-                                                    style={"fontWeight": "bold", "marginBottom": "10px"}))
+                availability_display.append(
+                    html.Div(
+                        "Dates with data for selected tubes:",
+                        style={"fontWeight": "bold", "marginBottom": "10px"},
+                    )
+                )
                 for tube in sorted(selected_tubes):
-                    dates_with_data = [date.strftime("%Y-%m-%d") for tube_id, date in availability.keys() 
-                                     if tube_id == tube and availability[(tube_id, date)]]
+                    dates_with_data = [
+                        date.strftime("%Y-%m-%d")
+                        for tube_id, date in availability.keys()
+                        if tube_id == tube and availability[(tube_id, date)]
+                    ]
                     if dates_with_data:
                         availability_display.append(
-                            html.Div(f"Tube {int(tube)}: {', '.join(dates_with_data)}", 
-                                   style={"fontSize": "11px", "marginBottom": "5px"})
+                            html.Div(
+                                f"Tube {int(tube)}: {', '.join(dates_with_data)}",
+                                style={"fontSize": "11px", "marginBottom": "5px"},
+                            )
                         )
             else:
-                availability_display = html.Div("Select tubes to see availability information.", 
-                                               style={"color": "gray", "fontStyle": "italic"})
-            
+                availability_display = html.Div(
+                    "Select tubes to see availability information.",
+                    style={"color": "gray", "fontStyle": "italic"},
+                )
+
             return selected_tubes, selected_dates, info_msg, availability_display
 
         # Callback to manage tube selection from multiple sources
@@ -654,38 +822,38 @@ class DashApp(DashVisualizations):
         ):
             """Manage tube selection from multiple input methods."""
             ctx = dash.callback_context
-            
+
             if not ctx.triggered:
                 return current_selection or []
-            
+
             trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-            
+
             # Clear all selections
             if trigger_id == "clear-all-btn":
                 return []
-            
+
             # Select all tubes
             if trigger_id == "select-all-btn":
                 all_tubes = [int(tube) for tube in self.data_processor.get_unique_tubes()]
                 return sorted(all_tubes)
-            
+
             # Start with current selection
             selected = set(current_selection or [])
-            
+
             # Add from multiselect dropdown
             if trigger_id == "tube-multiselect" and multiselect_values:
                 selected = set(multiselect_values)
-            
+
             # Add from range input
             if trigger_id == "add-range-btn" and range_from is not None and range_to is not None:
                 if range_from <= range_to:
                     selected.update(range(int(range_from), int(range_to) + 1))
-            
+
             # Add from manual entry
             if trigger_id == "tube-manual-entry" and manual_entry:
                 parsed_tubes = parse_tube_selection(manual_entry)
                 selected.update(parsed_tubes)
-            
+
             return sorted(list(selected))
 
         # Callback to display selected tubes as badges
@@ -700,7 +868,7 @@ class DashApp(DashVisualizations):
                     "No tubes selected",
                     style={"color": "#999", "fontStyle": "italic", "padding": "10px"},
                 )
-            
+
             badges = []
             for tube in selected_tubes[:50]:  # Limit display to first 50
                 badges.append(
@@ -715,7 +883,7 @@ class DashApp(DashVisualizations):
                         },
                     )
                 )
-            
+
             if len(selected_tubes) > 50:
                 badges.append(
                     html.Span(
@@ -727,7 +895,7 @@ class DashApp(DashVisualizations):
                         },
                     )
                 )
-            
+
             return html.Div(badges, style={"display": "flex", "flexWrap": "wrap"})
 
         # Callback to toggle legend visibility
@@ -764,14 +932,14 @@ class DashApp(DashVisualizations):
             ],
         )
         def update_visualization(
-            view_type, 
-            selected_tube, 
-            click_data, 
-            selected_tubes, 
+            view_type,
+            selected_tube,
+            click_data,
+            selected_tubes,
             viz_options,
             legend_visible,
             faceted_tubes,
-            faceted_dates
+            faceted_dates,
         ):
             ctx = dash.callback_context
             # Fill the chart card completely: the card is flex:1 of the 100vh
@@ -787,7 +955,7 @@ class DashApp(DashVisualizations):
             # layout (300px column, internal scroll). Inline width/flex-wrap here
             # would override it and force the old below-chart strip.
             hidden_images_style = {"display": "none"}
-            
+
             if not ctx.triggered:
                 return (
                     self.create_stacked_bar_chart(),
@@ -816,7 +984,7 @@ class DashApp(DashVisualizations):
                         {"label": f"Tube {tube}", "value": tube}
                         for tube in self.data_processor.get_unique_tubes()
                     ]
-                    
+
                     # Lines view: chart pane fills its flex column too (the side
                     # image panel sits beside it via .viz-lines-row).
                     lines_graph_style = default_style.copy()
@@ -865,7 +1033,7 @@ class DashApp(DashVisualizations):
                     viz_options = viz_options or []
                     show_field_avg = "show_field_avg" in viz_options
                     show_field_var = "show_field_var" in viz_options
-                    
+
                     return (
                         self.show_growth_over_time(
                             selected_tubes=selected_tubes,
@@ -913,9 +1081,10 @@ class DashApp(DashVisualizations):
                     # Convert dates to Timestamps if provided
                     selected_dates_ts = None
                     if faceted_dates:
-                        selected_dates_ts = [pd.Timestamp(d) if isinstance(d, str) else d 
-                                           for d in faceted_dates]
-                    
+                        selected_dates_ts = [
+                            pd.Timestamp(d) if isinstance(d, str) else d for d in faceted_dates
+                        ]
+
                     # Create faceted depth profile
                     faceted_style = default_style.copy()
                     faceted_style["height"] = "auto"  # Allow dynamic height based on dates
@@ -923,7 +1092,7 @@ class DashApp(DashVisualizations):
                     faceted_style["overflow"] = "visible"
                     faceted_style["padding"] = "6px"
                     faceted_style["marginBottom"] = "8px"
-                    
+
                     return (
                         self.create_faceted_depth_profile(faceted_tubes, selected_dates_ts),
                         "",
@@ -948,9 +1117,7 @@ class DashApp(DashVisualizations):
                     font=dict(size=16, color="red"),
                     align="center",
                 )
-                error_fig.update_layout(
-                    height=600
-                )
+                error_fig.update_layout(height=600)
                 return (
                     error_fig,
                     "An error occurred while rendering this view.",
@@ -984,7 +1151,7 @@ class DashApp(DashVisualizations):
 
                 # Extract date from customdata (more reliable than parsing HTML)
                 date_str = point.get("customdata")
-                
+
                 # Fallback: try parsing from text if customdata is not available
                 if not date_str:
                     text_lines = point.get("text", "").split("<br>")
@@ -993,11 +1160,11 @@ class DashApp(DashVisualizations):
                             # Extract date and remove HTML tags
                             date_part = line.split("Date:")[-1].strip()
                             if "<span" in date_part and "</span>" in date_part:
-                                start_idx = date_part.find('>') + 1
-                                end_idx = date_part.find('</span>')
+                                start_idx = date_part.find(">") + 1
+                                end_idx = date_part.find("</span>")
                                 date_str = date_part[start_idx:end_idx].strip()
                             else:
-                                date_str = re.sub(r'<[^>]+>', '', date_part).strip()
+                                date_str = re.sub(r"<[^>]+>", "", date_part).strip()
                             break
 
                 if not date_str:

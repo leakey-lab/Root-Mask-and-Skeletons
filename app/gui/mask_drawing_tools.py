@@ -3,10 +3,10 @@ Drawing tools for the mask tracing interface.
 Provides mixin class with drawing, flood fill, and undo/redo functionality.
 """
 
-from PyQt6.QtGui import QPixmap, QPainter, QPen, QBrush, QImage
-from PyQt6.QtCore import Qt, QPoint
-import numpy as np
 import cv2
+import numpy as np
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QBrush, QImage, QPainter, QPen, QPixmap
 
 
 class MaskDrawingMixin:
@@ -28,7 +28,7 @@ class MaskDrawingMixin:
         """
         Draw a point or line segment on the mask.
         Optimized to draw directly on the mask pixmap.
-        
+
         Args:
             pos: QPoint position to draw at
         """
@@ -41,23 +41,21 @@ class MaskDrawingMixin:
 
         # Set composition mode
         if self.eraser_button.isChecked():
-            painter.setCompositionMode(
-                QPainter.CompositionMode.CompositionMode_DestinationOut
-            )
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
         else:
-            painter.setCompositionMode(
-                QPainter.CompositionMode.CompositionMode_SourceOver
-            )
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
 
         # Set up the pen and brush
         pen = QPen(
             self.brush_color,
-            self.brush_size if self.last_point else 1, # Use brush size for line, 1 for ellipse outline (filled)
+            self.brush_size
+            if self.last_point
+            else 1,  # Use brush size for line, 1 for ellipse outline (filled)
             Qt.PenStyle.SolidLine,
             Qt.PenCapStyle.RoundCap,
             Qt.PenJoinStyle.RoundJoin,
         )
-        
+
         # For dots (no last point), we draw a filled ellipse
         # For lines, the Pen width handles the filling
         painter.setPen(pen)
@@ -70,7 +68,7 @@ class MaskDrawingMixin:
         else:
             # Drawing a single dot
             diameter = self.brush_size
-            # We need to turn off the pen for the ellipse fill if we want exact size, 
+            # We need to turn off the pen for the ellipse fill if we want exact size,
             # or just use the pen width?
             # Original code used a 1px pen and filled ellipse.
             # Let's match original appearance.
@@ -86,7 +84,7 @@ class MaskDrawingMixin:
     def flood_fill(self, pos):
         """
         Enhanced flood fill that uses the current brush color.
-        
+
         Args:
             pos: QPoint position to start the fill
         """
@@ -114,9 +112,7 @@ class MaskDrawingMixin:
         binary_mask = (alpha_channel > 0).astype(np.uint8) * 255
 
         # Find contours in the binary mask
-        contours, _ = cv2.findContours(
-            binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
-        )
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
         # Seed point for flood fill
         seed_x, seed_y = pos.x(), pos.y()
@@ -164,9 +160,7 @@ class MaskDrawingMixin:
             arr[local_mask == 255, 3] = 255  # Alpha
 
         # Convert the numpy array back to QImage
-        result_image = QImage(
-            arr.data, width, height, width * 4, QImage.Format.Format_RGBA8888
-        )
+        result_image = QImage(arr.data, width, height, width * 4, QImage.Format.Format_RGBA8888)
 
         # Update the mask pixmap. The undo snapshot is taken by the caller
         # (mask_graphics_view.mousePressEvent) before dispatching to flood_fill,
@@ -203,4 +197,3 @@ class MaskDrawingMixin:
             # Restore next state from redo stack
             self.mask_pixmap = self.redo_stack.pop()
             self.update_display()
-

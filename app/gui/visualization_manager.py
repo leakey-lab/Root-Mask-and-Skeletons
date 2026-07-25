@@ -5,11 +5,13 @@ Handles root length and root area visualization toggling and cleanup.
 
 import logging
 import os
-from PyQt6.QtWidgets import QApplication, QMessageBox
+
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import QApplication, QMessageBox
+
 from app.config import ROOT_AREAS_CSV, ROOT_LENGTHS_CSV
-from app.visualization.root_length_visulization import RootLengthVisualization
 from app.visualization.root_area_visualization import RootAreaVisualization
+from app.visualization.root_length_visulization import RootLengthVisualization
 
 logger = logging.getLogger(__name__)
 
@@ -131,32 +133,29 @@ def toggle_root_length_visualization(main_window):
             main_window.root_length_viz,
             main_window.right_panel.currentWidget().__class__.__name__,
         )
-        # If visualization exists and is currently shown
-        if (
-            main_window.root_length_viz is not None
-            and main_window.right_panel.currentWidget() == main_window.root_length_viz
-        ):
+        # Branch on existence alone, not on which panel is current. The viz may
+        # be alive but hidden (panel switched to mask-tracing/skeleton/display);
+        # gating on currentWidget routed those Close clicks into show(), whose
+        # "already exists" branch closes then reopens after 500ms -> flicker.
+        if main_window.root_length_viz is not None:
             close_root_length_visualization(main_window)
         else:
-            # Always create a new visualization instance
             show_root_length_visualization(main_window)
     except Exception as e:
         # Top-level UI guard: log with traceback, then surface to the user.
         logger.exception("Error toggling root length visualization")
-        QMessageBox.critical(
-            main_window, "Error", f"Error toggling visualization: {str(e)}"
-        )
+        QMessageBox.critical(main_window, "Error", f"Error toggling visualization: {str(e)}")
 
 
 def show_root_length_visualization(main_window):
     """Show the root length visualization with proper loading state management."""
-    logger.info("DBG show_root_length_viz: entered, topLevelItemCount=%d",
-                main_window.file_list.topLevelItemCount())
+    logger.info(
+        "DBG show_root_length_viz: entered, topLevelItemCount=%d",
+        main_window.file_list.topLevelItemCount(),
+    )
 
     if main_window.file_list.topLevelItemCount() == 0:
-        QMessageBox.warning(
-            main_window, "Warning", "No images loaded. Please load images first."
-        )
+        QMessageBox.warning(main_window, "Warning", "No images loaded. Please load images first.")
         return
 
     # Guard: don't open the visualization while a calculation that produces
@@ -167,11 +166,11 @@ def show_root_length_visualization(main_window):
     sh = getattr(main_window, "skeleton_handler", None)
     if sh is not None:
         busy = (
-            (getattr(sh, "calculator_thread", None) is not None
-             and sh.calculator_thread.isRunning())
-            or (getattr(sh, "skeleton_handler", None) is not None
-                and getattr(sh.skeleton_handler, "_thread", None) is not None
-                and sh.skeleton_handler._thread.isRunning())
+            getattr(sh, "calculator_thread", None) is not None and sh.calculator_thread.isRunning()
+        ) or (
+            getattr(sh, "skeleton_handler", None) is not None
+            and getattr(sh.skeleton_handler, "_thread", None) is not None
+            and sh.skeleton_handler._thread.isRunning()
         )
         if busy:
             QMessageBox.information(
@@ -218,7 +217,6 @@ def show_root_length_visualization(main_window):
         first_image_path = main_window.image_manager.get_image_path(first_image_name)
 
         if first_image_path is None:
-
             raise ValueError("Failed to get image path from image manager")
         # Get the directory containing the first image
         start_dir = os.path.dirname(first_image_path)
@@ -228,7 +226,7 @@ def show_root_length_visualization(main_window):
             base_folder = main_window.image_manager.original_folder
         else:
             base_folder = start_dir
-        
+
         # Search for CSV in multiple locations (prioritize skeletons folder)
         potential_csv_paths = [
             os.path.join(base_folder, "skeletons", ROOT_LENGTHS_CSV),  # New format
@@ -239,9 +237,12 @@ def show_root_length_visualization(main_window):
         base_path = find_test_latest_dir(start_dir)
         if base_path:
             potential_csv_paths.append(os.path.join(base_path, ROOT_LENGTHS_CSV))
-        
-        logger.info("DBG show_root_length_viz: base_folder=%s, searching CSV paths: %s",
-                    base_folder, potential_csv_paths)
+
+        logger.info(
+            "DBG show_root_length_viz: base_folder=%s, searching CSV paths: %s",
+            base_folder,
+            potential_csv_paths,
+        )
 
         # Try each path until we find the CSV
         csv_path = None
@@ -266,9 +267,10 @@ def show_root_length_visualization(main_window):
             )
             return
 
-
         def create_new_visualization():
-            logger.info("DBG show_root_length_viz: creating RootLengthVisualization with csv=%s", csv_path)
+            logger.info(
+                "DBG show_root_length_viz: creating RootLengthVisualization with csv=%s", csv_path
+            )
             main_window.root_length_viz = RootLengthVisualization(
                 csv_path, main_window.image_manager
             )
@@ -279,8 +281,10 @@ def show_root_length_visualization(main_window):
             # Add to right panel and show
             main_window.right_panel.addWidget(main_window.root_length_viz)
             main_window.right_panel.setCurrentWidget(main_window.root_length_viz)
-            logger.info("DBG show_root_length_viz: widget added, currentWidget=%s",
-                        main_window.right_panel.currentWidget().__class__.__name__)
+            logger.info(
+                "DBG show_root_length_viz: widget added, currentWidget=%s",
+                main_window.right_panel.currentWidget().__class__.__name__,
+            )
 
             # Update button text
             main_window.visualize_root_length_button.setText("Close Visualization")
@@ -299,9 +303,7 @@ def show_root_length_visualization(main_window):
 
     except Exception as e:
         logger.exception("Failed to create root length visualization")
-        QMessageBox.critical(
-            main_window, "Error", f"Failed to create visualization: {str(e)}"
-        )
+        QMessageBox.critical(main_window, "Error", f"Failed to create visualization: {str(e)}")
         main_window.visualize_root_length_button.setText("📊 Visualize Root Length")
 
 
@@ -312,7 +314,6 @@ def close_root_length_visualization(main_window):
         return
 
     try:
-
         # Update UI state first
         main_window.visualize_root_length_button.setText("📊 Visualize Root Length")
         main_window.switch_right_panel("display")
@@ -361,32 +362,29 @@ def toggle_root_area_visualization(main_window):
             main_window.root_area_viz,
             main_window.right_panel.currentWidget().__class__.__name__,
         )
-        # If visualization exists and is currently shown
-        if (
-            main_window.root_area_viz is not None
-            and main_window.right_panel.currentWidget() == main_window.root_area_viz
-        ):
+        # Branch on existence alone, not on which panel is current. See the
+        # matching note in toggle_root_length_visualization: gating on
+        # currentWidget made hidden-but-alive viz Close clicks fall into show(),
+        # which closes then reopens after 500ms -> flicker.
+        if main_window.root_area_viz is not None:
             close_root_area_visualization(main_window)
         else:
-            # Always create a new visualization instance
             show_root_area_visualization(main_window)
     except Exception as e:
         # Top-level UI guard: log with traceback, then surface to the user.
         logger.exception("Error toggling root area visualization")
-        QMessageBox.critical(
-            main_window, "Error", f"Error toggling visualization: {str(e)}"
-        )
+        QMessageBox.critical(main_window, "Error", f"Error toggling visualization: {str(e)}")
 
 
 def show_root_area_visualization(main_window):
     """Show the root area visualization with proper loading state management."""
-    logger.info("DBG show_root_area_viz: entered, topLevelItemCount=%d",
-                main_window.file_list.topLevelItemCount())
+    logger.info(
+        "DBG show_root_area_viz: entered, topLevelItemCount=%d",
+        main_window.file_list.topLevelItemCount(),
+    )
 
     if main_window.file_list.topLevelItemCount() == 0:
-        QMessageBox.warning(
-            main_window, "Warning", "No images loaded. Please load images first."
-        )
+        QMessageBox.warning(main_window, "Warning", "No images loaded. Please load images first.")
         return
 
     # Guard: don't open the visualization while a calculation that produces
@@ -397,11 +395,12 @@ def show_root_area_visualization(main_window):
     sh = getattr(main_window, "skeleton_handler", None)
     if sh is not None:
         busy = (
-            (getattr(sh, "area_calculator_thread", None) is not None
-             and sh.area_calculator_thread.isRunning())
-            or (getattr(sh, "skeleton_handler", None) is not None
-                and getattr(sh.skeleton_handler, "_thread", None) is not None
-                and sh.skeleton_handler._thread.isRunning())
+            getattr(sh, "area_calculator_thread", None) is not None
+            and sh.area_calculator_thread.isRunning()
+        ) or (
+            getattr(sh, "skeleton_handler", None) is not None
+            and getattr(sh.skeleton_handler, "_thread", None) is not None
+            and sh.skeleton_handler._thread.isRunning()
         )
         if busy:
             QMessageBox.information(
@@ -487,7 +486,9 @@ def show_root_area_visualization(main_window):
             return
 
         csv_path = os.path.join(masks_dir, ROOT_AREAS_CSV)
-        logger.info("DBG show_root_area_viz: csv_path=%s, exists=%s", csv_path, os.path.exists(csv_path))
+        logger.info(
+            "DBG show_root_area_viz: csv_path=%s, exists=%s", csv_path, os.path.exists(csv_path)
+        )
 
         if not os.path.exists(csv_path):
             QMessageBox.information(
@@ -500,7 +501,9 @@ def show_root_area_visualization(main_window):
             return
 
         def create_new_visualization():
-            logger.info("DBG show_root_area_viz: creating RootAreaVisualization with csv=%s", csv_path)
+            logger.info(
+                "DBG show_root_area_viz: creating RootAreaVisualization with csv=%s", csv_path
+            )
             main_window.root_area_viz = RootAreaVisualization(csv_path)
             main_window.root_area_viz.server_closed.connect(
                 main_window.on_area_visualization_server_closed
@@ -509,8 +512,10 @@ def show_root_area_visualization(main_window):
             # Add to right panel and show
             main_window.right_panel.addWidget(main_window.root_area_viz)
             main_window.right_panel.setCurrentWidget(main_window.root_area_viz)
-            logger.info("DBG show_root_area_viz: widget added, currentWidget=%s",
-                        main_window.right_panel.currentWidget().__class__.__name__)
+            logger.info(
+                "DBG show_root_area_viz: widget added, currentWidget=%s",
+                main_window.right_panel.currentWidget().__class__.__name__,
+            )
 
             # Update button text
             main_window.visualize_root_area_button.setText("Close Area Visualization")
@@ -529,9 +534,7 @@ def show_root_area_visualization(main_window):
 
     except Exception as e:
         logger.exception("Failed to create root area visualization")
-        QMessageBox.critical(
-            main_window, "Error", f"Failed to create visualization: {str(e)}"
-        )
+        QMessageBox.critical(main_window, "Error", f"Failed to create visualization: {str(e)}")
         main_window.visualize_root_area_button.setText("📈 Visualize Root Area")
 
 
@@ -542,7 +545,6 @@ def close_root_area_visualization(main_window):
         return
 
     try:
-
         # Update UI state first
         main_window.visualize_root_area_button.setText("📈 Visualize Root Area")
         main_window.switch_right_panel("display")
@@ -580,4 +582,3 @@ def close_root_area_visualization(main_window):
         main_window.root_area_viz = None
         main_window.switch_right_panel("display")
         QMessageBox.warning(main_window, "Warning", f"Error during cleanup: {str(e)}")
-

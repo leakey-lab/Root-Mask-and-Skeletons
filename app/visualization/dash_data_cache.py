@@ -9,7 +9,7 @@ create a new DataCache) so memoized interval data is not stale.
 
 import copy
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import pandas as pd
 
@@ -27,15 +27,15 @@ class DataCache:
             data_processor: DataProcessor instance with loaded data
         """
         self.data_processor = data_processor
-        self.tubes: Optional[Tuple[int, ...]] = None
-        self.dates: Optional[Tuple[pd.Timestamp, ...]] = None
+        self.tubes: tuple[int, ...] | None = None
+        self.dates: tuple[pd.Timestamp, ...] | None = None
         self.tube_date_groups = None
         self.position_groups = None
         # Per-instance memo for get_interval_data. Keyed by (tube, date,
         # interval_size). Per-instance (not @lru_cache) so it does not pin the
         # DataCache in a module-level cache (memory leak) nor share / return
         # stale results across instances (F-012).
-        self._interval_cache: Dict[Tuple[int, Any, int], dict] = {}
+        self._interval_cache: dict[tuple[int, Any, int], dict] = {}
         self._cache_data()
 
     def _cache_data(self) -> None:
@@ -46,9 +46,9 @@ class DataCache:
         # Pre-compute grouped data for different views
         df = self.data_processor.df
         self.tube_date_groups = df.groupby(["Tube", "Date"])["Length (mm)"].sum()
-        self.position_groups = df.groupby(["Tube", "Position", "Date"])[
-            "Length (mm)"
-        ].agg(["mean", "min", "max", "std", "count"])
+        self.position_groups = df.groupby(["Tube", "Position", "Date"])["Length (mm)"].agg(
+            ["mean", "min", "max", "std", "count"]
+        )
         # Invalidate any previously memoized interval data.
         self._interval_cache.clear()
 
@@ -60,9 +60,7 @@ class DataCache:
         """
         self._cache_data()
 
-    def get_interval_data(
-        self, tube: int, date: pd.Timestamp, interval_size: int = 10
-    ) -> dict:
+    def get_interval_data(self, tube: int, date: pd.Timestamp, interval_size: int = 10) -> dict:
         """
         Get cached interval data for a specific tube and date with standardized intervals.
         Returns data in fixed intervals (1-10, 11-20, etc.) regardless of starting position.
@@ -86,9 +84,7 @@ class DataCache:
         self._interval_cache[cache_key] = computed
         return copy.deepcopy(computed)
 
-    def _compute_interval_data(
-        self, tube: int, date: pd.Timestamp, interval_size: int
-    ) -> dict:
+    def _compute_interval_data(self, tube: int, date: pd.Timestamp, interval_size: int) -> dict:
         """Compute (uncached) standardized-interval statistics for one tube/date."""
         df = self.data_processor.df
         tube_data = df[(df["Tube"] == tube) & (df["Date"] == date)]
@@ -106,13 +102,10 @@ class DataCache:
         last_interval_end = ((max_pos - 1) // interval_size + 1) * interval_size
 
         interval_stats = {}
-        for interval_end in range(
-            first_interval_end, last_interval_end + 1, interval_size
-        ):
+        for interval_end in range(first_interval_end, last_interval_end + 1, interval_size):
             interval_start = interval_end - interval_size + 1
             interval_data = tube_data[
-                (tube_data["Position"] >= interval_start)
-                & (tube_data["Position"] <= interval_end)
+                (tube_data["Position"] >= interval_start) & (tube_data["Position"] <= interval_end)
             ]
 
             if not interval_data.empty:
