@@ -768,11 +768,11 @@ class DashVisualizations:
                             text="Vertical Depth (cm)"
                             if tube_idx == 1 and date_idx == (num_dates + 1) // 2
                             else "",
-                            font=dict(size=20),
+                            font=dict(size=13),
                         ),
                         showgrid=True,
                         gridcolor="lightgray",
-                        tickfont=dict(size=18),
+                        tickfont=dict(size=11),
                         row=date_idx,
                         col=tube_idx,
                     )
@@ -780,11 +780,19 @@ class DashVisualizations:
             # Update overall layout
             fig.update_layout(
                 showlegend=True,
-                height=max(1100, num_dates * 420),  # Larger height: ~420px per facet row
+                autosize=True,
+                # Smaller per-row height so few-row selections roughly fill the
+                # viewport instead of a giant internal scroll; many rows still
+                # scroll but with readable, non-overlapping text.
+                height=max(560, num_dates * 300),
+                # Wider top margin separates the main title from the "Tube N"
+                # column titles; trim the oversized right margin.
+                margin=dict(l=64, r=60, t=118, b=52),
+                title=dict(y=0.985, yanchor="top", font=dict(size=16)),
                 hovermode="closest",
                 barmode="overlay",  # Allow bars at same y-position to display independently
             )
-            fig.update_annotations(font=dict(size=18))
+            fig.update_annotations(font=dict(size=12))
 
             # Set y-axis range based on actual data
             y_max = global_max_depth + 10 if global_max_depth > 0 else 120
@@ -869,7 +877,7 @@ class DashVisualizations:
                         fig.layout[xaxis_key].side = "bottom"
                         fig.layout[xaxis_key].ticks = "outside" if show_labels else ""
                         fig.layout[xaxis_key].ticklen = 6 if show_labels else 0
-                        fig.layout[xaxis_key].tickfont = dict(size=16)
+                        fig.layout[xaxis_key].tickfont = dict(size=11)
 
                     yaxis_key = f"yaxis{subplot_num}" if subplot_num > 1 else "yaxis"
                     if yaxis_key in fig.layout:

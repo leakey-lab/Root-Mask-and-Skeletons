@@ -173,6 +173,7 @@ class MainWindow(QMainWindow):
         # Left Panel - use extracted module
         left_panel = ui_panels.create_left_panel(self)
         left_panel.setMinimumWidth(170)  # names still legible at the floor
+        self.left_panel = left_panel
         splitter.addWidget(left_panel)
 
         # Right Panel (Stacked Widget for Display Area and Mask Tracing)
@@ -188,7 +189,40 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([240, 960])
         self.body_splitter = splitter
+
+        # When a visualization becomes the current right-panel widget, collapse
+        # the library panel so the dashboard gets full width; restore it (and its
+        # prior width) on the way out. Driven off currentChanged so every path
+        # (ribbon switch, toggle, close) is covered.
+        self._pre_viz_splitter_sizes = None
+        self.right_panel.currentChanged.connect(self._sync_library_for_panel)
         return body
+
+    def _current_widget_is_viz(self) -> bool:
+        cur = self.right_panel.currentWidget()
+        return cur is not None and cur in (
+            getattr(self, "root_length_viz", None),
+            getattr(self, "root_area_viz", None),
+        )
+
+    def _sync_library_for_panel(self, *_args):
+        """Collapse the library panel while a visualization is shown; restore it
+        (and its previous width) otherwise. Idempotent and safe to call before
+        any viz exists."""
+        left = getattr(self, "left_panel", None)
+        splitter = getattr(self, "body_splitter", None)
+        if left is None or splitter is None:
+            return
+        if self._current_widget_is_viz():
+            if left.isVisible():
+                self._pre_viz_splitter_sizes = splitter.sizes()
+                left.setVisible(False)
+        else:
+            if not left.isVisible():
+                left.setVisible(True)
+                if self._pre_viz_splitter_sizes:
+                    splitter.setSizes(self._pre_viz_splitter_sizes)
+                    self._pre_viz_splitter_sizes = None
 
     def _build_shell(self) -> QWidget:
         """Build the guided shell: one chrome row over the body (stretch) over

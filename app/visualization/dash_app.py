@@ -495,13 +495,9 @@ class DashApp(DashVisualizations):
                             ),
                         ],
                     ),
-                    # ---- metric chips ----
-                    html.Div(
-                        className="viz-metrics",
-                        children=[
-                            html.Div(id="click-data", className="metric"),
-                        ],
-                    ),
+                    # click-data kept as a hidden callback target; the visible
+                    # metric band was an always-empty row and is removed.
+                    html.Div(id="click-data", style={"display": "none"}),
                     # ---- chart card: full-bleed, fills remaining space ----
                     # Lines view renders chart + image panel side-by-side; other
                     # views are full-width chart. Both keep the same component ids.

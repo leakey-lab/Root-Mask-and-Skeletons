@@ -116,13 +116,9 @@ class DashAppArea:
                         ),
                     ],
                 ),
-                # ---- metric chips ----
-                html.Div(
-                    className="viz-metrics",
-                    children=[
-                        html.Div(id="click-data", className="metric"),
-                    ],
-                ),
+                # click-data kept as a hidden callback target; the visible
+                # metric band was an always-empty row and is removed.
+                html.Div(id="click-data", style={"display": "none"}),
                 # ---- chart card: full-bleed, fills remaining space ----
                 html.Div(
                     className="viz-chart-card",
