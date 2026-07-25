@@ -8,12 +8,12 @@ stop, join on close — lives here so neither file duplicates it.
 Public names re-exported from this module are *not* part of the package API;
 all public classes remain in their respective modules.
 """
+
 import logging
 import socket
 import threading
 
 from PyQt6.QtCore import QThread, pyqtSignal
-
 from werkzeug.serving import make_server
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,19 @@ class _DashServerThreadBase(QThread):
 
     def run(self) -> None:
         try:
-            self.server = make_server("127.0.0.1", self.port, self.dash_app.app.server)
+            # threaded=True is load-bearing for clean shutdown, not just perf.
+            # QWebEngineView (Chromium) holds a keep-alive socket to this server.
+            # A single-threaded server blocks inside handle_one_request' rfile
+            # readline waiting for the next request on that persistent connection
+            # (server.timeout only bounds the accept select, not an in-flight
+            # connection). stop() then can't unblock it, thread.wait() times out,
+            # and the parented QThread is torn down while still running
+            # ("QThread: Destroyed while thread 'DashServerThread...' is still
+            # running"). Threaded => each connection runs in its own daemon
+            # thread, so this accept loop keeps polling _stop_event every <=0.5s.
+            self.server = make_server(
+                "127.0.0.1", self.port, self.dash_app.app.server, threaded=True
+            )
             self.server.timeout = 0.5
             self.port_assigned.emit(self.port)
             while not self._stop_event.is_set():

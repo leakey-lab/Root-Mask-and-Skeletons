@@ -3,17 +3,17 @@ Cursor utilities for the mask tracing interface.
 Handles brush cursor creation for drawing operations.
 """
 
-from PyQt6.QtGui import QPixmap, QPainter, QPen, QCursor
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QCursor, QPainter, QPen, QPixmap
 
 
 def create_brush_cursor(size):
     """
     Creates a custom brush cursor based on the brush size.
-    
+
     Args:
         size: Brush diameter in pixels
-        
+
     Returns:
         QCursor: Custom cursor for drawing
     """
@@ -55,9 +55,8 @@ def create_brush_cursor(size):
 def create_panning_cursor():
     """
     Creates a panning cursor (open hand).
-    
+
     Returns:
         QCursor: Open hand cursor for panning
     """
     return QCursor(Qt.CursorShape.OpenHandCursor)
-

@@ -5,7 +5,7 @@ import torchvision.models as models
 
 class DualAttention(nn.Module):
     def __init__(self, in_channels):
-        super(DualAttention, self).__init__()
+        super().__init__()
         self.in_channels = in_channels
 
         # Position attention module
@@ -53,7 +53,7 @@ class DualAttention(nn.Module):
 
 class ResNetSkeleton(nn.Module):
     def __init__(self, num_classes=1, pretrained=False):
-        super(ResNetSkeleton, self).__init__()
+        super().__init__()
 
         resnet = models.resnet18(
             weights=models.ResNet18_Weights.IMAGENET1K_V1 if pretrained else None

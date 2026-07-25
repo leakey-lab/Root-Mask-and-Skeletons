@@ -5,9 +5,10 @@ Handles tree widget population, item finding, and status updates.
 
 import os
 import re
-from PyQt6.QtWidgets import QTreeWidgetItem
-from PyQt6.QtGui import QColor
+
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QTreeWidgetItem
 
 # Global dictionary for fast item lookup
 # Maps image_name -> QTreeWidgetItem
@@ -37,18 +38,18 @@ def find_tree_item_by_image_name(file_list, image_name):
     """
     Find a tree item by its stored image name using cached dictionary lookup.
     Falls back to recursive search if not found in cache.
-    
+
     Args:
         file_list: QTreeWidget to search
         image_name: Image name to find
-        
+
     Returns:
         QTreeWidgetItem or None
     """
     # Try cache first (O(1) lookup)
     if image_name in _item_cache:
         return _item_cache[image_name]
-    
+
     # Fallback to recursive search if not in cache
     def search_item(item):
         # Check if this item stores the image name
@@ -77,14 +78,14 @@ def populate_file_list(main_window):
     """
     Populate the file tree with hierarchical structure.
     Optimized with caching and batched updates.
-    
+
     Args:
         main_window: MainWindow instance with file_list and image_manager
     """
     # Clear cache when repopulating
     global _item_cache
     _item_cache.clear()
-    
+
     # Disable updates during population for better performance
     main_window.file_list.setUpdatesEnabled(False)
     try:
@@ -106,9 +107,7 @@ def populate_file_list(main_window):
             field_item.setFont(0, font)
             field_item.setForeground(0, QColor("#50fa7b"))  # Green
 
-            for tube_name in sorted(
-                hierarchy[field_name].keys(), key=natural_sort_key
-            ):
+            for tube_name in sorted(hierarchy[field_name].keys(), key=natural_sort_key):
                 tube_item = QTreeWidgetItem(field_item, [f"🧪 {tube_name}"])
                 tube_item.setData(0, Qt.ItemDataRole.UserRole, None)  # Not an image
                 tube_item.setExpanded(False)
@@ -160,7 +159,7 @@ def populate_file_list(main_window):
 
         # Expand the first level by default for easy access
         main_window.file_list.expandToDepth(0)
-        
+
     finally:
         # Re-enable updates
         main_window.file_list.setUpdatesEnabled(True)
@@ -174,7 +173,7 @@ def update_file_list_mask_status(main_window):
     """
     Update the file tree items to show mask status.
     Optimized with batched updates.
-    
+
     Args:
         main_window: MainWindow instance with file_list and mask checking methods
     """
@@ -182,6 +181,7 @@ def update_file_list_mask_status(main_window):
         # Disable updates during batch color changes for better performance
         main_window.file_list.setUpdatesEnabled(False)
         try:
+
             def update_item_colors(item):
                 stored_name = item.data(0, Qt.ItemDataRole.UserRole)
                 if stored_name:  # Only update leaf items (images)
@@ -206,7 +206,7 @@ def update_file_list_mask_status(main_window):
 def highlight_saved_mask(main_window, image_path):
     """
     Highlight a tree item when its mask is saved.
-    
+
     Args:
         main_window: MainWindow instance
         image_path: Path to the image whose mask was saved
@@ -221,7 +221,7 @@ def highlight_saved_mask(main_window, image_path):
 def unhighlight_cleared_mask(main_window, image_path):
     """
     Remove highlight from a tree item when its mask is cleared.
-    
+
     Args:
         main_window: MainWindow instance
         image_path: Path to the image whose mask was cleared
@@ -230,4 +230,3 @@ def unhighlight_cleared_mask(main_window, image_path):
     item = find_tree_item_by_image_name(main_window.file_list, image_name)
     if item:
         item.setForeground(0, QColor("white"))
-

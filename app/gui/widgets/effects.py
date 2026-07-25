@@ -6,8 +6,9 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QGraphicsDropShadowEffect, QWidget
 
 
-def drop_shadow(widget: QWidget, *, blur: int = 24, dy: int = 8, dx: int = 0,
-                alpha: int = 140) -> QGraphicsDropShadowEffect:
+def drop_shadow(
+    widget: QWidget, *, blur: int = 24, dy: int = 8, dx: int = 0, alpha: int = 140
+) -> QGraphicsDropShadowEffect:
     """Attach a soft drop shadow to ``widget`` and return the effect."""
     eff = QGraphicsDropShadowEffect(widget)
     eff.setBlurRadius(blur)

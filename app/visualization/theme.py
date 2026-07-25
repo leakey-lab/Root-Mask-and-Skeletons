@@ -37,10 +37,10 @@ import plotly.io as pio
 # ---------------------------------------------------------------------------
 
 # Dark surfaces (deep, desaturated)
-BG_0 = "#15161c"   # deepest — app behind / paper
-BG_1 = "#1b1c24"   # chrome
-BG_2 = "#21232e"   # panels / plot area
-BG_3 = "#282a37"   # raised cards / inputs
+BG_0 = "#15161c"  # deepest — app behind / paper
+BG_1 = "#1b1c24"  # chrome
+BG_2 = "#21232e"  # panels / plot area
+BG_3 = "#282a37"  # raised cards / inputs
 
 BORDER = "#2a2c39"
 BORDER_STRONG = "#373a4c"
@@ -50,12 +50,12 @@ TEXT_MUTED = "#9498ad"
 TEXT_FAINT = "#686c82"
 
 # Brand accents
-ACCENT = "#5fd6a0"   # SPROUTS leaf green (primary)
-SEL = "#b794f6"      # purple — reserved for selection / highlight
+ACCENT = "#5fd6a0"  # SPROUTS leaf green (primary)
+SEL = "#b794f6"  # purple — reserved for selection / highlight
 WARN = "#e8b25e"
 INFO = "#79c0e8"
 DANGER = "#ec6a78"
-SKEL = "#f0a868"     # warm — skeleton
+SKEL = "#f0a868"  # warm — skeleton
 
 # Fonts (loaded via assets/, falls back to system)
 FONT_SANS = "IBM Plex Sans, system-ui, -apple-system, Segoe UI, sans-serif"
@@ -99,6 +99,7 @@ _LIGHT = {
 # ---------------------------------------------------------------------------
 # Template construction
 # ---------------------------------------------------------------------------
+
 
 def _axis(grid: str, zero: str, line: str, tick: str) -> dict:
     return dict(
@@ -193,6 +194,7 @@ pio.templates["sprouts_light"] = _build(dark=False)
 # Public helpers
 # ---------------------------------------------------------------------------
 
+
 def use(name: str = "sprouts") -> None:
     """Make a SPROUTS template the global Plotly default.
 
@@ -202,8 +204,14 @@ def use(name: str = "sprouts") -> None:
     pio.templates.default = name
 
 
-def style(fig: go.Figure, *, title: str | None = None, height: int | None = None,
-          template: str = "sprouts", **layout_kwargs) -> go.Figure:
+def style(
+    fig: go.Figure,
+    *,
+    title: str | None = None,
+    height: int | None = None,
+    template: str = "sprouts",
+    **layout_kwargs,
+) -> go.Figure:
     """Apply the theme to a figure in one call.
 
     Use for figures where you want to be explicit instead of relying on the

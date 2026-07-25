@@ -1,16 +1,19 @@
 """Dash application for root area visualization (F-014 hardened)."""
+
 import logging
 import os
 
-from dash import Dash, dcc, html, Input, Output, State
 import dash
-import plotly.graph_objects as go
-import plotly.express as px
 import dash_bootstrap_components as dbc
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from dash import Dash, Input, Output, State, dcc, html
 
 from app.config import DASH_AREA_PORT
+
 from . import theme
+
 theme.use("sprouts")
 
 logger = logging.getLogger(__name__)
@@ -39,9 +42,9 @@ class DashAppArea:
             update_title=None,
             compress=True,
         )
-        self.app.index_string = '''<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>
+        self.app.index_string = """<!DOCTYPE html><html><head>{%metas%}<title>{%title%}</title>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-{%favicon%}{%css%}</head><body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>'''
+{%favicon%}{%css%}</head><body>{%app_entry%}<footer>{%config%}{%scripts%}{%renderer%}</footer></body></html>"""
 
         self._setup_layout()
         self._setup_callbacks()
@@ -224,10 +227,7 @@ class DashAppArea:
 
                 elif view_type == "profile":
                     tubes = self.data_processor.get_unique_tubes()
-                    tube_options = [
-                        {"label": f"Tube {tube}", "value": tube}
-                        for tube in tubes
-                    ]
+                    tube_options = [{"label": f"Tube {tube}", "value": tube} for tube in tubes]
 
                     if trigger_id == "view-selector":
                         if not tubes:
@@ -263,7 +263,7 @@ class DashAppArea:
             except (KeyError, IndexError, ValueError) as exc:
                 logger.error("update_visualization(%s): %s", view_type, exc, exc_info=True)
                 return dash.no_update
-            except Exception as exc:  # noqa: BLE001 — last-resort guard
+            except Exception:  # noqa: BLE001 — last-resort guard
                 logger.exception("update_visualization(%s): unexpected error", view_type)
                 return dash.no_update
 
@@ -303,10 +303,13 @@ class DashAppArea:
                         y=trace_data,
                         text=[f"{v:.2f}" for v in trace_data],
                         textposition="auto",
-                        hovertemplate=theme.hover("%{x}", [
-                            ("Date", date.strftime("%Y-%m-%d")),
-                            ("Area", "%{y:.2f} mm²"),
-                        ]),
+                        hovertemplate=theme.hover(
+                            "%{x}",
+                            [
+                                ("Date", date.strftime("%Y-%m-%d")),
+                                ("Area", "%{y:.2f} mm²"),
+                            ],
+                        ),
                     )
                 )
 
@@ -326,7 +329,7 @@ class DashAppArea:
         except (KeyError, ValueError) as exc:
             logger.error("create_stacked_bar_chart: %s", exc, exc_info=True)
             return go.Figure()
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("create_stacked_bar_chart: unexpected error")
             return go.Figure()
 
@@ -343,9 +346,7 @@ class DashAppArea:
 
             for i, date in enumerate(dates):
                 date_data = tube_data[tube_data["Date"] == date]
-                position_data = (
-                    date_data.groupby("Position")["Area (mm²)"].mean().reset_index()
-                )
+                position_data = date_data.groupby("Position")["Area (mm²)"].mean().reset_index()
 
                 if not position_data.empty:
                     fig.add_trace(
@@ -356,10 +357,13 @@ class DashAppArea:
                             marker_color=colors[i % len(colors)],
                             text=position_data["Area (mm²)"].round(2),
                             textposition="auto",
-                            hovertemplate=theme.hover("Position: %{x}", [
-                                ("Area", "%{y:.2f} mm²"),
-                                ("Date", date.strftime("%Y-%m-%d")),
-                            ]),
+                            hovertemplate=theme.hover(
+                                "Position: %{x}",
+                                [
+                                    ("Area", "%{y:.2f} mm²"),
+                                    ("Date", date.strftime("%Y-%m-%d")),
+                                ],
+                            ),
                         )
                     )
 
@@ -372,7 +376,7 @@ class DashAppArea:
             )
         except (KeyError, ValueError) as exc:
             logger.error("show_area_profile(tube=%s): %s", selected_tube, exc, exc_info=True)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("show_area_profile(tube=%s): unexpected error", selected_tube)
 
         return fig
@@ -391,10 +395,13 @@ class DashAppArea:
                         y=grouped["Area (mm²)"],
                         mode="lines+markers",
                         name=f"Tube {int(tube)}",
-                        hovertemplate=theme.hover("Tube %{fullData.name}", [
-                            ("Date", "%{x|%Y-%m-%d}"),
-                            ("Total Area", "%{y:.2f} mm²"),
-                        ]),
+                        hovertemplate=theme.hover(
+                            "Tube %{fullData.name}",
+                            [
+                                ("Date", "%{x|%Y-%m-%d}"),
+                                ("Total Area", "%{y:.2f} mm²"),
+                            ],
+                        ),
                     )
                 )
 
@@ -407,7 +414,7 @@ class DashAppArea:
         except (KeyError, ValueError) as exc:
             logger.error("show_growth_over_time: %s", exc, exc_info=True)
             return go.Figure()
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("show_growth_over_time: unexpected error")
             return go.Figure()
 
@@ -417,5 +424,5 @@ class DashAppArea:
             self.app.run(debug=False, port=DASH_AREA_PORT, host="127.0.0.1", threaded=True)
         except OSError as exc:
             logger.error("run_server: port %d unavailable: %s", DASH_AREA_PORT, exc)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("run_server: unexpected error")

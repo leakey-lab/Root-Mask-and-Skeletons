@@ -4,6 +4,7 @@ Call setup_logging() once at application startup (before any other app imports).
 Log file: ~/.root_mask_logs/app.log — rotates at 5 MB, keeps 3 backups.
 Set DEBUG=1 env var to enable debug-level output.
 """
+
 import logging
 import logging.handlers
 import os

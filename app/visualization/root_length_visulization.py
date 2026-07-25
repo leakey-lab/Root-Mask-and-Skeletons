@@ -1,19 +1,21 @@
 """Root-length Dash visualization window (note: filename spelling preserved for
 import compatibility — other modules import from this exact module name)."""
+
 import logging
 import os
+import socket
 from datetime import datetime
 
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLabel, QMessageBox
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtCore import QUrl, QThread, pyqtSignal, Qt, QTimer
-import socket
 import requests
+from PyQt6.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+from PyQt6.QtWidgets import QLabel, QMainWindow, QMessageBox, QVBoxLayout, QWidget
 
-from .dash_app import DashApp
-from ._viz_server import _DashServerThreadBase, join_qthread
-from app.data_processing.data_processor import DataProcessor
 from app.config import DASH_LENGTH_PORT
+from app.data_processing.data_processor import DataProcessor
+
+from ._viz_server import _DashServerThreadBase, join_qthread
+from .dash_app import DashApp
 
 logger = logging.getLogger(__name__)
 
@@ -106,20 +108,26 @@ class RootLengthVisualization(QMainWindow):
                 return False
 
     def _start_visualization(self) -> None:
-        logger.info("DBG RootLengthViz._start_visualization: port=%d, attempt=%d",
-                    self.port, self.port_check_attempts)
+        logger.info(
+            "DBG RootLengthViz._start_visualization: port=%d, attempt=%d",
+            self.port,
+            self.port_check_attempts,
+        )
         if not self._is_port_available(self.port):
             self.port_check_attempts += 1
             logger.info(
                 "DBG RootLengthViz: port %d busy, retry %d/%d",
-                self.port, self.port_check_attempts, self.max_port_check_attempts,
+                self.port,
+                self.port_check_attempts,
+                self.max_port_check_attempts,
             )
             if self.port_check_attempts < self.max_port_check_attempts:
                 QTimer.singleShot(500, self._start_visualization)
                 return
             logger.error(
                 "Port %d still busy after %d attempts, giving up",
-                self.port, self.max_port_check_attempts,
+                self.port,
+                self.max_port_check_attempts,
             )
             error_msg = f"Error: Port {self.port} is in use.\nPlease try again later."
             self.loading_label.setText(error_msg)
@@ -129,7 +137,9 @@ class RootLengthVisualization(QMainWindow):
             self.loading_label.setText("Loading data...\nThis may take a moment...")
 
             self.init_worker = VisualizationInitWorker(
-                self.csv_path, self.save_directory, self.image_manager,
+                self.csv_path,
+                self.save_directory,
+                self.image_manager,
             )
             self.init_worker.setObjectName("VisualizationInitWorker")
             self.init_worker.setParent(self)
@@ -144,8 +154,9 @@ class RootLengthVisualization(QMainWindow):
 
     def _on_init_finished(self, processor, dash_app) -> None:
         """Called when worker thread finishes initialization."""
-        logger.info("DBG RootLengthViz._on_init_finished: processor=%s, dash_app=%s",
-                    processor, dash_app)
+        logger.info(
+            "DBG RootLengthViz._on_init_finished: processor=%s, dash_app=%s", processor, dash_app
+        )
         try:
             # Worker is done; release it now so it is not torn down with the widget.
             self._join_init_worker()
@@ -185,9 +196,7 @@ class RootLengthVisualization(QMainWindow):
     def _handle_initialization_error(self, error_msg: str) -> None:
         logger.error("Initialization error: %s", error_msg)
         self.loading_label.setText(f"Initialization Error:\n{error_msg}")
-        QMessageBox.critical(
-            self, "Error", f"Failed to initialize visualization: {error_msg}"
-        )
+        QMessageBox.critical(self, "Error", f"Failed to initialize visualization: {error_msg}")
         self.cleanup_server()
 
     def _check_server(self) -> None:
@@ -206,8 +215,11 @@ class RootLengthVisualization(QMainWindow):
 
     def _show_visualization(self) -> None:
         """Load the Dash URL into the web view — idempotent (F-020)."""
-        logger.info("DBG RootLengthViz._show_visualization: _visualization_shown=%s, web_view=%s",
-                    self._visualization_shown, self.web_view)
+        logger.info(
+            "DBG RootLengthViz._show_visualization: _visualization_shown=%s, web_view=%s",
+            self._visualization_shown,
+            self.web_view,
+        )
         if self._visualization_shown:
             logger.info("DBG RootLengthViz._show_visualization: already shown, skipping")
             return
@@ -281,7 +293,7 @@ class RootLengthVisualization(QMainWindow):
     def closeEvent(self, event) -> None:
         try:
             self.cleanup_server()
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("closeEvent cleanup failed")
         event.accept()
 
@@ -308,6 +320,6 @@ class RootLengthVisualization(QMainWindow):
         except OSError as exc:
             logger.error("handle_download OSError: %s", exc)
             QMessageBox.warning(self, "Download Error", "Failed to save file.")
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             logger.exception("handle_download unexpected error")
             QMessageBox.warning(self, "Download Error", "Failed to save file.")

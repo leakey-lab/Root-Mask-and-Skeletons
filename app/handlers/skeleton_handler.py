@@ -3,9 +3,10 @@ import os
 
 from PyQt6.QtWidgets import QMessageBox
 
-from .generate_skeleton_handler import GenerateSkeletonHandler
 from app.inference.root_area_inference_handler import RootAreaCalculatorThread
 from app.inference.root_length_inference_handler import RootLengthCalculatorThread
+
+from .generate_skeleton_handler import GenerateSkeletonHandler
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,7 @@ class SkeletonHandler:
         """Calculate root length for all skeleton images in the output directory."""
         # Guard against re-entry: a second click would orphan the running QThread
         # (the F-024 strong-ref only keeps ONE alive, it does not prevent overlap).
-        if (
-            self.calculator_thread is not None
-            and self.calculator_thread.isRunning()
-        ):
+        if self.calculator_thread is not None and self.calculator_thread.isRunning():
             QMessageBox.information(
                 self.main_window,
                 "In Progress",
@@ -57,8 +55,12 @@ class SkeletonHandler:
         # Find skeletons output directory
         potential_paths = [
             os.path.join(base_folder, "skeletons"),
-            os.path.join(base_folder, "output", "skeletonizer", "test_latest", "images"),  # Legacy path support
-            os.path.join(base_folder, "skeletonizer", "test_latest", "images"),  # Legacy path support
+            os.path.join(
+                base_folder, "output", "skeletonizer", "test_latest", "images"
+            ),  # Legacy path support
+            os.path.join(
+                base_folder, "skeletonizer", "test_latest", "images"
+            ),  # Legacy path support
         ]
 
         output_dir = None
@@ -86,7 +88,7 @@ class SkeletonHandler:
         try:
             for filename in os.listdir(output_dir):
                 if filename.endswith("_fake.png"):
-                    base_name = filename[:-len("_fake.png")]
+                    base_name = filename[: -len("_fake.png")]
                     fake_images[base_name] = os.path.join(output_dir, filename)
         except OSError as exc:
             logger.exception("Cannot list skeleton directory %s", output_dir)
@@ -106,35 +108,37 @@ class SkeletonHandler:
             return
 
         # Start calculation thread - save CSV in the skeletons directory
-        self.calculator_thread = RootLengthCalculatorThread(
-            fake_images, output_dir
-        )
+        self.calculator_thread = RootLengthCalculatorThread(fake_images, output_dir)
         self.calculator_thread.finished.connect(self.on_calculation_finished)
         self.calculator_thread.progress.connect(self.update_progress)
         self.calculator_thread.start()
 
+        tp = getattr(self.main_window, "task_progress", None)
+        if tp is not None:
+            tp.start("Calculating root length")
         self.main_window.status_bar.showMessage("Calculating root lengths...")
 
     def on_calculation_finished(self, csv_path):
         self.calculator_thread = None
-        self.main_window.status_bar.showMessage(
-            "Root length calculation completed.", 5000
-        )
+        tp = getattr(self.main_window, "task_progress", None)
+        if tp is not None:
+            tp.finish("Root length calculation complete")
+        self.main_window.status_bar.showMessage("Root length calculation completed.", 5000)
         QMessageBox.information(
             self.main_window, "Calculation Complete", f"Results saved to {csv_path}"
         )
 
     def update_progress(self, value):
+        tp = getattr(self.main_window, "task_progress", None)
+        if tp is not None:
+            tp.set_progress(value)
         self.main_window.status_bar.showMessage(f"Calculating root lengths... {value}%")
 
     def calculate_root_area(self):
         """Calculate root area for all mask images in the masks directory."""
         # Guard against re-entry: a second click would orphan the running QThread
         # (the F-024 strong-ref only keeps ONE alive, it does not prevent overlap).
-        if (
-            self.area_calculator_thread is not None
-            and self.area_calculator_thread.isRunning()
-        ):
+        if self.area_calculator_thread is not None and self.area_calculator_thread.isRunning():
             QMessageBox.information(
                 self.main_window,
                 "In Progress",
@@ -207,16 +211,23 @@ class SkeletonHandler:
         self.area_calculator_thread.progress.connect(self.update_area_progress)
         self.area_calculator_thread.start()
 
+        tp = getattr(self.main_window, "task_progress", None)
+        if tp is not None:
+            tp.start("Calculating root area")
         self.main_window.status_bar.showMessage("Calculating root areas...")
 
     def on_area_calculation_finished(self, csv_path):
         self.area_calculator_thread = None
-        self.main_window.status_bar.showMessage(
-            "Root area calculation completed.", 5000
-        )
+        tp = getattr(self.main_window, "task_progress", None)
+        if tp is not None:
+            tp.finish("Root area calculation complete")
+        self.main_window.status_bar.showMessage("Root area calculation completed.", 5000)
         QMessageBox.information(
             self.main_window, "Calculation Complete", f"Results saved to {csv_path}"
         )
 
     def update_area_progress(self, value):
+        tp = getattr(self.main_window, "task_progress", None)
+        if tp is not None:
+            tp.set_progress(value)
         self.main_window.status_bar.showMessage(f"Calculating root areas... {value}%")

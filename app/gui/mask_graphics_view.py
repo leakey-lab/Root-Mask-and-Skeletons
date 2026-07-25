@@ -3,13 +3,15 @@ Graphics view for the mask tracing interface.
 Handles zooming, panning, and drawing event routing.
 """
 
-from PyQt6.QtWidgets import QGraphicsView, QGraphicsPixmapItem, QWidget
-from PyQt6.QtGui import QPainter, QWheelEvent, QMouseEvent
-from PyQt6.QtCore import Qt, QPointF, QPoint
 import logging
 import os
 
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent, QPainter, QWheelEvent
+from PyQt6.QtWidgets import QGraphicsPixmapItem, QGraphicsView, QWidget
+
 logger = logging.getLogger(__name__)
+
 
 def _env_bool(name: str, *, default: bool) -> bool:
     v = os.environ.get(name, None)
@@ -19,12 +21,11 @@ def _env_bool(name: str, *, default: bool) -> bool:
 
 
 # Enabled by default; temporarily disabled when showing QtWebEngine visualizations.
-DEFAULT_OPENGL_VIEWPORT_ENABLED = _env_bool(
-    "ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT", default=True
-)
+DEFAULT_OPENGL_VIEWPORT_ENABLED = _env_bool("ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT", default=True)
 
 try:
     from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+
     HAS_OPENGL = True
 except ImportError:
     HAS_OPENGL = False
@@ -34,7 +35,7 @@ class MaskTracingGraphicsView(QGraphicsView):
     """
     Custom QGraphicsView for mask tracing with zoom, pan, and draw modes.
     """
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.mask_tracing_interface = parent
@@ -93,9 +94,7 @@ class MaskTracingGraphicsView(QGraphicsView):
         self.setCacheMode(QGraphicsView.CacheMode.CacheBackground)
 
         # Optimize for interactive use
-        self.setOptimizationFlags(
-            QGraphicsView.OptimizationFlag.DontSavePainterState
-        )
+        self.setOptimizationFlags(QGraphicsView.OptimizationFlag.DontSavePainterState)
 
     def wheelEvent(self, event: QWheelEvent):
         if self.drawing:
@@ -131,9 +130,7 @@ class MaskTracingGraphicsView(QGraphicsView):
                 zoom_percent = int(round(self.zoom_factor * 100))
                 self.mask_tracing_interface.zoom_slider.setValue(zoom_percent)
                 if hasattr(self.mask_tracing_interface, "zoom_label"):
-                    self.mask_tracing_interface.zoom_label.setText(
-                        f"Zoom: {zoom_percent}%"
-                    )
+                    self.mask_tracing_interface.zoom_label.setText(f"Zoom: {zoom_percent}%")
 
             event.accept()
         elif (
@@ -165,9 +162,7 @@ class MaskTracingGraphicsView(QGraphicsView):
                 and self.mask_tracing_interface.mask_pixmap
             ):
                 self.drawing = True
-                self.viewport().setProperty(
-                    "cursor", self.mask_tracing_interface.brush_cursor
-                )
+                self.viewport().setProperty("cursor", self.mask_tracing_interface.brush_cursor)
                 self.mask_tracing_interface.drawing = True
                 self.mask_tracing_interface.save_for_undo()
                 pos = self.map_to_image(event.position())
@@ -231,12 +226,8 @@ class MaskTracingGraphicsView(QGraphicsView):
         image_x = int(scene_pos.x())
         image_y = int(scene_pos.y())
 
-        final_x = max(
-            0, min(image_x, self.mask_tracing_interface.mask_pixmap.width() - 1)
-        )
-        final_y = max(
-            0, min(image_y, self.mask_tracing_interface.mask_pixmap.height() - 1)
-        )
+        final_x = max(0, min(image_x, self.mask_tracing_interface.mask_pixmap.width() - 1))
+        final_y = max(0, min(image_y, self.mask_tracing_interface.mask_pixmap.height() - 1))
 
         return QPoint(final_x, final_y)
 
@@ -251,12 +242,8 @@ class MaskTracingGraphicsView(QGraphicsView):
         if self.scene():
             for item in self.scene().items():
                 if isinstance(item, QGraphicsPixmapItem):
-                    item.setTransformationMode(
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                    item.setCacheMode(
-                        QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache
-                    )
+                    item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+                    item.setCacheMode(QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache)
 
         # Apply the scaling
         self.scale(factor, factor)
@@ -276,4 +263,3 @@ class MaskTracingGraphicsView(QGraphicsView):
 
             # Apply high-quality scaling
             self.scale_with_quality(new_zoom)
-

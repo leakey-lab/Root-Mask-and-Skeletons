@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
 from . import theme
 
 logger = logging.getLogger(__name__)
@@ -139,9 +140,7 @@ class DashVisualizations:
                         custom_data.append(date_str)
                     else:
                         averages.append(float("nan"))
-                        hover_text = (
-                            f"No Data  Interval L{pos - interval_size + 1}-L{pos}"
-                        )
+                        hover_text = f"No Data  Interval L{pos - interval_size + 1}-L{pos}"
                         custom_data.append(date_str)
 
                     hover_info.append(hover_text)
@@ -333,10 +332,13 @@ class DashVisualizations:
                             line=dict(color="rgba(0,0,0,0)"),
                             name="Field Variance (±1 SD)",
                             legendgroup="field_avg",
-                            hovertemplate=theme.hover("Field Variance Range", [
-                                ("Date", "%{x|%b %d, %Y}"),
-                                ("Range", "+-1 Standard Deviation"),
-                            ]),
+                            hovertemplate=theme.hover(
+                                "Field Variance Range",
+                                [
+                                    ("Date", "%{x|%b %d, %Y}"),
+                                    ("Range", "+-1 Standard Deviation"),
+                                ],
+                            ),
                         )
                     )
 
@@ -350,12 +352,15 @@ class DashVisualizations:
                         line=dict(color="black", width=3),
                         marker=dict(size=8, color="black"),
                         legendgroup="field_avg",
-                        hovertemplate=theme.hover("Field Average", [
-                            ("Date", "%{x|%b %d, %Y}"),
-                            ("Avg Length", "%{y:.2f} mm"),
-                            ("Std Dev", "+/-%{customdata[0]:.2f} mm"),
-                            ("Tubes", "%{customdata[1]:.0f}"),
-                        ]),
+                        hovertemplate=theme.hover(
+                            "Field Average",
+                            [
+                                ("Date", "%{x|%b %d, %Y}"),
+                                ("Avg Length", "%{y:.2f} mm"),
+                                ("Std Dev", "+/-%{customdata[0]:.2f} mm"),
+                                ("Tubes", "%{customdata[1]:.0f}"),
+                            ],
+                        ),
                         customdata=field_stats[["std_length", "count"]].values,
                     )
                 )
@@ -383,10 +388,13 @@ class DashVisualizations:
                             name=f"Tube {int(tube)}",
                             line=dict(color=color, width=2),
                             marker=dict(size=6),
-                            hovertemplate=theme.hover(f"Tube {int(tube)}", [
-                                ("Date", "%{x|%b %d, %Y}"),
-                                ("Total Length", "%{y:.2f} mm"),
-                            ]),
+                            hovertemplate=theme.hover(
+                                f"Tube {int(tube)}",
+                                [
+                                    ("Date", "%{x|%b %d, %Y}"),
+                                    ("Total Length", "%{y:.2f} mm"),
+                                ],
+                            ),
                         )
                     )
 
@@ -422,10 +430,13 @@ class DashVisualizations:
                         y=trace_data,
                         text=[f"{v:.2f}" for v in trace_data],
                         textposition="auto",
-                        hovertemplate=theme.hover("%{x}", [
-                            ("Date", date.strftime('%b %d, %Y')),
-                            ("Length", "%{y:.2f} mm"),
-                        ]),
+                        hovertemplate=theme.hover(
+                            "%{x}",
+                            [
+                                ("Date", date.strftime("%b %d, %Y")),
+                                ("Length", "%{y:.2f} mm"),
+                            ],
+                        ),
                     )
                 )
 
@@ -535,7 +546,9 @@ class DashVisualizations:
                 subplot_titles=subplot_titles,
                 row_titles=[date.strftime("%Y-%m-%d") for date in selected_dates],
             )
-            theme.style(fig, title="Faceted Depth Profile - Field Average (Left) vs Individual Tube (Right)")
+            theme.style(
+                fig, title="Faceted Depth Profile - Field Average (Left) vs Individual Tube (Right)"
+            )
 
             # Track legends and max values globally
             field_avg_added_to_legend = False

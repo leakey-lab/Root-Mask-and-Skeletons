@@ -10,12 +10,13 @@ NOT done eagerly at build time — that scaled O(all loaded images) and blocked
 the visualization open for minutes on large datasets (F-013).
 """
 
+import base64
+import io
+import logging
 import os
 import re
-import base64
-import logging
+
 from PIL import Image, UnidentifiedImageError
-import io
 
 logger = logging.getLogger(__name__)
 
@@ -84,9 +85,7 @@ def build_available_images_map(image_manager) -> dict:
             if all([tube_match, pos_match, date_match]):
                 tube = int(tube_match.group(1))
                 position = int(pos_match.group(1))
-                date_str = (
-                    f"{date_match.group(1)}.{date_match.group(2)}.{date_match.group(3)}"
-                )
+                date_str = f"{date_match.group(1)}.{date_match.group(2)}.{date_match.group(3)}"
 
                 key = (tube, position, date_str)
                 available_images[key] = path

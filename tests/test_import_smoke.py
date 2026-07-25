@@ -8,6 +8,7 @@ GUI / visualization wiring. A broken import after an upgrade fails here.
 GUI modules only need a QApplication for *instantiation*, not import, so importing
 is safe in a headless/offscreen environment.
 """
+
 import importlib
 import os
 
@@ -35,6 +36,8 @@ APP_MODULES = [
     "app.gui.image_normalization_interface",
     "app.gui.file_tree_manager",
     "app.gui.ui_panels",
+    "app.gui.task_progress",
+    "app.gui.empty_state",
     "app.gui.display_controller",
     "app.gui.mask_tracing_interface",
     "app.gui.skeleton_correction_interface",

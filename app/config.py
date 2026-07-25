@@ -7,6 +7,7 @@ duplicated across the inference handlers, visualization apps, and GUI
 thresholds). Importing from here keeps the scientific calibration in exactly
 one place — see CALIBRATION below, which the root-length/area metrics depend on.
 """
+
 from __future__ import annotations
 
 import logging
@@ -88,7 +89,7 @@ def _auto_skeleton_batch(default: int = _SKELETON_BATCH_DEFAULT) -> int:
         free, _ = torch.cuda.mem_get_info()  # bytes free on the active device
         est = int((free * 0.70) // _SKELETON_BYTES_PER_SAMPLE)
         result = max(default, (est // 8) * 8)
-        logger.info("Auto skeleton batch: %.1f GB free VRAM → batch=%d", free / 1024 ** 3, result)
+        logger.info("Auto skeleton batch: %.1f GB free VRAM → batch=%d", free / 1024**3, result)
         return result
     except Exception as exc:  # noqa: BLE001 -- batch sizing must never break startup
         logger.warning("CUDA mem query failed, using default batch=%d: %s", default, exc)

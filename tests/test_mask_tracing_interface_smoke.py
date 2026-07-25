@@ -14,7 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from app.gui.mask_tracing_interface import MaskTracingInterface  # noqa: E402
-from app.gui.widgets import ToolRail, FloatingDock, EnhancePopover  # noqa: E402
+from app.gui.widgets import EnhancePopover, FloatingDock, ToolRail  # noqa: E402
 
 
 @pytest.fixture(scope="module")

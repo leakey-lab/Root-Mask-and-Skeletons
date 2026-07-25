@@ -3,46 +3,46 @@ Mask tracing interface for drawing and editing masks.
 Provides tools for brush, eraser, and flood fill operations.
 """
 
-from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QPushButton,
-    QSlider,
-    QLabel,
-    QButtonGroup,
-    QGraphicsScene,
-    QGraphicsPixmapItem,
-)
+import logging
+import os
+from collections import deque
+
+import cv2
+import numpy as np
+from PyQt6.QtCore import QPoint, QRectF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
-    QPixmap,
-    QPainter,
     QColor,
     QImage,
     QKeySequence,
+    QPainter,
+    QPixmap,
     QShortcut,
     QWheelEvent,
 )
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QRectF, QTimer
-from collections import deque
-import logging
-import os
-import numpy as np
-import cv2
+from PyQt6.QtWidgets import (
+    QButtonGroup,
+    QGraphicsPixmapItem,
+    QGraphicsScene,
+    QLabel,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
 logger = logging.getLogger(__name__)
 
-from .mask_graphics_view import MaskTracingGraphicsView
+from app.gui.widgets import (
+    EnhancePopover,
+    FloatingDock,
+    IconButton,
+    ToolRail,
+)
+
+from .image_normalization_interface import ImageNormalization, NormalizationControls
 from .mask_cursor_utils import create_brush_cursor, create_panning_cursor
 from .mask_drawing_tools import MaskDrawingMixin
-from .image_normalization_interface import ImageNormalization, NormalizationControls
-from app.gui.widgets import (
-    ToolRail,
-    FloatingDock,
-    EnhancePopover,
-    IconButton,
-    load_icon,
-    tokens,
-)
+from .mask_graphics_view import MaskTracingGraphicsView
 
 
 class MaskTracingInterface(QWidget, MaskDrawingMixin):
@@ -50,7 +50,7 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
     Main widget for mask tracing with brush, eraser, and flood fill tools.
     Inherits drawing functionality from MaskDrawingMixin.
     """
-    
+
     mask_saved = pyqtSignal(str)
     mask_cleared = pyqtSignal(str)
     b_key_status_changed = pyqtSignal(bool)
@@ -84,9 +84,7 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         self.graphics_view.setTransformationAnchor(
             self.graphics_view.ViewportAnchor.AnchorUnderMouse
         )
-        self.graphics_view.setResizeAnchor(
-            self.graphics_view.ViewportAnchor.AnchorUnderMouse
-        )
+        self.graphics_view.setResizeAnchor(self.graphics_view.ViewportAnchor.AnchorUnderMouse)
 
         self.scene = QGraphicsScene()
         self.graphics_view.setScene(self.scene)
@@ -165,9 +163,7 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
 
         # Image enhancement controls -> top-right popover, toggled from rail.
         self.enhance_popover.set_content(self.norm_controls)
-        self.enhance_button = IconButton(
-            "contrast", "Image enhancement", checkable=False
-        )
+        self.enhance_button = IconButton("contrast", "Image enhancement", checkable=False)
         self.enhance_button.clicked.connect(self.enhance_popover.toggle)
         self.tool_rail.add_separator()
         self.tool_rail.add_widget(self.enhance_button)
@@ -373,9 +369,7 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         extensions = [".png", ".PNG", ".jpg", ".JPG", ".jpeg", ".JPEG"]
 
         for ext in extensions:
-            mask_path = os.path.normpath(
-                os.path.join(self.mask_directory, base_name + ext)
-            )
+            mask_path = os.path.normpath(os.path.join(self.mask_directory, base_name + ext))
             if os.path.exists(mask_path):
                 return mask_path
         return None
@@ -467,12 +461,8 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
             self.mask_item.setZValue(1)
 
         # Configure high quality settings for items
-        self.image_item.setTransformationMode(
-            Qt.TransformationMode.SmoothTransformation
-        )
-        self.image_item.setCacheMode(
-            QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache
-        )
+        self.image_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+        self.image_item.setCacheMode(QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache)
 
         self.mask_item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
         self.mask_item.setCacheMode(QGraphicsPixmapItem.CacheMode.DeviceCoordinateCache)
@@ -513,8 +503,7 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
             save_path = os.path.normpath(
                 os.path.join(
                     self.mask_directory,
-                    os.path.splitext(os.path.basename(self.current_image_path))[0]
-                    + ".png",
+                    os.path.splitext(os.path.basename(self.current_image_path))[0] + ".png",
                 )
             )
 
@@ -599,8 +588,6 @@ class MaskTracingInterface(QWidget, MaskDrawingMixin):
         # Convert to QPixmap and update display
         rgb_img = cv2.cvtColor(enhanced, cv2.COLOR_BGR2RGB)
         height, width, channel = rgb_img.shape
-        q_img = QImage(
-            rgb_img.data, width, height, width * 3, QImage.Format.Format_RGB888
-        )
+        q_img = QImage(rgb_img.data, width, height, width * 3, QImage.Format.Format_RGB888)
         self.image_pixmap = QPixmap.fromImage(q_img)
         self.update_display()

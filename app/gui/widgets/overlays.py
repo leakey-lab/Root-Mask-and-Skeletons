@@ -10,11 +10,20 @@ plus a QGraphicsDropShadowEffect.
 from __future__ import annotations
 
 from PyQt6.QtCore import (
-    QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal,
+    QEasingCurve,
+    QPropertyAnimation,
+    Qt,
+    QTimer,
+    pyqtSignal,
 )
 from PyQt6.QtWidgets import (
-    QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QProgressBar,
-    QVBoxLayout, QWidget,
+    QFrame,
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QVBoxLayout,
+    QWidget,
 )
 
 from . import tokens
@@ -140,8 +149,9 @@ class Toast(QWidget):
 
     closed = pyqtSignal()
 
-    def __init__(self, parent, message: str, kind: str = "success",
-                 timeout: int = 3200, *, margin: int = 16):
+    def __init__(
+        self, parent, message: str, kind: str = "success", timeout: int = 3200, *, margin: int = 16
+    ):
         super().__init__(parent)
         self._margin = margin
         color = _KIND_COLOR.get(kind, tokens.OK)
@@ -230,8 +240,7 @@ class ToastManager:
         self._toasts: list[Toast] = []
 
     def show(self, message: str, kind: str = "success", timeout: int = 3200) -> Toast:
-        toast = Toast(self._host, message, kind=kind, timeout=timeout,
-                      margin=self._margin)
+        toast = Toast(self._host, message, kind=kind, timeout=timeout, margin=self._margin)
         toast.closed.connect(lambda t=toast: self._remove(t))
         self._toasts.append(toast)
         toast.show_toast()

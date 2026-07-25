@@ -26,7 +26,8 @@ class SkeletonGeneratorThread(QThread):
         try:
             logger.info(
                 "SkeletonGeneratorThread starting: input=%s output=%s",
-                self.input_dir, self.output_dir,
+                self.input_dir,
+                self.output_dir,
             )
 
             # Progress callback function
@@ -67,9 +68,7 @@ class GenerateSkeletonHandler:
             else:
                 # Fallback: get directory from first image
                 try:
-                    first_image_path = next(
-                        iter(self.main_window.image_manager.images.values())
-                    )
+                    first_image_path = next(iter(self.main_window.image_manager.images.values()))
                 except StopIteration:
                     QMessageBox.warning(
                         self.main_window,
@@ -80,9 +79,7 @@ class GenerateSkeletonHandler:
                 input_dir = os.path.dirname(first_image_path)
         else:
             # No images loaded, ask user to select directory
-            input_dir = QFileDialog.getExistingDirectory(
-                self.main_window, "Select Input Folder"
-            )
+            input_dir = QFileDialog.getExistingDirectory(self.main_window, "Select Input Folder")
             if not input_dir:
                 return
 
@@ -125,8 +122,6 @@ class GenerateSkeletonHandler:
 
     def on_generation_error(self, error_message):
         self.main_window.loading_progress_bar.hide()
-        self.main_window.status_bar.showMessage(
-            "Error occurred during skeleton generation.", 5000
-        )
+        self.main_window.status_bar.showMessage("Error occurred during skeleton generation.", 5000)
         logger.error("Skeleton generation error: %s", error_message)
         QMessageBox.critical(self.main_window, "Error", error_message)
