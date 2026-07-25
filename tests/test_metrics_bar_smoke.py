@@ -32,7 +32,7 @@ def test_metrics_bar_instantiates(app):
     bar = MetricsBar()
     # Fixed FOV cell is always populated.
     assert bar._status_value.text() == "—"
-    assert bar.height() == 56
+    assert bar.height() == MetricsBar.HEIGHT  # 26
 
 
 def test_set_metrics_with_values(app):

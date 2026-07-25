@@ -3,31 +3,31 @@ Main window for the Root Viewer application.
 Orchestrates the GUI components and handles core functionality.
 """
 
-from PyQt6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QHBoxLayout,
-    QVBoxLayout,
-    QSplitter,
-    QStatusBar,
-    QMessageBox,
-    QStackedWidget,
-    QFileDialog,
-    QApplication,
-)
-from PyQt6.QtGui import QColor, QIcon, QCloseEvent, QShortcut, QKeySequence
-from PyQt6.QtCore import Qt, pyqtSignal
-from .image_manager import ImageManager
-from .display_controller import DisplayController
-from .mask_tracing_interface import MaskTracingInterface
-from .skeleton_correction_interface import SkeletonCorrectionInterface
-from . import ui_panels
-from . import file_tree_manager
-from . import visualization_manager
-from .task_progress import TaskProgressWidget
-from .empty_state import ShortcutsDialog
 import logging
 import os
+
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QCloseEvent, QColor, QIcon, QKeySequence, QShortcut
+from PyQt6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QHBoxLayout,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+    QStackedWidget,
+    QStatusBar,
+    QVBoxLayout,
+    QWidget,
+)
+
+from . import file_tree_manager, ui_panels, visualization_manager
+from .display_controller import DisplayController
+from .empty_state import ShortcutsDialog
+from .image_manager import ImageManager
+from .mask_tracing_interface import MaskTracingInterface
+from .skeleton_correction_interface import SkeletonCorrectionInterface
+from .task_progress import TaskProgressWidget
 
 logger = logging.getLogger(__name__)
 
@@ -77,13 +77,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Root Viewer")
         self.setGeometry(100, 100, 1200, 700)
-        
+
         # Set window icon with multiple sizes for better visibility
-        icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "resources", "app_icon.ico")
+        icon_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "resources", "app_icon.ico"
+        )
         if os.path.exists(icon_path):
             icon = QIcon(icon_path)
             self.setWindowIcon(icon)
-        
+
         # Initialize components.
         #
         # Handlers are imported lazily here rather than at module top to break a
@@ -91,9 +93,9 @@ class MainWindow(QMainWindow):
         # main_window -> mask_handler). By the time __init__ runs, the app.gui
         # package is fully initialized, so these imports resolve cleanly and
         # `import app.handlers.mask_handler` succeeds standalone.
-        from app.handlers.skeleton_handler import SkeletonHandler
-        from app.handlers.mask_handler import MaskHandler
         from app.handlers.mask_generation_handler import MaskGenerationHandler
+        from app.handlers.mask_handler import MaskHandler
+        from app.handlers.skeleton_handler import SkeletonHandler
 
         self.image_manager = ImageManager(self)
         self.display_controller = DisplayController(self)
@@ -150,18 +152,27 @@ class MainWindow(QMainWindow):
         ``right_panel.addWidget`` calls in their fixed index order
         (0=display, 1=mask_tracing, 2=visualization, 3=skeleton_correction).
         """
+        from app.gui.widgets import tokens
+
         body = QWidget()
         main_layout = QHBoxLayout(body)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         main_layout.addWidget(splitter)
 
-        # Set splitter properties. Handle colour comes from the global SPROUTS
-        # QSS (QSplitter::handle -> --border), not an inline neon override.
-        splitter.setHandleWidth(5)
+        # User-resizable library panel. The handle colour lifts to the accent on
+        # hover so the drag target is discoverable; names in the tree middle-
+        # elide to whatever width the user drags to (see create_left_panel).
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(4)
+        splitter.setStyleSheet(
+            f"QSplitter::handle {{ background-color: {tokens.BORDER}; }}"
+            f"QSplitter::handle:hover {{ background-color: {tokens.ACCENT_LINE}; }}"
+        )
 
         # Left Panel - use extracted module
         left_panel = ui_panels.create_left_panel(self)
+        left_panel.setMinimumWidth(170)  # names still legible at the floor
         splitter.addWidget(left_panel)
 
         # Right Panel (Stacked Widget for Display Area and Mask Tracing)
@@ -173,15 +184,18 @@ class MainWindow(QMainWindow):
         self.right_panel.addWidget(self.skeleton_correction_interface)
         splitter.addWidget(self.right_panel)
 
-        splitter.setSizes([400, 800])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([240, 960])
+        self.body_splitter = splitter
         return body
 
     def _build_shell(self) -> QWidget:
-        """Build the guided shell: titlebar / ribbon / action-bar over the body
-        (stretch) over the statusline. Returns the shell container.
+        """Build the guided shell: one chrome row over the body (stretch) over
+        the statusline. Returns the shell container.
 
         Presentation wrapper only — the body (and its four right_panel indices)
-        is unchanged; the chrome bands forward to existing handlers.
+        is unchanged; the chrome row forwards to existing handlers.
         """
         from . import shell_chrome
 
@@ -190,9 +204,7 @@ class MainWindow(QMainWindow):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
 
-        col.addWidget(shell_chrome.build_titlebar(self))
-        col.addWidget(shell_chrome.build_ribbon(self))
-        col.addWidget(shell_chrome.build_action_bar(self))
+        col.addWidget(shell_chrome.build_topbar(self))
         col.addWidget(self._build_body(), 1)
         col.addWidget(shell_chrome.build_statusline(self))
 
@@ -213,17 +225,15 @@ class MainWindow(QMainWindow):
         # Guided app shell: a QStackedWidget that flips between the Welcome
         # screen (index 0) and the working shell/body (index 1). The window
         # starts on Welcome; load_images flips to the shell (T4.6).
-        from app.gui.welcome_screen import WelcomeWidget
         from app.gui.loading_overlay import LoadingOverlay
+        from app.gui.welcome_screen import WelcomeWidget
 
         self.app_stack = QStackedWidget()
-        self.welcome = WelcomeWidget(
-            on_get_started=self.load_images, on_open_recent=self.open_path
-        )
-        self.app_stack.addWidget(self.welcome)          # index 0
+        self.welcome = WelcomeWidget(on_get_started=self.load_images, on_open_recent=self.open_path)
+        self.app_stack.addWidget(self.welcome)  # index 0
 
         shell = self._build_shell()
-        self.app_stack.addWidget(shell)                 # index 1
+        self.app_stack.addWidget(shell)  # index 1
 
         self.setCentralWidget(self.app_stack)
         self.app_stack.setCurrentIndex(0)
@@ -247,6 +257,7 @@ class MainWindow(QMainWindow):
         # Transient success/feedback toasts (bottom-right of the window). Hard
         # errors keep using QMessageBox.critical; this is additive.
         from app.gui.widgets import ToastManager
+
         self.toasts = ToastManager(self)
 
     def notify(self, message: str, kind: str = "success", timeout: int = 3200) -> None:
@@ -299,7 +310,7 @@ class MainWindow(QMainWindow):
             logger.warning("Failed to toggle OpenGL on skeleton correction view: %s", e)
 
     # ==================== File Tree Methods (delegated) ====================
-    
+
     def find_tree_item_by_image_name(self, image_name):
         """Recursively find a tree item by its stored image name"""
         return file_tree_manager.find_tree_item_by_image_name(self.file_list, image_name)
@@ -323,7 +334,7 @@ class MainWindow(QMainWindow):
         return file_tree_manager.natural_sort_key(text)
 
     # ==================== Visualization Methods (delegated) ====================
-    
+
     def toggle_root_length_visualization(self):
         """Toggle between showing and hiding the root length visualization."""
         visualization_manager.toggle_root_length_visualization(self)
@@ -363,7 +374,7 @@ class MainWindow(QMainWindow):
             visualization_manager.close_root_area_visualization(self)
 
     # ==================== Image Loading ====================
-    
+
     def load_images(self):
         """Open the directory dialog, then load the chosen folder."""
         dir_name = QFileDialog.getExistingDirectory(self, "Select Image Directory")
@@ -402,9 +413,7 @@ class MainWindow(QMainWindow):
                 hasattr(self.mask_tracing_interface, "mask_pixmap")
                 and self.mask_tracing_interface.mask_pixmap
             ):
-                self.mask_tracing_interface.mask_pixmap.fill(
-                    Qt.GlobalColor.transparent
-                )
+                self.mask_tracing_interface.mask_pixmap.fill(Qt.GlobalColor.transparent)
 
         # Load images through image manager
         self.image_manager.load_images(dir_name)
@@ -441,6 +450,7 @@ class MainWindow(QMainWindow):
         try:
             import json
             from datetime import datetime
+
             from PyQt6.QtCore import QSettings
 
             settings = QSettings("LeakeyLab", "SPROUTS")
@@ -459,17 +469,14 @@ class MainWindow(QMainWindow):
                 "ts": datetime.now().isoformat(),
             }
             # Dedup by path, most-recent-first, cap 8.
-            entries = [
-                e for e in entries
-                if isinstance(e, dict) and e.get("path") != dir_name
-            ]
+            entries = [e for e in entries if isinstance(e, dict) and e.get("path") != dir_name]
             entries.insert(0, entry)
             settings.setValue("recent_projects", json.dumps(entries[:8]))
         except Exception:
             logger.exception("Failed to record recent project")
 
     # ==================== Tree Item Selection ====================
-    
+
     def mask_exists(self, image_name):
         image_path = self.image_manager.get_image_path(image_name)
         mask_dir = os.path.join(os.path.dirname(image_path), "mask")
@@ -524,7 +531,28 @@ class MainWindow(QMainWindow):
             else:
                 status = "No mask"
 
-        bar.set_metrics(length=None, area=None, status=status)
+        bar.set_metrics(length=None, area=None, status=status, name=stored_name)
+
+    def generate_all(self):
+        """Generate masks, then skeletons, as one user-visible operation.
+
+        Mask generation runs on a QThread, so the skeleton pass is queued on its
+        ``finished`` signal and starts only once masks exist on disk. The
+        connection is one-shot — a later solo mask run must not re-trigger it.
+        """
+        self.mask_generation_handler.generate_masks()
+        thread = getattr(self.mask_generation_handler, "generation_thread", None)
+        if thread is None:
+            return  # guard tripped (no directory / already running)
+
+        def _then_skeleton(*_args):
+            try:
+                thread.finished.disconnect(_then_skeleton)
+            except TypeError:
+                pass
+            self.skeleton_handler.generate_skeleton()
+
+        thread.finished.connect(_then_skeleton)
 
     def on_tree_item_clicked(self, item, column):
         """Handle tree item clicks - expand/collapse folders, load images"""
@@ -565,7 +593,7 @@ class MainWindow(QMainWindow):
         self._refresh_metrics_bar(image_name)
 
     # ==================== Calculation Methods ====================
-    
+
     def calculate_root_length(self):
         self.skeleton_handler.calculate_root_length()
 
@@ -582,9 +610,7 @@ class MainWindow(QMainWindow):
         """
         images_dir = os.path.join(results_dir, "images")
         if not os.path.isdir(images_dir):
-            QMessageBox.critical(
-                self, "Error", f"Images directory not found at: {images_dir}"
-            )
+            QMessageBox.critical(self, "Error", f"Images directory not found at: {images_dir}")
             return
 
         # Update the skeleton paths
@@ -602,7 +628,7 @@ class MainWindow(QMainWindow):
         self._refresh_metrics_bar(None)
 
     # ==================== Mask Tracing ====================
-    
+
     def toggle_mask_tracing(self):
         if self.right_panel.currentIndex() != 1:  # If not in mask tracing view
             self.switch_right_panel("mask_tracing")
@@ -645,9 +671,7 @@ class MainWindow(QMainWindow):
             # Disconnect signals (mirrors the guarded connect above, F-015).
             if self._mask_tracing_signals_connected:
                 self.mask_tracing_interface.mask_saved.disconnect(self.on_mask_saved)
-                self.mask_tracing_interface.mask_cleared.disconnect(
-                    self.on_mask_cleared
-                )
+                self.mask_tracing_interface.mask_cleared.disconnect(self.on_mask_cleared)
                 self.mask_tracing_interface.b_key_status_changed.disconnect(
                     self.on_b_key_status_changed
                 )
@@ -693,9 +717,7 @@ class MainWindow(QMainWindow):
 
         # Only update the visual status if we're in mask tracing view
         if self.right_panel.currentWidget() == self.mask_tracing_interface:
-            image_name = os.path.splitext(
-                os.path.basename(os.path.normpath(image_path))
-            )[0]
+            image_name = os.path.splitext(os.path.basename(os.path.normpath(image_path)))[0]
             item = self.find_tree_item_by_image_name(image_name)
             if item:
                 item.setForeground(0, QColor("green"))
@@ -708,15 +730,13 @@ class MainWindow(QMainWindow):
 
         # Only update the visual status if we're in mask tracing view
         if self.right_panel.currentWidget() == self.mask_tracing_interface:
-            image_name = os.path.splitext(
-                os.path.basename(os.path.normpath(image_path))
-            )[0]
+            image_name = os.path.splitext(os.path.basename(os.path.normpath(image_path)))[0]
             item = self.find_tree_item_by_image_name(image_name)
             if item:
                 item.setForeground(0, QColor("white"))
 
     # ==================== Skeleton Correction (isolated stream) ====================
-    
+
     def toggle_skeleton_correction(self):
         """
         Toggle the Skeleton Correction editor view.
@@ -745,7 +765,7 @@ class MainWindow(QMainWindow):
             self.on_image_selected(current_item)
 
     # ==================== Panel Switching ====================
-    
+
     def switch_right_panel(self, panel):
         if panel == "display":
             self.right_panel.setCurrentIndex(0)

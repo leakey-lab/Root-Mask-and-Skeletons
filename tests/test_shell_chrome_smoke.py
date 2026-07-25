@@ -57,6 +57,7 @@ def test_filter_file_list(app):
     """FIX5: case-insensitive contains filter, empty query shows all; parents of
     matching leaves stay visible."""
     from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
+
     from app.gui.ui_panels import filter_file_list
 
     class _MW:
@@ -126,17 +127,17 @@ def test_main_window_contract(app):
             assert hasattr(mw, attr), f"missing {attr}"
         assert mw.view_mode_combo.count() == 3
         assert mw.right_panel.count() == 4
-        # Track R: ribbon split into 7 explicit stages, in order.
+        # Topbar merge: six-stage pipeline, in order (mask+skeleton generation
+        # is one stage; the two corrections are separate editors).
         assert list(mw.ribbon_buttons.keys()) == [
             "Library",
-            "Generate Mask",
-            "Trace",
-            "Generate Skeleton",
-            "Correct",
+            "Generate",
+            "Correct Mask",
+            "Correct Skeleton",
             "Measure",
             "Visualize",
         ]
-        assert len(mw.ribbon_buttons) == 7
+        assert len(mw.ribbon_buttons) == 6
         assert mw.app_stack.count() >= 2
         # FIX2: the dialog-free loader entry point exists for recent rows.
         assert callable(getattr(mw, "open_path", None))
