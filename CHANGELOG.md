@@ -60,6 +60,13 @@ Seven passes, not yet released:
   a 161-finding audit implemented by per-area packages, then integrated and reviewed.
 
 ### Fixed
+- **Windows bundle: Generate failed in the app built on Python 3.14 (U2, 2026-10-29).**
+  torchvision 0.29 renamed its operator libraries to `_C_stable.pyd` / `image_stable.pyd`,
+  which PyInstaller's hook does not collect, so a frozen `import torchvision` raised
+  "operator torchvision::nms does not exist". The spec now bundles every compiled library
+  of the torchvision package (`scripts/build_support.py`). A GUI smoke test of the bundle
+  (start-up, open, GPU Generate, Measure Length and Area, both dashboards, Correct, close)
+  passed, with masks, skeletons and both CSVs identical to the source app's.
 - **Dashboard blink on Linux X11 (D8, 2026-10-29).** Each dashboard is a native child window
   with an OpenGL surface on X11: the main window is no longer recreated (a blink) at the first
   dashboard when the canvases draw without OpenGL, and OpenGL canvases keep their viewports
@@ -641,6 +648,9 @@ Seven passes, not yet released:
   3-7x faster; first GPU run no longer spends 40-70 s in cuDNN autotuning.
 
 ### Added
+- `scripts/build.ps1 -DistPath / -WorkPath` and, for both build scripts,
+  `SPROUTS_BUILD_DISTPATH` / `SPROUTS_BUILD_WORKPATH`: build outside the checkout
+  (2026-10-29).
 - **Owner-decisions build (2026-10-25).**
   - Key texts show Cmd / Option on macOS (F1 sheet, tooltips, hints); on macOS each stage
     also answers to Cmd+Option+N (Option+N types a character in a text field); the F1 sheet

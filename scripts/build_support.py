@@ -8,6 +8,8 @@ unit tested without running PyInstaller (``tests/test_fair_build.py``):
   root, failing loudly (:class:`BuildConfigError`) when a required one is missing;
 * :func:`app_modules` -- every module of the ``app`` package, so modules that are
   only imported lazily (PEP 562, ``importlib``) are still bundled;
+* :func:`torchvision_op_libraries` -- torchvision's compiled operator libraries, which
+  it loads by path and PyInstaller's hook misses;
 * :func:`windows_version_info` -- the Windows version resource, from ``app.__version__``;
 * :func:`collect_build_info` / :func:`write_build_info` -- ``build_info.json``,
   bundled at the root of the app so a frozen build (no git) can report what it
@@ -21,7 +23,9 @@ Import-light: no Qt or torch import; PyInstaller is imported only by
 from __future__ import annotations
 
 import datetime as dt
+import importlib.machinery
 import importlib.metadata
+import importlib.util
 import json
 import os
 import platform
@@ -42,6 +46,7 @@ __all__ = [
     "app_modules",
     "collect_build_info",
     "resolve_datas",
+    "torchvision_op_libraries",
     "version_tuple",
     "windows_version_info",
     "write_build_info",
@@ -108,6 +113,31 @@ def app_modules(root: Path = ROOT) -> list[str]:
         parts = path.relative_to(root).with_suffix("").parts
         names.append(".".join(parts[:-1] if parts[-1] == "__init__" else parts))
     return names
+
+
+def torchvision_op_libraries(package_dir: str | os.PathLike | None = None) -> list[tuple[str, str]]:
+    """``(source, "torchvision")`` for each compiled library in torchvision's package folder.
+
+    torchvision loads its operator libraries by path (``torch.ops.load_library``), so
+    PyInstaller does not see them. Its hook names ``torchvision._C`` (and ``image``), their
+    names in torchvision 0.22; in 0.29 they are ``_C_stable`` and ``image_stable``. Without
+    them a frozen ``import torchvision`` fails ("operator torchvision::nms does not exist")
+    and Generate cannot run. Every extension file at the top of the package is bundled,
+    whatever its name. ``package_dir`` defaults to the installed torchvision (located, not
+    imported); an empty list when it is not installed.
+    """
+    if package_dir is None:
+        spec = importlib.util.find_spec("torchvision")
+        if spec is None or not spec.submodule_search_locations:
+            return []
+        package_dir = next(iter(spec.submodule_search_locations))
+    folder = Path(package_dir)
+    suffixes = tuple(importlib.machinery.EXTENSION_SUFFIXES)
+    return [
+        (str(path), "torchvision")
+        for path in sorted(folder.iterdir())
+        if path.is_file() and path.name.endswith(suffixes)
+    ]
 
 
 def version_tuple(version: str) -> tuple[int, int, int, int]:

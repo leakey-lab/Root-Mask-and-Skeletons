@@ -518,9 +518,12 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1     # or: scripts\bui
 
 This runs PyInstaller on `scripts/build_executable.spec` and produces
 `dist\SPROUTS\SPROUTS.exe` (zip the whole `dist\SPROUTS` folder to distribute; with CUDA
-PyTorch it is about 6 GB). Run `scripts/fetch_models.py` first. The scripts work from any
-folder, stop if the model weights are missing (pass `-AllowMissingModels` /
+PyTorch it is about 4 GB, a 2.5 GB zip). Run `scripts/fetch_models.py` first. The scripts
+work from any folder, stop if the model weights are missing (pass `-AllowMissingModels` /
 `/allow-missing-models` to build anyway) and exit with an error when the build fails.
+`-Python`, `-DistPath` and `-WorkPath` (or `SPROUTS_BUILD_PYTHON`, `SPROUTS_BUILD_DISTPATH`
+and `SPROUTS_BUILD_WORKPATH`, which `build.bat` reads too) pick the interpreter and the
+output folders. Build a release from a clean checkout of its commit.
 The app records its version and git commit in `_internal\build_info.json`.
 
 The bundle is distributed under the GPL: ship `LICENSE` and `THIRD_PARTY_NOTICES.md` (the
