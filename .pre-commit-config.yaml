@@ -1,3 +1,7 @@
+# Hooks that parse the sources (debug-statements) must run on Python 3.14: older versions
+# cannot parse the PEP 758 `except A, B:` lines ruff format writes (KNOWN_ISSUES U5).
+default_language_version:
+  python: python3.14
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.17.3
