@@ -28,6 +28,7 @@ from app.inference import runtime
 from app.inference.mask_origin import OverwritePolicy
 from app.masks import write_mask_file
 from app.project_layout import ProjectLayout
+from tests.box_titles import record_titles, title_of
 from tests.correct_goldens_support import png_colour_type
 from tests.correct_support import plane, write_image, write_mask
 from tests.generation_support import generation_project
@@ -80,7 +81,7 @@ def capture_prompt(call, *, press: QMessageBox.ButtonRole | None = None):
             QTimer.singleShot(10, answer)
             return
         shown.update(
-            title=box.windowTitle(),
+            title=title_of(box),
             text=box.text(),
             info=box.informativeText(),
             buttons=[b.text() for b in box.buttons()],
@@ -94,7 +95,9 @@ def capture_prompt(call, *, press: QMessageBox.ButtonRole | None = None):
             button.click()
 
     QTimer.singleShot(0, answer)
-    shown["result"] = call()
+    with pytest.MonkeyPatch.context() as patch:
+        record_titles(patch)
+        shown["result"] = call()
     return shown
 
 

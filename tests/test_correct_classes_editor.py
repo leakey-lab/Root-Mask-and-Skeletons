@@ -59,6 +59,7 @@ from app.gui.editor_prompts import CANCEL, DISCARD, SAVE
 from app.gui.export_dataset_dialog import ExportDatasetDialog
 from app.gui.paint_canvas import pixmap_to_argb_array
 from app.project_layout import ProjectLayout
+from tests.box_titles import record_titles, title_of
 from tests.correct_support import (
     NO_MODS,
     H,
@@ -1511,13 +1512,14 @@ def test_the_remove_gt_box_defaults_to_cancel(monkeypatch):
     def exec_(box):
         cancel = box.button(QMessageBox.StandardButton.Cancel)
         assert box.defaultButton() is cancel and box.escapeButton() is cancel
-        seen.append((box.windowTitle(), box.text(), box.informativeText()))
+        seen.append((title_of(box), box.text(), box.informativeText()))
         answer = seen_answers.pop(0)
         if answer is not None:
             next(b for b in box.buttons() if b.text() == answer).click()
         return 0
 
     seen_answers: list[str | None] = [None, "Cancel", "Remove GT"]
+    record_titles(monkeypatch)
     monkeypatch.setattr(QMessageBox, "exec", exec_)
 
     assert ask_remove_gt(None, "a.png", "detail") is False  # closed: Esc

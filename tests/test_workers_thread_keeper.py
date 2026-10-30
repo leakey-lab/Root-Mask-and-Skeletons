@@ -518,7 +518,9 @@ def test_a_dashboard_deleted_while_its_server_runs_never_aborts(tmp_path, varian
         text=True,
         timeout=180,
     )
-    assert result.returncode == 0, (result.returncode, result.stderr[-2000:])
+    # A str message: pytest prints it whole (a tuple's repr was cut to one line on macOS,
+    # CI run 40970595195, hiding why the page never loaded there).
+    assert result.returncode == 0, f"exit {result.returncode}\n{result.stderr[-6000:]}"
     lines = result.stdout.strip().splitlines()
     assert lines[-1] == "server running at the end: False"
     if variant == "cleanup_raise":  # cleanup_server stops the threads even when it raises

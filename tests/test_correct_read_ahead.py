@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from app.gui.correct.read_ahead import AheadImage, ReadAhead, read_image
-from app.io_utils import file_stamp
+from app.io_utils import file_stamp, path_key
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -227,7 +227,7 @@ def test_it_keeps_at_most_max_bytes_but_always_the_newest(tmp_path):
 
     ahead.request(paths[0], lambda: entry(paths[0], 60))
     ahead.request(paths[1], lambda: entry(paths[1], 60))  # 120 > 100: the oldest goes
-    assert ahead.pending() == [os.path.normcase(os.path.abspath(paths[1]))]
+    assert ahead.pending() == [path_key(paths[1])]
     ahead.request(paths[2], lambda: entry(paths[2], 500))  # alone over budget: still kept
 
     assert ahead.take(paths[2]) is not None

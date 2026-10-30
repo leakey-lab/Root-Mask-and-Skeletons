@@ -17,6 +17,7 @@ from app.gui.editor_prompts import (
     ask_unsaved,
     join_nouns,
 )
+from tests.box_titles import record_titles, title_of
 from tests.qt_teardown import flush_deleted
 
 Button = QMessageBox.StandardButton
@@ -38,12 +39,13 @@ class Answer:
     def __init__(self, monkeypatch, answer):
         self.answer = answer
         self.seen: dict = {}
+        record_titles(monkeypatch)
         monkeypatch.setattr(QMessageBox, "exec", lambda box: self._exec(box))
 
     def _exec(self, box):
         self.seen = {
             "icon": box.icon(),
-            "title": box.windowTitle(),
+            "title": title_of(box),
             "text": box.text(),
             "info": box.informativeText(),
             "buttons": {box.standardButton(w): w.text() for w in box.buttons()},

@@ -11,13 +11,12 @@ A decode whose end reports only after its photo was shown and kept changes nothi
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import Future, ThreadPoolExecutor
 
 import numpy as np
 
 from app.gui.display_read_ahead import DisplayReadAhead
-from app.io_utils import file_stamp
+from app.io_utils import file_stamp, path_key
 
 SHAPE = (30, 40, 3)
 ONE = int(np.prod(SHAPE))  # bytes of one decoded photo
@@ -83,7 +82,9 @@ def _photos(tmp_path, n: int) -> list[str]:
 
 
 def _key(path: str) -> str:
-    return os.path.normcase(os.path.abspath(path))
+    """The read-ahead's key of ``path``: ``path_key`` (on macOS NFC and case-folded, which
+    ``normcase`` is not)."""
+    return path_key(path)
 
 
 def _held(ahead: DisplayReadAhead, paths: list[str]) -> int:

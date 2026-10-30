@@ -26,7 +26,7 @@ from app.gui import display_controller as display_module
 from app.gui.canvas_layers.photo import PhotoLayerItem
 from app.gui.display_read_ahead import DisplayReadAhead
 from app.gui.library_index import LibraryIndex, index_names
-from app.io_utils import file_stamp
+from app.io_utils import file_stamp, path_key
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import wait_until as _wait
 from tests.window_support import build_window, open_folder, quiet_window
@@ -177,7 +177,7 @@ def test_kept_images_and_reads_are_bounded(tmp_path):
     assert len(ahead.pending()) == 3
     assert ahead.get(paths[0]) is None  # the oldest went first
     ahead.retain([paths[3]])
-    assert ahead.pending() == [os.path.normcase(os.path.abspath(paths[3]))]
+    assert ahead.pending() == [path_key(paths[3])]
     ahead.clear()
     assert ahead.pending() == []
 
@@ -197,7 +197,7 @@ def test_a_read_that_tips_the_byte_bound_is_still_handed_over(tmp_path):
     image = ahead.get(first)
 
     assert image is not None and int(image[0, 0, 0]) == 10
-    assert ahead.pending() == [os.path.normcase(os.path.abspath(first))]
+    assert ahead.pending() == [path_key(first)]
 
 
 def test_an_unreadable_file_gives_nothing(tmp_path):
