@@ -1242,6 +1242,19 @@ Seven passes, not yet released:
   as pre-commit already ran it.
 
 ### Scientific output changes
+- **macOS and Linux on ARM (arm64): Correct opens and edits a skeleton as on x86
+  (2026-10-30).** OpenCV's arm64 wheels (carotene / KleidiCV HAL) rounded the bilinear
+  upscale of a prediction differently (`thin_raster`: 2-44 skeleton pixels of the three
+  `docs/examples` skeletons and the synthetic golden; L044 opened at 18.353 mm on arm64
+  against 18.343 mm on x86) and halved every neighbour count of the skeleton's degree map
+  (an integer `filter2D` kernel), so tips, Connect, Select / Delete branch and the
+  vectorization were wrong there. The upscale is now OpenCV's own integer bilinear algorithm
+  in numpy (`thinning.resize_linear_u8`, equal to `cv2.resize` on x86, pinned by a digest on
+  every platform) and the kernel is float32. Checked under QEMU aarch64: the patched code
+  gives x86's pixels exactly. A GT skeleton saved on a Mac before this change can differ
+  from one saved on Windows for the same edits. x86 output is unchanged (goldens
+  unchanged); Measure was never affected (same CSV values from the same files on arm64).
+  Cost: opening a 640 x 480 prediction thins in 3.5 ms instead of 1.5 ms.
 - **PyTorch 2.15.0 (cuDNN 9.26) changes no output (2026-10-29).** torch `2.15.0+cu132` /
   torchvision `0.29.2+cu132` (cuDNN 9.26.0, CUDA 13.2) replace `2.14.1+cu132` /
   `0.29.1+cu132` (cuDNN 9.24). On the science harness (40 Generate photos, the 123-image

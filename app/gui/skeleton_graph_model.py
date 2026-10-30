@@ -140,9 +140,13 @@ class _Step:
 # 3x3 kernel that sums all 8 neighbors (center weight = 0) -- used by
 # _compute_degree_map to count the 8-connected neighbor degree in one
 # filter pass instead of eight array-slicing iterations (F-096 / Perf).
+# float32, never an integer type: on arm64 (macOS, Linux aarch64) OpenCV hands an
+# integer kernel over a uint8 image 8 or more pixels wide to its carotene HAL, which
+# returns the sum shifted right by one (every degree halved). A float kernel takes
+# OpenCV's own path there, exact on every CPU (as metrics.py's _NEIGHBOUR_CODE).
 _NEIGHBOR_KERNEL = np.array(
     [[1, 1, 1], [1, 0, 1], [1, 1, 1]],
-    dtype=np.uint8,
+    dtype=np.float32,
 )
 
 

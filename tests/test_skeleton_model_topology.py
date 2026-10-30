@@ -340,6 +340,18 @@ def test_degree_map_counts_every_8_neighbour_including_at_the_borders():
     assert np.array_equal(deg, _degree(field))
 
 
+def test_the_neighbour_kernels_are_float_on_every_platform():
+    """An integer kernel over a uint8 image goes to OpenCV's carotene HAL on arm64 (macOS,
+    Linux aarch64), which halves the sum: the degrees, so the tips, Connect and the
+    vectorization were wrong on a Mac (CI run 40970595195). x86 has no such HAL, so the
+    degree test above passes there with either kernel; this pins the kernel type."""
+    from app.gui.skeleton_graph_model import _NEIGHBOR_KERNEL
+    from app.inference.metrics import _NEIGHBOUR_CODE
+
+    assert _NEIGHBOR_KERNEL.dtype == np.float32
+    assert _NEIGHBOUR_CODE.dtype == np.float32
+
+
 @pytest.mark.parametrize("eps", [0.0, 1.0, 1.5])
 def test_output_identical_to_reference_when_no_walk_returns_to_its_start(eps):
     cases = _loop_free_cases()
