@@ -427,6 +427,13 @@ Seven passes, not yet released:
     ... has been deleted", and the Measure Retry prompt is freed once answered.
 
 ### Performance
+- **Skeleton undo history at large sizes (P3, 2026-10-29).** Skeleton patches (0/255) are
+  stored as packed bits, deflated, as mask patches (0/1) already were, and the all-0 side of a
+  Clear stores nothing. On a dense 6000 x 4000 skeleton a Clear records in 21-22 ms instead of
+  32-37 and undoes in 15-16 instead of 19-25; a replaced skeleton records in 32-34 ms instead
+  of 46-55; 2048 x 1536 edits are 30-40 % faster; the history holds 20 % less. 640 x 480 edits
+  were under 0.5 ms and still are. Undo and redo give every pixel back exactly; saved masks
+  and skeletons are unchanged.
 - **Redundancy and speed pass (2026-10-26).** Outputs are unchanged by all of these.
   - Whole app (the pass's perf harness, `f392a85` against `ea205a9`, three interleaved runs
     each, medians): opening the 46k project 1222 -> 903 ms (GUI thread 359 -> 290 ms);

@@ -9,10 +9,12 @@ one :class:`Patch`: the box that changed, before and after. Undo writes the
 size of the edited boxes, not a full canvas copy per action (a 25-deep history
 of full ARGB snapshots was 300 MiB at 2048x1536).
 
-Large patches (a clear, a big fill) are stored deflated; a 0/1 region (every
-mask edit) is packed to one bit per pixel first, so a whole-plane mask edit at
-2048x1536 deflates and inflates 8x less data (commit about 2 ms per side instead
-of 7.5; undo inflates in about 1.5 ms instead of 4). The stacks
+Large patches (a clear, a big fill) are stored deflated; a region of 0 and one
+other value, 1 (every mask edit) or 255 (every skeleton edit: the skeleton model,
+``app.gui.skeleton_graph_model``, records its actions as these patches too), is
+packed to one bit per pixel first, so a whole-plane edit at 2048x1536 deflates
+and inflates 8x less data (a mask commit about 2 ms per side instead of 7.5;
+undo inflates in about 1.5 ms instead of 4). The stacks
 are bounded by entry count and by a byte budget (see
 :class:`app.editing.history.SnapshotHistory`, which does the bookkeeping).
 When several documents share one undo timeline (the Correct workspace's
@@ -27,6 +29,7 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 
 from app.editing.history import UNDO_BYTES, UNDO_STEPS, SnapshotHistory
@@ -43,9 +46,12 @@ _ENTRY_OVERHEAD = 128  # rough per-patch Python object cost, counted in nbytes
 
 @dataclass(frozen=True)
 class _Bits:
-    """A deflated ``np.packbits`` of a 0/1 uint8 region (one bit per pixel)."""
+    """A uint8 region of 0 and ``one``, as its ``np.packbits`` (one bit per pixel) deflated:
+    ``one`` is 1 (a mask plane) or 255 (a skeleton); 0 means the region is all 0 (a Clear's
+    after) and nothing is stored."""
 
     data: bytes
+    one: int = 1
 
 
 def _deflate(data: bytes) -> bytes:
@@ -54,12 +60,31 @@ def _deflate(data: bytes) -> bytes:
     return packer.compress(data) + packer.flush()
 
 
+def _bit_value(region: np.ndarray) -> int | None:
+    """The value of the set pixels of a 2-D, C-contiguous uint8 ``region`` that holds 0 and
+    at most one other value, 1 or 255 (0: it is all 0); None for any other region, so a
+    packed region always unpacks to exactly what it was."""
+    if region.dtype != np.uint8:
+        return None
+    top = int(region.max(initial=0))
+    if top <= 1:
+        return top
+    # Each set pixel is 1-255, so their sum is 255 x their count only when every one is
+    # 255 (cv2: 0.8 ms at 6000 x 4000, numpy's uint64 sum 8 ms; a double holds it exactly).
+    if top == 255 and cv2.countNonZero(region) * 255 == cv2.sumElems(region)[0]:
+        return 255
+    return None
+
+
 def _pack(region: np.ndarray, compress: bool) -> bytes | _Bits | np.ndarray:
     region = np.ascontiguousarray(region)
     if not compress:
         return region.copy()
-    if region.dtype == np.uint8 and region.max(initial=0) <= 1:
-        return _Bits(_deflate(np.packbits(region).tobytes()))
+    one = _bit_value(region)
+    if one == 0:
+        return _Bits(b"", 0)
+    if one is not None:
+        return _Bits(_deflate(np.packbits(region).tobytes()), one)
     return _deflate(region.tobytes())
 
 
@@ -117,8 +142,12 @@ class Patch:
         if isinstance(data, np.ndarray):
             return data
         if isinstance(data, _Bits):
+            if data.one == 0:
+                return np.zeros((self.height, self.width), np.uint8)
             bits = np.frombuffer(zlib.decompress(data.data), np.uint8)
             flat = np.unpackbits(bits, count=self.width * self.height)
+            if data.one == 255:
+                np.negative(flat, out=flat)  # 1 -> 255 (uint8 wraps): twice as fast as *= 255
         else:
             flat = np.frombuffer(zlib.decompress(data), dtype=self.dtype)
         return flat.reshape(self.height, self.width)

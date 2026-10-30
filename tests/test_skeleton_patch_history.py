@@ -224,6 +224,36 @@ def test_the_byte_budget_drops_the_oldest_actions_first(monkeypatch):
     assert model.undo() is False
 
 
+def test_whole_frame_skeleton_actions_are_stored_as_bits_and_undo_bit_for_bit():
+    """KNOWN_ISSUES P3: a 0/255 patch is stored as packed bits (at most one bit per pixel
+    per side, however noisy) and a Clear's empty after as nothing; undo and redo give
+    every state back exactly."""
+    w, h = 2048, 1536
+    rng = np.random.default_rng(9)
+    model = SkeletonCorrectionModel()
+    model.load_thinned(np.where(rng.random((h, w)) < 0.5, 255, 0).astype(np.uint8))
+    states = [model.mask.copy()]
+    model.push_undo()  # Load prediction: the whole array replaced (noise: deflate keeps it)
+    model.mask = np.where(rng.random((h, w)) < 0.5, 255, 0).astype(np.uint8)
+    states.append(model.mask.copy())
+    model.push_undo()  # Clear
+    model.clear()
+    states.append(model.mask.copy())
+    model.push_undo()  # records the Clear (and opens an action that changes nothing)
+
+    replaced, cleared = (step.nbytes for step in list(model._undo_stack)[:2])
+    bits = -(-w * h // 8)  # one bit per pixel: 384 KiB (byte for byte, deflated: more)
+    assert replaced <= 2 * bits + 1024, replaced
+    assert bits // 2 < cleared <= bits + 1024, cleared  # the cleared side stores nothing
+    assert model.undo() and np.array_equal(model.mask, states[2])  # the empty action
+    assert model.undo() and np.array_equal(model.mask, states[1])  # the Clear
+    assert model.undo() and np.array_equal(model.mask, states[0])  # the Load
+    assert not model.undo()
+    assert model.redo() and np.array_equal(model.mask, states[1])
+    assert model.redo() and np.array_equal(model.mask, states[2])
+    assert model.mask.dtype == np.uint8
+
+
 def test_undo_and_redo_report_the_box_they_changed():
     model = SkeletonCorrectionModel()
     model.set_empty((300, 200))
