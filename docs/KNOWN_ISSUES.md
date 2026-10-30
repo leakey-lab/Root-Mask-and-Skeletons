@@ -1,23 +1,26 @@
 # SPROUTS — known issues and open decisions
 
-Status of 2026-10-28 on `feat/unified-correct-editor`, after the redundancy and speed pass
-(audit 2026-10-26, built 2026-10-27 in `89965f5`..`5f0ca18`, and `011ad3f` on 2026-10-28).
-Every owner decision of the 2026-10-12 audit is built except O28 (the optional W6-T3);
-table 1 names the task and commit that built each (plan:
+Status of 2026-10-30 on `feat/unified-correct-editor`, after the open-items pass of
+2026-10-29 / 2026-10-30 (`13af981`..`15e3c60`; handoff `.claude/handoff/open-items-2026-10-29/`,
+git-ignored). Every owner decision of the 2026-10-12 audit is built; O28 was closed
+unbuilt (D2, table 3). Table 1 names the task and commit that built each (plan:
 `docs/superpowers/plans/2026-10-25-owner-decisions/00-master.md`). A final whole-branch
 review (2026-10-26: correctness, science, data safety, cross-platform) found one critical,
 three important and nine minor items; all are fixed (rows FR1 to FR7 of "Resolved
-history") except E11, accepted. The redundancy and speed pass changed no scientific output
-except one corner case (S01-06, `CHANGELOG.md`); the IDs its code cites are in the second
-table of "Resolved history", and its owner questions, none built, are under "Details and
-history" (the offenders its guard tests marked, row K1b-01, are fixed since 2026-10-29; the dashboard
-blink, row D8, is fixed on Windows since 2026-10-29). Table 2 lists the engineering items still open: accepted
-limits and work not built now; rows U1, U2, U3, U5 and U7 are the open follow-ups of the
-Python 3.14 upgrade (2026-10-27, `2309d67`, `CHANGELOG.md`; U4 is resolved, U6 closed by
-the owner). Built items are in "Resolved history" with their commits; table 3 lists what
-was closed as accepted. The text below the tables is the record: the entries keep their
-original wording and their "Open" / "Resolved" labels as of the pass that wrote them, so
-read the tables for the present state.
+history") except E11, accepted. The redundancy and speed pass (audit 2026-10-26, built
+2026-10-27 in `89965f5`..`5f0ca18`) changed no scientific output except one corner case
+(S01-06, `CHANGELOG.md`); the IDs its code cites are in the second table of "Resolved
+history", and its owner questions are under "Details and history" (their status of
+2026-10-29 is in that pass's handoff, `notes/owner-questions.md`). The open-items pass
+resolved U2 (the app bundle on Python 3.14), U5, U7 (PyTorch 2.15.0, outputs unchanged),
+P3, the five guard-test offenders (K1b-01) and the dashboard blink on Linux X11 (D8), and
+closed P2, D2 and S15-01 as accepted; it found and fixed two arm64 (macOS) differences in
+Correct ("Scientific output changes" in `CHANGELOG.md`). Table 2 lists the engineering
+items still open: accepted limits, the dashboard blink on Wayland and macOS (D8), the Dash
+re-check (U1) and the first green macOS CI run (U3). Built items are in "Resolved history"
+with their commits; table 3 lists what was closed as accepted. The text below the tables
+is the record: the entries keep their original wording and their "Open" / "Resolved"
+labels as of the pass that wrote them, so read the tables for the present state.
 
 ## Decisions: asked on 2026-10-12, answered 2026-10-12 and 2026-10-25
 
