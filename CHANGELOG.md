@@ -60,6 +60,20 @@ Seven passes, not yet released:
   a 161-finding audit implemented by per-area packages, then integrated and reviewed.
 
 ### Fixed
+- **Open-items pass (2026-10-29), the five guard-test offenders** (owner questions #4, #9, #13,
+  #14, #50; no CSV value or output pixel changes):
+  - The status line's Cancel button shows the keyboard focus ring when Tab reaches it (K1b-01).
+  - Classes… and Export dataset… on the Correct page leave the keyboard on the canvas after a
+    click (Space no longer opens the dialog again; Tab still reaches them) (C5-03).
+  - The Correct side card takes its new width as soon as a Layers row's label changes (a label
+    was cut, or the card stayed too wide, until the next change) (S02-01).
+  - With a measured image selected the window can be 834 px narrow (was 1,126 px): the
+    metrics bar's STATUS words elide, with the full text (and the GT note) in their tooltip,
+    only once ZOOM has gone and the name is at its shortest; wider windows look as before
+    (P1-03).
+  - At 125 / 150 % scaling the image name under the Library display shows the longest form
+    that fits whole (a form one pixel too wide was painted cut), and a cut class name always
+    has its tooltip (C5-02).
 - **Redundancy and speed pass (2026-10-26).** None of these changes a CSV value or an
   output pixel, except one corner case under *Scientific output changes* (S01-06).
   - Correct: undo across layers keeps each layer's newest 100 actions on the one timeline,

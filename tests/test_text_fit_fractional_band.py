@@ -7,8 +7,8 @@ compares the fractional width, so a form chosen by the rounded width can be cut 
 half a pixel: "T1 · L44 · 2024.07.…" painted where "T1 · L44" fits. That band exists where
 glyph advances are fractional: Windows at 125 / 150 % scaling (laptops), DejaVu on Linux,
 CoreText on macOS. ``text_fit.label_advance`` (the fractional width, rounded up) is the
-rule; the metrics bar's name cell and the class panel's names still use the rounded one
-(C5-02, owner question #14).
+rule; the metrics bar's name cell and the class panel's names used the rounded one until
+C5-02 (owner question #14) was fixed.
 
 The band needs the native font engine: a child process on the Windows platform at 125 %
 (``QT_SCALE_FACTOR``) measures the labels; no window is shown. Skipped off Windows.
@@ -136,19 +136,9 @@ def test_the_shared_rule_paints_the_first_form_that_fits_whole(band):
     assert band["cut_shared"] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C5-02 (owner question #14): the metrics bar's name cell chooses its form by the "
-    "rounded advance; at 125 % a form one pixel too wide is chosen and cut",
-)
 def test_the_name_cell_paints_the_first_form_that_fits_whole(band):
     assert band["cut_cell"] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C5-02 (owner question #14): a class name is elided by the fractional width but "
-    "its tooltip follows the rounded one, so a cut name can have no tooltip",
-)
 def test_an_elided_class_name_always_has_its_tooltip(band):
     assert band["untipped"] == []

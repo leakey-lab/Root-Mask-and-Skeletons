@@ -1,8 +1,8 @@
 """Fitting label text into a width: wrap only when needed, elide what cannot wrap.
 
-Shared by the status chip (file name / hint line), the toasts, the metrics bar's image name
-and the one-line elided labels (status line, loading card, recent projects, class names),
-which must never grow past the space the overlay layout or the window gives them.
+Shared by the status chip (file name / hint line), the toasts, the metrics bar's image name and
+STATUS words, and the one-line elided labels (status line, loading card, recent projects, class
+names), which must never grow past the space the overlay layout or the window gives them.
 """
 
 from __future__ import annotations

@@ -41,7 +41,7 @@ from app.gui.widgets import tokens
 from app.gui.widgets.controls import IconButton
 from app.gui.widgets.focus import keep_canvas_focus
 from app.gui.widgets.overlays import _FloatingPanel
-from app.gui.widgets.text_fit import ElidedLabel
+from app.gui.widgets.text_fit import ElidedLabel, label_advance
 
 _MARGIN = 14
 _MAX_HEIGHT_FRACTION = 0.6
@@ -74,8 +74,9 @@ class _NameLabel(ElidedLabel):
         return QSize(_NAME_MIN_PX, super().minimumSizeHint().height())
 
     def is_elided(self) -> bool:
-        """True when the name does not fit the label's width."""
-        return self.fontMetrics().horizontalAdvance(self.text()) > self.contentsRect().width()
+        """True when the name does not fit the label's width whole (the painted rule, by the
+        fractional width rounded up: a cut name always has its tooltip)."""
+        return label_advance(self.fontMetrics(), self.text()) > self.contentsRect().width()
 
     def setText(self, text: str) -> None:  # noqa: N802 - Qt override
         super().setText(text)

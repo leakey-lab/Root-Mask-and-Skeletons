@@ -61,7 +61,7 @@ from app.gui.key_text import platform_keys
 from app.gui.library_index import count_label
 from app.gui.panels import Panel
 from app.gui.task_progress import TaskProgressWidget
-from app.gui.widgets import SegmentedControl, tokens
+from app.gui.widgets import SegmentedControl, keep_canvas_focus, tokens
 from app.gui.widgets.buttons import ghost_button
 from app.gui.widgets.icons import load_icon, load_pixmap
 from app.gui.widgets.text_fit import ElidedLabel
@@ -361,6 +361,9 @@ class ShellTopbar(QFrame):
             compact=True,
         )
         mw.gt_export_button.clicked.connect(mw.export_gt_dataset)
+        # A click leaves the keyboard on the canvas (Space would open the dialog again); Tab
+        # still reaches them.
+        keep_canvas_focus(mw.gt_classes_button, mw.gt_export_button)
         # Remove GT…: the Correct page owns it (on while an image is open and nothing is
         # unsaved) and asks before it deletes the image's GT files.
         mw.gt_remove_button = mw.correct_editor.actions.remove_button

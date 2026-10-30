@@ -322,7 +322,12 @@ class LayerPanel(_FloatingPanel):
 
     def set_status(self, layer_id: str, status: LayerStatus) -> None:
         """State dot + label + tooltip of ``layer_id``'s row (see :meth:`LayerRow.set_status`)."""
-        if self.rows[layer_id].set_status(status) and self.isVisible():
+        if not self.rows[layer_id].set_status(status):
+            return
+        # The row told this panel; tell the side card holding it too, or the card measures
+        # this panel's old size hint (Qt passes it up one level per event-loop pass).
+        self.updateGeometry()
+        if self.isVisible():
             wanted = max(self.minimumWidth(), self.sizeHint().width())
             if wanted != self.width():
                 self.reposition()  # the layout re-measures and places the panel
