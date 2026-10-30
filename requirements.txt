@@ -9,17 +9,19 @@
 # ---------------------------------------------------------------------------
 # PyTorch: NOT pinned here on purpose. Install the build that matches your GPU
 # driver (or the CPU build) BEFORE the packages below -- see README
-# "Installation". Recommended (Python 3.14, verified on the index 2026-10-28):
-#     pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu132
+# "Installation". Recommended (Python 3.14, verified on the index 2026-10-29):
+#     pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cu132
 #     (CUDA 13.2 build, NVIDIA driver of the 580 series or newer; CPU only: same versions,
 #     --index-url https://download.pytorch.org/whl/cpu; macOS: the same versions from PyPI)
 #     Supported GPUs: Turing (RTX 20 series, GTX 16xx) and newer. The CUDA 13 builds have no
 #     kernels for older ones (Maxwell, Pascal, Volta): use the CPU build there.
 # The results published so far were produced with the nightly torch 2.8.0.dev20250325+cu128 /
 # torchvision 0.22.0.dev20250326+cu128 (cuDNN 9.7.1), which is no longer downloadable.
-# torch 2.14.1 reproduces its CPU outputs bit for bit; on the GPU, its cuDNN 9.24 moves 1-4
+# torch 2.15.0 reproduces its CPU outputs bit for bit; on the GPU, its cuDNN 9.26 moves 1-4
 # pixels in some masks and some raw skeleton prediction values by one level, the measured
-# skeletons unchanged (CHANGELOG "Scientific output changes", docs/MODELS.md).
+# skeletons unchanged, exactly as 2.14.1 (cuDNN 9.24) did: the two give the same GPU outputs
+# (CHANGELOG "Scientific output changes", docs/MODELS.md). The cu134 build of 2.15.0 moves a
+# few more pixels (no CSV value): use cu132.
 # Pinning torch in this file would let pip pull a CPU wheel and silently disable
 # GPU inference. Keep it managed separately.
 # ---------------------------------------------------------------------------

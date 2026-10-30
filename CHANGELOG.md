@@ -1224,6 +1224,17 @@ Seven passes, not yet released:
   as pre-commit already ran it.
 
 ### Scientific output changes
+- **PyTorch 2.15.0 (cuDNN 9.26) changes no output (2026-10-29).** torch `2.15.0+cu132` /
+  torchvision `0.29.2+cu132` (cuDNN 9.26.0, CUDA 13.2) replace `2.14.1+cu132` /
+  `0.29.1+cu132` (cuDNN 9.24). On the science harness (40 Generate photos, the 123-image
+  Measure project with its GT cases, both fields of view) the GPU outputs, CSVs, provenance,
+  decisions and estimators are bit-identical to 2.14.1's, and the CPU outputs to the
+  published nightly's; on a 400-photo Generate job 0 of 400 masks and 0 of 400 raw skeleton
+  predictions differ from 2.14.1's. The GPU differences against the published results listed
+  below for 2.14.1 stand unchanged. The `cu134` build of 2.15.0 is not identical: against
+  `cu132` it moves 1 mask pixel (`24EFCAM1_T055_L066_2024.08.26_094641_003_SMM`, 799 -> 800
+  root pixels, CSV cell unchanged) and 6 raw skeleton predictions by one level in 1-8 pixels,
+  no CSV value; the recommended build is `cu132` (2.15.0 has no `cu130` build).
 - **GPU predictions: PyTorch 2.14.1 with cuDNN 9.24 (2026-10-27, accepted by the owner).**
   Generate on the GPU (RTX 5070 Ti, TF32, deterministic cuDNN, default batch policy) moves a
   few pixels. Before: torch `2.8.0.dev20250325+cu128` (cuDNN 9.7.1.26, CUDA 12.8); after:

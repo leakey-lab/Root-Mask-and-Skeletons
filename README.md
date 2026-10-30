@@ -49,8 +49,9 @@ py -3.14 -m venv venv
 
 # 1. PyTorch: CUDA 13.2 build (Turing - GTX 16xx, RTX 20xx - and newer GPUs, RTX 50-series
 #    included; driver of the 580 series or newer)
-pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu132
-#    Same results: the same versions from .../whl/cu130 (also Turing and newer, driver 580+)
+pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cu132
+#    Use this cu132 build: 2.15.0 has no cu130 build, and its cu134 build moves a few pixels
+#    (no CSV value)
 #    No NVIDIA GPU, or one older than Turing: the same versions from .../whl/cpu
 
 # 2. Application dependencies (the exact versions the app is tested with)
@@ -68,8 +69,9 @@ before installing the requirements (`pip uninstall -y opencv-python`), because i
 
 Results published so far were produced with a PyTorch nightly
 (`torch 2.8.0.dev20250325+cu128`, cuDNN 9.7.1) that is no longer downloadable. On the CPU,
-torch 2.14.1 above reproduces the nightly's CPU outputs bit for bit. On the GPU every later
-build moves a few pixels through its cuDNN: with torch 2.14.1 (cuDNN 9.24), 11 of 40 test
+torch 2.15.0 above reproduces the nightly's CPU outputs bit for bit. On the GPU every later
+build moves a few pixels through its cuDNN: with torch 2.15.0 (cuDNN 9.26), exactly as with
+2.14.1 (cuDNN 9.24), 11 of 40 test
 masks differ in 1 to 4 pixels (the root pixel count by 1 or 2), 6 of 40 raw skeleton
 predictions in up to 25 pixels by one intensity level (their thinned skeletons, which
 Measure reads, and so the lengths do not change), and 3 of 40 areas by 0.01 mm²
@@ -93,12 +95,12 @@ source venv/bin/activate
 # 1. PyTorch, one of:
 #    Linux + NVIDIA GPU (CUDA 13.2 build; Turing - GTX 16xx, RTX 20xx - and newer GPUs;
 #    driver of the 580 series or newer):
-pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu132
+pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cu132
 #    Linux, CPU only, also for an NVIDIA GPU older than Turing (without --index-url pip
 #    pulls about 3 GB of CUDA wheels):
-pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cpu
+pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
 #    macOS 14+ (Apple silicon, CPU):
-pip install torch==2.14.1 torchvision==0.29.1
+pip install torch==2.15.0 torchvision==0.29.2
 
 # 2. Application dependencies, then optionally the development tooling
 pip install -r requirements.txt
