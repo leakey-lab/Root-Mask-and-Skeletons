@@ -12,13 +12,13 @@ runs their shared lifecycle:
 * ``close`` removes a dashboard exactly once, and ``toggle`` keeps the legacy
   open/close meaning for the old buttons. ``release_all`` closes both when
   another project is opened (they chart the previous project's CSVs).
-* On Windows each dashboard is a native child window with its own Direct3D
-  surface (:func:`dashboards_embed_natively`): the canvases keep OpenGL and the
-  main window is never recreated (``docs/KNOWN_ISSUES.md`` D8). Elsewhere
-  (Linux, macOS: not checked) OpenGL canvas viewports stay off while any
-  dashboard embeds a browser (Qt6 cannot composite a QWebEngineView in a window
-  holding a QOpenGLWidget) and come back when the last one closes, but only if
-  they were on before.
+* On Windows and on Linux with X11 each dashboard is a native child window with
+  its own Direct3D / OpenGL surface (:func:`dashboards_embed_natively`): the
+  canvases keep OpenGL and the main window is never recreated
+  (``docs/KNOWN_ISSUES.md`` D8). Elsewhere (Wayland; macOS, not checked) OpenGL
+  canvas viewports stay off while any dashboard embeds a browser (on Windows Qt6
+  could not composite a QWebEngineView in a window holding a QOpenGLWidget) and
+  come back when the last one closes, but only if they were on before.
 * Dashboards outlive a visit to the Visualize stage, so a revisit is instant.
   ``stage_changed`` (called by MainWindow on every stage change) closes them
   :data:`IDLE_RELEASE_MS` after the stage was left: each dashboard's browser
@@ -246,7 +246,7 @@ def _opengl_viewports_in_use(window) -> bool:
 
 
 def dashboards_embed_natively() -> bool:
-    """True where each dashboard is a native child window with its own surface (Windows).
+    """True where each dashboard is a native child window with its own surface (Windows, X11).
 
     Its browser then composites next to the OpenGL canvases, which keep their viewports;
     see ``viz_window.native_child_surface``.

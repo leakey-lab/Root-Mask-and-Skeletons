@@ -572,25 +572,27 @@ def test_prewarm_imports_loads_the_dashboard_stack():
 #  keeps the canvases' OpenGL surface and is never recreated.
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
-    ("platform", "environ", "native"),
+    ("platform", "environ", "surface"),
     [
-        ("windows", {}, True),
-        # the backend table: tests/test_startup_environment.py
-        ("windows", {"QSG_RHI_BACKEND": "opengl"}, False),  # the browser draws through OpenGL
-        ("windows", {"QT_QUICK_BACKEND": "software"}, False),  # no RHI at all
-        ("offscreen", {}, False),
-        ("minimal", {}, False),
-        ("xcb", {}, False),  # Linux and macOS were not checked: the canvases' swap stays
-        ("wayland", {}, False),
-        ("cocoa", {}, False),
+        ("windows", {}, "Direct3DSurface"),
+        # the backend tables: tests/test_startup_environment.py (Windows),
+        # tests/test_qt_environment_linux_quick.py (Linux)
+        ("windows", {"QSG_RHI_BACKEND": "opengl"}, None),  # the browser draws through OpenGL
+        ("windows", {"QT_QUICK_BACKEND": "software"}, None),  # no RHI at all
+        ("offscreen", {}, None),
+        ("minimal", {}, None),
+        ("xcb", {}, "OpenGLSurface"),  # Linux on X11, measured in WSL 2026-10-29
+        ("xcb", {"QSG_RHI_BACKEND": "vulkan"}, None),
+        ("wayland", {}, None),  # Wayland and macOS keep plain children and the canvases' swap
+        ("cocoa", {}, None),
     ],
 )
-def test_only_windows_with_the_d3d11_browser_gets_native_dashboards(platform, environ, native):
+def test_windows_and_x11_with_their_browser_rhi_get_native_dashboards(platform, environ, surface):
     from PyQt6.QtGui import QSurface
 
     import app.visualization.viz_window as vw
 
-    expected = QSurface.SurfaceType.Direct3DSurface if native else None
+    expected = getattr(QSurface.SurfaceType, surface) if surface else None
     assert vw.native_child_surface(platform, environ) == expected
 
 

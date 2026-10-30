@@ -108,18 +108,22 @@ pip install -r requirements-dev.txt
 
 # 3. Linux only: system libraries (Debian / Ubuntu package names)
 sudo apt install libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
-     libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libxcb-xkb1 \
-     libdbus-1-3 libnss3 libfontconfig1
+     libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+     libxcb-xkb1 libdbus-1-3 libnss3 libfontconfig1
 #    Minimal / server images also need these for the embedded browser (QtWebEngine):
-#    sudo apt install libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2t64
+#    sudo apt install libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libgbm1 \
+#         libasound2t64
+#    A Wayland-only system also needs libwayland-client0 libwayland-cursor0 libwayland-egl1
 #    (Ubuntu 22.04 and Debian 12 name the last one libasound2)
 
 python main.py
 ```
 
 Troubleshooting: as root or in a container the app sets `QTWEBENGINE_DISABLE_SANDBOX=1`
-itself; on Ubuntu 24.04 with restricted user namespaces
-(`kernel.apparmor_restrict_unprivileged_userns=1`) set it yourself before starting the app.
+itself. A normal user keeps Chromium's sandbox. On Ubuntu 24.04
+(`kernel.apparmor_restrict_unprivileged_userns=1`) the dashboards still open: Qt WebEngine
+runs its renderer without user namespaces and keeps its seccomp filter (checked by
+emulation, 2026-10-29), so there is no need to turn the sandbox off.
 
 ### Model weights
 

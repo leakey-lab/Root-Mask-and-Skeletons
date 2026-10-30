@@ -51,6 +51,31 @@ jobs:
         continue-on-error: ${{ matrix.os == 'macos-latest' }}
         run: pytest -q -rfE
 
+      - name: Dashboard blink probe on the native platform (D8, non-blocking)
+        # The suite runs Qt offscreen, where no window is ever recreated. This step runs the
+        # real window on the runner's own platform (Cocoa on macOS, X11 under xvfb on Linux)
+        # through the dashboards and asks whether the main window is recreated, and on Linux
+        # whether the renderer keeps Chromium's sandbox as a normal user
+        # (tests/test_dashboard_native_platform.py; Windows: its release_native test in the suite).
+        # Non-blocking: macOS is unanswered (no fix there yet). A failure shows on this step;
+        # the job stays green. Make the Linux run blocking once it has passed twice.
+        if: runner.os != 'Windows'
+        continue-on-error: true
+        env:
+          SPROUTS_NATIVE_PLATFORM_PROBE: "1"
+        run: |
+          unset QT_QPA_PLATFORM  # the platform's own default for this step
+          probe="pytest tests/test_dashboard_native_platform.py -s -rA -p no:cacheprovider"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # Qt's X11 plugin and QtWebEngine need these beyond the runner image.
+            sudo apt-get install -y xvfb libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+              libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-xkb1 \
+              libxkbcommon-x11-0 libnss3
+            xvfb-run -a -s "-screen 0 1600x1000x24" $probe
+          else
+            $probe
+          fi
+
   package:
     name: wheel builds and installs
     runs-on: ubuntu-latest

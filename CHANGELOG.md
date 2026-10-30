@@ -60,6 +60,14 @@ Seven passes, not yet released:
   a 161-finding audit implemented by per-area packages, then integrated and reviewed.
 
 ### Fixed
+- **Dashboard blink on Linux X11 (D8, 2026-10-29).** Each dashboard is a native child window
+  with an OpenGL surface on X11: the main window is no longer recreated (a blink) at the first
+  dashboard when the canvases draw without OpenGL, and OpenGL canvases keep their viewports
+  while a dashboard lives. Wayland and macOS are unchanged. CI: a non-blocking native-platform
+  dashboard probe on macOS and Linux (xvfb). README: two missing Linux packages
+  (`libxcb-randr0`, `libgbm1`) and the Ubuntu 24.04 sandbox advice corrected (the dashboards
+  open with the sandbox on; turning it off is not needed). No CSV value or output pixel
+  changes.
 - **Open-items pass (2026-10-29), the five guard-test offenders** (owner questions #4, #9, #13,
   #14, #50; no CSV value or output pixel changes):
   - The status line's Cancel button shows the keyboard focus ring when Tab reaches it (K1b-01).
