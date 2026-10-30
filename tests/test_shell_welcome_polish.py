@@ -122,6 +122,21 @@ def test_four_rows_show_whole_before_the_list_scrolls(welcome, monkeypatch, them
         assert bottom < viewport.height(), (row.entry.name, bottom, viewport.height())
 
 
+@pytest.mark.parametrize("theme", [False, True], ids=["no-theme", "app-theme"])
+def test_rows_that_grow_after_the_fit_still_show_whole(welcome, theme):
+    """The list fits the rows as they are laid out, not as they were built: rows that grow
+    later (the theme's fonts, taller on macOS: CI run 40970595195) still show whole."""
+    widget = welcome(names=[f"project_{i}" for i in range(6)], theme=theme)
+    for row in widget.recent_rows():
+        row._name_label.setStyleSheet(row._name_label.styleSheet() + " font-size: 30px;")
+    for _ in range(3):
+        QApplication.processEvents()
+    viewport = widget._recent_scroll.viewport()
+    for row in widget.recent_rows()[: welcome_screen.VISIBLE_RECENT_ROWS]:
+        bottom = row.mapTo(viewport, row.rect().bottomLeft()).y()
+        assert bottom < viewport.height(), (row.entry.name, bottom, viewport.height())
+
+
 # ----------------------------------------------------------------------- W15
 def _stage_overview(widget: WelcomeWidget) -> list[QLabel]:
     return [
