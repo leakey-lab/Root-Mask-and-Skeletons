@@ -1,7 +1,7 @@
 """Recent-projects MRU list: the one implementation shared by MainWindow and Welcome.
 
-Stored in ``QSettings(ORGANIZATION_NAME, APP_NAME)`` (``"LeakeyLab"`` /
-``"SPROUTS"``) under ``"recent_projects"`` as a JSON list of
+Stored in the app's settings (:func:`app.settings.app_settings`, the user's
+``settings.ini``) under ``"recent_projects"`` as a JSON list of
 ``{"name", "path", "count", "ts"}`` dicts, most recent first, capped at 8 —
 exactly the format ``MainWindow._record_recent_project`` has always written, so
 existing lists keep working.

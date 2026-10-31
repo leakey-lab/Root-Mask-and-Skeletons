@@ -15,6 +15,9 @@ Locations, named after :data:`app.APP_NAME`:
   ``$XDG_DATA_HOME/sprouts`` (``~/.local/share/sprouts``); logs
   ``$XDG_STATE_HOME/sprouts/log`` (``~/.local/state/sprouts/log``).
 
+The app's settings file, ``settings.ini``, is in the config folder
+(:func:`user_settings_file`; :mod:`app.settings` opens it).
+
 ``SPROUTS_CONFIG_DIR`` relocates everything (config there, data and logs in
 its ``data``/``logs`` subfolders unless ``SPROUTS_DATA_DIR`` / ``SPROUTS_LOG_DIR``
 are set); tests and portable installs use it.
@@ -29,7 +32,16 @@ import sys
 
 from app import APP_NAME
 
-__all__ = ["user_config_dir", "user_data_dir", "user_log_dir"]
+__all__ = [
+    "SETTINGS_FILE_NAME",
+    "user_config_dir",
+    "user_data_dir",
+    "user_log_dir",
+    "user_settings_file",
+]
+
+#: The app's settings file (INI format) in :func:`user_config_dir`.
+SETTINGS_FILE_NAME = "settings.ini"
 
 
 def _home() -> str:
@@ -72,6 +84,12 @@ def user_config_dir(ensure: bool = True) -> str:
         else:
             path = os.path.join(_env_dir("XDG_CONFIG_HOME", ".config"), APP_NAME.lower())
     return _ensure(path, ensure)
+
+
+def user_settings_file() -> str:
+    """The app's settings file, ``settings.ini`` in :func:`user_config_dir` (nothing is
+    created: Qt makes the folder when it first writes the file)."""
+    return os.path.join(user_config_dir(ensure=False), SETTINGS_FILE_NAME)
 
 
 def user_data_dir(ensure: bool = True) -> str:

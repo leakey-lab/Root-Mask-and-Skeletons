@@ -6,9 +6,9 @@ directory). On the first run, or when the stored state is unreadable, the window
 gets :func:`initial_geometry`: 90% of the screen's available area, never smaller
 than the window's minimum size, centred and kept on screen.
 
-Settings live in the app's store (:func:`app.settings.app_settings`:
-``QSettings("LeakeyLab", "SPROUTS")``, memory on the ``offscreen`` platform) next to
-``recent_projects``; tests inject an ini-file ``QSettings``.
+Settings live in the app's store (:func:`app.settings.app_settings`: the user's
+``settings.ini``, memory on the ``offscreen`` platform) next to ``recent_projects``; tests
+inject an ini-file ``QSettings``.
 """
 
 from __future__ import annotations
