@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import traceback
 from collections import deque
 from collections.abc import Callable, Hashable, Iterable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -200,7 +201,8 @@ class AsyncWriter:
     keeps memory bounded when writes fall behind). A failing task is recorded in
     ``errors()``; the others keep running. The first ``FAILURE_LOG_LIMIT`` failures
     are logged (the first with its traceback), and ``close()`` logs how many more
-    there were. Every submitted task runs. Submit from one thread.
+    there were. A kept error's frames are cleared, so it holds no task's data. Every
+    submitted task runs. Submit from one thread.
     """
 
     def __init__(self, max_workers: int | None = None, max_pending: int | None = None) -> None:
@@ -264,6 +266,7 @@ class AsyncWriter:
         try:
             fn(*args, **kwargs)
         except Exception as exc:
+            tb = exc.__traceback__  # this thread's: the error may be raised again elsewhere
             with self._lock:
                 self._errors.append((key, exc))
                 first = len(self._errors) == 1
@@ -274,6 +277,9 @@ class AsyncWriter:
                 exc,
                 exc_info=exc if first else None,
             )
+            # (C6-01) The error is kept until the run ends; its frames would keep the save's
+            # image and encoded bytes too (0.3-0.8 MiB per failed image). Their line numbers stay.
+            traceback.clear_frames(tb)
         finally:
             self._task_finished()
 

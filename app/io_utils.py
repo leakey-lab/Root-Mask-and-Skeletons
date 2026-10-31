@@ -10,15 +10,21 @@ should be written through this module so that:
 * a target held open by another program (Excel keeps a CSV locked) raises
   :class:`FileLockedError`, a ``PermissionError`` whose message tells the user
   what to do, instead of an opaque ``[WinError 5]``;
+* a failed write names the file being saved, never the hidden temp file (C6-05), and
+  :func:`folder_not_writable` tells when the folder takes no new files at all, so a
+  batch run can stop at once (C6-01);
 * image paths with non-ASCII characters work on Windows, where ``cv2.imread`` /
   ``cv2.imwrite`` silently fail (``Données``, ``José``, CJK folder names).
 
-``durable=True`` (the default, for hand-made data and CSVs) also survives a
-power cut: the data is fsync'ed before the swap and, off Windows, the folder after it
-(a rename is on disk only once its folder is; on Windows the swap itself is not forced
-to disk). Bulk writers of regenerable outputs (46k generated masks) may pass
-``durable=False``: still never half-written, but skips the fsyncs, which cost
-0.6-4 ms per file on Windows.
+``durable=True`` (the default, for hand-made data and CSVs) also syncs: the data before
+the swap and, off Windows, the folder after it (a rename is on disk only once its folder
+is). On Linux that survives a power cut. On macOS the sync is ``F_BARRIERFSYNC`` (X1-05):
+the drive keeps the order of the writes, so a power cut leaves the previous file or the
+new complete one, never a broken one, but the last few seconds of saves can be lost
+(``F_FULLFSYNC`` would flush the drive's cache, at 3-22 ms more per file). On Windows the
+swap itself is not forced to disk. Bulk writers of regenerable outputs (46k generated
+masks) may pass ``durable=False``: still never half-written, but skips the syncs, which
+cost 0.6-4 ms per file on Windows.
 
 A process killed mid-write leaves its hidden temp file behind;
 :func:`sweep_stale_temp_files` removes such leftovers once they are old (R8).
@@ -28,6 +34,7 @@ A process killed mid-write leaves its hidden temp file behind;
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import logging
 import os
@@ -48,10 +55,12 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "REPLACE_RETRY_DELAYS",
     "FileLockedError",
+    "FolderNotWritableError",
     "atomic_open",
     "atomic_write_bytes",
     "atomic_write_text",
     "file_stamp",
+    "folder_not_writable",
     "imdecode_bytes",
     "imread_unicode",
     "imwrite_unicode",
@@ -85,6 +94,19 @@ _HEX_DIGITS = frozenset("0123456789abcdef")
 _MAX_PATH_CHARS = 259
 _MAX_NAME_CHARS = 255
 
+# (C6-01) Errors creating a temp file that mean its folder takes no new files: permission
+# denied (a protected folder, Windows' controlled folder access), a read-only drive, a folder
+# that is gone or is a file (ENOENT / ENOTDIR count only then: _is_folders). Every save into
+# that folder fails the same way. Errors of one name (EINVAL, ENAMETOOLONG) or of the moment
+# (EMFILE, EIO) are not among them.
+_FOLDER_ERRNOS = frozenset({errno.EACCES, errno.EPERM, errno.EROFS, errno.ENOENT, errno.ENOTDIR})
+# The attribute that marks such an error with its folder (see folder_not_writable).
+_FOLDER_ATTR = "sprouts_unwritable_folder"
+
+#: (X1-05) macOS's fcntl command "fsync, then a barrier to the drive" (<sys/fcntl.h>).
+#: Python's fcntl module does not export it (3.14), so its value is spelled out here.
+_F_BARRIERFSYNC = 85
+
 
 class FileLockedError(PermissionError):
     """A write failed because another program holds the target file open."""
@@ -102,6 +124,44 @@ class FileLockedError(PermissionError):
 
     def __reduce__(self):
         return (type(self), (self.path,))
+
+
+class FolderNotWritableError(OSError):
+    """No new file can be made in ``folder``, so every save into it fails (C6-01).
+
+    :func:`folder_not_writable` builds it from the save that found out; ``errno`` is that
+    save's, and the message names the folder and says what to check.
+    """
+
+    def __init__(self, folder: str | os.PathLike[str], reason: str, code: int | None = None):
+        self.folder = os.fspath(folder)
+        self.reason = reason
+        self.message = (
+            f"Cannot save files in {self.folder}: {reason}. "
+            "Check that the folder exists and that you may write to it, then try again."
+        )
+        super().__init__(code, self.message, self.folder)
+
+    def __str__(self) -> str:
+        return self.message
+
+    def __reduce__(self):
+        return (type(self), (self.folder, self.reason, self.errno))
+
+
+def folder_not_writable(exc: BaseException) -> FolderNotWritableError | None:
+    """A :class:`FolderNotWritableError` for ``exc`` if it means the folder takes no new files.
+
+    That is an atomic save that could not create its temp file for a reason of the folder
+    (``_FOLDER_ERRNOS``); a swap or a write that fails is about the one file and gives None.
+    The error's ``__cause__`` is ``exc``.
+    """
+    folder = getattr(exc, _FOLDER_ATTR, None) if isinstance(exc, OSError) else None
+    if folder is None:
+        return None
+    error = FolderNotWritableError(folder, exc.strerror or str(exc), exc.errno)
+    error.__cause__ = exc
+    return error
 
 
 def _current_platform() -> str:
@@ -210,13 +270,56 @@ def _is_lock(exc: OSError, target: str) -> bool:
     return not os.path.exists(target) or os.access(target, os.W_OK)
 
 
+def _fsync(fd: int) -> None:
+    """``os.fsync(fd)``; on macOS ``F_BARRIERFSYNC`` instead (X1-05).
+
+    A macOS fsync stops at the drive's cache, which may reach the disk in any order: after
+    a power cut the swapped-in name could point to data that never got there. The barrier
+    keeps the order (this file's data reaches the disk before anything written after it,
+    the swap included) and costs about nothing. A file system without it (SMB, FAT) and a
+    Python without ``fcntl`` get the plain fsync.
+    """
+    if _current_platform() == "darwin":
+        try:
+            import fcntl
+
+            fcntl.fcntl(fd, getattr(fcntl, "F_BARRIERFSYNC", _F_BARRIERFSYNC))
+            return
+        except ImportError, OSError:
+            pass
+    os.fsync(fd)
+
+
+def _is_folders(exc: OSError, folder: str) -> bool:
+    """Whether a temp file that could not be made means ``folder`` takes no new files (C6-01).
+
+    "No such file" (and "not a directory") is the folder's only when the folder is not
+    there: Windows also says ENOENT for one path over MAX_PATH (long paths off, the
+    default), and a generated name is longer than its input.
+    """
+    if exc.errno not in _FOLDER_ERRNOS:
+        return False
+    return exc.errno not in (errno.ENOENT, errno.ENOTDIR) or not os.path.isdir(folder)
+
+
+def _name_target(exc: BaseException, tmp: str, target: str) -> None:
+    """Make an error that names the temp file name ``target`` instead (C6-05).
+
+    The user reads the error, and the hidden temp file means nothing to them (it is gone
+    by then). A swap names both, ``'<tmp>' -> '<target>'``: only the target is kept.
+    """
+    if isinstance(exc, OSError) and exc.filename == tmp:
+        exc.filename = target
+        del exc.filename2  # None would still print as "-> None"
+
+
 def _sync_folder(folder: str) -> None:
-    """fsync ``folder``, so that a rename into it is on disk (Linux, macOS). Never raises:
+    """Sync ``folder``, so that a rename into it is on disk (Linux, macOS). Never raises:
     some file systems refuse it (CIFS, FUSE), and the file is in place already."""
     try:
         fd = os.open(folder, os.O_RDONLY)
         try:
-            os.fsync(fd)
+            _fsync(fd)
         finally:
             os.close(fd)
     except OSError:
@@ -247,11 +350,13 @@ def atomic_open(
     ``"wb"``; other keyword arguments go to :func:`open` (e.g. ``newline=""``
     for :mod:`csv`). On any exception the temp file is removed and the previous
     ``path`` is left untouched. The parent folder must exist. ``durable``
-    fsyncs the data before the swap and, off Windows, the folder after it.
+    syncs the data before the swap and, off Windows, the folder after it.
 
     Raises:
         FileLockedError: ``path`` is held open by another program.
-        OSError: any other I/O failure.
+        OSError: any other I/O failure; one that named the temp file names ``path``
+            (C6-05), and :func:`folder_not_writable` says whether the folder takes no
+            new files (C6-01).
     """
     if mode not in _WRITE_MODES:
         raise ValueError(f"atomic_open supports modes {sorted(_WRITE_MODES)}, not {mode!r}")
@@ -259,15 +364,21 @@ def atomic_open(
         open_kwargs.setdefault("encoding", "utf-8")
     target = os.fspath(path)
     tmp = _temp_path(target)
-    fh = open(tmp, mode.replace("w", "x"), **open_kwargs)  # noqa: SIM115 - closed below
+    try:
+        fh = open(tmp, mode.replace("w", "x"), **open_kwargs)  # noqa: SIM115 - closed below
+    except OSError as exc:
+        _name_target(exc, tmp, target)
+        if _is_folders(exc, folder := os.path.dirname(os.path.abspath(target))):
+            setattr(exc, _FOLDER_ATTR, folder)  # (C6-01) the folder refused a brand-new name
+        raise
     try:
         yield fh
         fh.flush()
         if durable:
-            os.fsync(fh.fileno())
+            _fsync(fh.fileno())
         fh.close()
         _replace(tmp, target)
-    except BaseException:
+    except BaseException as exc:
         # On a full disk the close fails too (it flushes the rest): it must neither
         # replace the error being raised nor keep the temp file on disk (R7). The
         # file is closed even when its final flush fails.
@@ -276,6 +387,7 @@ def atomic_open(
         except Exception:  # noqa: BLE001 - the original error is the one to raise
             pass
         _remove_quietly(tmp)
+        _name_target(exc, tmp, target)
         raise
     # Outside the try: the file is saved, and a folder that cannot be synced must not turn
     # the save into a failure or remove anything.
