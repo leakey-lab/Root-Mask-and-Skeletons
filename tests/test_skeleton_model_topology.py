@@ -400,3 +400,52 @@ def test_real_generated_skeletons_unchanged():
         checked += 1
     if not checked:
         pytest.skip("no sample skeleton found")
+
+
+# --------------------------------------------------------------------------------------
+# Own pixels: what deleting a branch erases (S03-01), rings included (S03-06)
+# --------------------------------------------------------------------------------------
+
+
+def _dist_to_polyline(p, poly) -> float:
+    """Distance from point ``p`` to the polyline ``poly`` (a single point for one vertex)."""
+    px, py = p
+    best = math.inf
+    for (x0, y0), (x1, y1) in pairwise(poly) if len(poly) > 1 else [(poly[0], poly[0])]:
+        dx, dy = x1 - x0, y1 - y0
+        t = 0.0 if dx == dy == 0 else ((px - x0) * dx + (py - y0) * dy) / (dx * dx + dy * dy)
+        t = min(max(t, 0.0), 1.0)
+        best = min(best, math.hypot(px - (x0 + t * dx), py - (y0 + t * dy)))
+    return best
+
+
+def _own_cases() -> dict[str, np.ndarray]:
+    cases = dict(_loop_free_cases())
+    cases["lollipop"] = _lollipop()
+    rng = np.random.default_rng(1)
+    for i in range(6):
+        cases[f"curl{i}"] = _loop_drawn_onto_its_branch(rng)
+    ring_and_line = np.zeros((80, 120), np.uint8)
+    cv2.circle(ring_and_line, (40, 40), 20, 255, 1)
+    cv2.line(ring_and_line, (80, 10), (110, 70), 255, 1)
+    cases["ring and line"] = _skeleton(ring_and_line)
+    return cases
+
+
+@pytest.mark.parametrize("eps", [0.0, 1.5])
+def test_own_pixels_split_the_skeleton_without_its_junctions_by_branch(eps):
+    for key, skel in _own_cases().items():
+        topo = vectorize_skeleton(skel, simplify_epsilon=eps)
+        deg, fg = _degree(skel), skel > 0
+        assert len(topo.own) == len(topo.polylines), key
+        seen: set[tuple[int, int]] = set()
+        for poly, own in zip(topo.polylines, topo.own, strict=True):
+            pixels = set(own)
+            assert len(pixels) == len(own), f"{key}: a pixel twice in one branch"
+            assert not pixels & seen, f"{key}: a pixel in two branches"
+            seen |= pixels
+            assert all(fg[y, x] and deg[y, x] < 3 for x, y in own), f"{key}: a junction pixel"
+            if not own:  # an edge between two junction pixels
+                assert deg[poly[0][1], poly[0][0]] >= 3 and deg[poly[-1][1], poly[-1][0]] >= 3
+            assert all(_dist_to_polyline(p, poly) <= eps + 1e-6 for p in own), key
+        assert seen == _pixels(fg & (deg > 0) & (deg < 3)), f"{key}: a pixel in no branch"

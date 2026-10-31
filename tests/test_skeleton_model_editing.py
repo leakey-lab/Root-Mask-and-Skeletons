@@ -122,6 +122,7 @@ MUTATIONS = {
     "erase_circle": lambda m: m.erase_circle((10, 20), 2),
     "erase_segment": lambda m: m.erase_segment((5, 20), (25, 20), 2),
     "erase_polyline": lambda m: m.erase_polyline([(5, 20), (25, 20)], thickness=3),
+    "erase_pixels": lambda m: m.erase_pixels([(5, 20), (6, 20)]),
     "skeletonize": lambda m: m.skeletonize(),
     "clear": lambda m: m.clear(),
     "assign_mask": lambda m: setattr(m, "mask", np.zeros((40, 60), np.uint8)),
@@ -278,6 +279,50 @@ def test_erase_polyline_needs_two_points():
     rev = model.revision
     model.erase_polyline([(20, 20)], thickness=9)
     assert np.array_equal(model.mask, before) and model.revision == rev
+
+
+# --------------------------------------------------------------------------------------
+# erase_pixels (the Select -> edit commit and branch delete, S03-01)
+# --------------------------------------------------------------------------------------
+
+
+def test_erase_pixels_erases_exactly_the_given_pixels():
+    model = SkeletonCorrectionModel()
+    model.set_empty((40, 30))
+    model.mask[:] = 255
+    points = [(5, 15), (6, 15), (7, 16), (39, 29), (0, 0)]
+
+    model.erase_pixels(points)
+
+    expected = np.full((30, 40), 255, np.uint8)
+    for x, y in points:
+        expected[y, x] = 0
+    assert np.array_equal(model.mask, expected)
+
+
+def test_erase_pixels_skips_points_outside_the_mask():
+    model = SkeletonCorrectionModel()
+    model.set_empty((40, 30))
+    model.mask[:] = 255
+
+    model.erase_pixels([(-1, 5), (40, 5), (5, 30), (5, -2), (10, 10)])
+
+    assert int(np.count_nonzero(model.mask == 0)) == 1 and model.mask[10, 10] == 0
+
+
+@pytest.mark.parametrize("points", [[], [(-1, -1)], [(60, 5)]])
+def test_erase_pixels_without_a_pixel_to_erase_changes_nothing(points):
+    model = _model_with_line()
+    before = model.mask.copy()
+    rev = model.revision
+    model.erase_pixels(points)
+    assert np.array_equal(model.mask, before) and model.revision == rev
+
+
+def test_erase_pixels_without_a_mask_does_nothing():
+    model = SkeletonCorrectionModel()
+    model.erase_pixels([(1, 1)])
+    assert model.mask is None
 
 
 # --------------------------------------------------------------------------------------
@@ -490,6 +535,7 @@ EDITS = {
     "erase_circle": (True, lambda m: m.erase_circle((30, 20), 4)),
     "erase_segment": (True, lambda m: m.erase_segment((10, 12), (45, 30), 3)),
     "erase_polyline": (True, lambda m: m.erase_polyline([(8, 8), (30, 25), (50, 12)], 9)),
+    "erase_pixels": (True, lambda m: m.erase_pixels([(8, 8), (9, 9), (30, 25), (50, 12)])),
     "draw_polyline_1px": (False, lambda m: m.draw_polyline([(4, 30), (55, 6)], thickness=1)),
     "draw_polyline_3px": (False, lambda m: m.draw_polyline([(8, 8), (30, 25)], thickness=3)),
     "draw_polyline_9px": (False, lambda m: m.draw_polyline([(20, 5), (21, 33)], thickness=9)),

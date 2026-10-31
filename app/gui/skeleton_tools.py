@@ -96,9 +96,10 @@ class DraftState:
 class PolylineDraft:
     """The polyline being drawn, or a picked branch being edited.
 
-    ``edit_original`` holds the picked branch's pixels (erased when the edit is
-    committed or deleted). ``smooth`` mirrors the Smooth toggle and survives
-    :meth:`reset`.
+    ``edit_original`` holds the picked branch's points as picked (what :meth:`pending`
+    compares), ``edit_pixels`` its own pixels: erased when the edit is committed or the
+    branch deleted, so the other branches at its junctions keep theirs (S03-01).
+    ``smooth`` mirrors the Smooth toggle and survives :meth:`reset`.
     """
 
     points: list[QPoint] = field(default_factory=list)
@@ -108,6 +109,7 @@ class PolylineDraft:
     orig_points: list[QPoint] = field(default_factory=list)
     smooth: bool = False
     edit_original: list[tuple[int, int]] | None = None
+    edit_pixels: list[tuple[int, int]] | None = None
     smooth_on_pick: bool = False  # Smooth was already on when the branch was picked
     SMOOTH_DROPPED_NOTICE: ClassVar[str] = (
         "Smoothed branch not applied · pick it and press Enter to apply"
@@ -116,7 +118,7 @@ class PolylineDraft:
     def reset(self) -> None:
         """Forget the line and any drag (keeps the Smooth setting)."""
         self.points = []
-        self.edit_original = None
+        self.edit_original = self.edit_pixels = None
         self.smooth_on_pick = False
         self.end_drag()
 
@@ -146,6 +148,10 @@ class PolylineDraft:
         moved): a dropped draft is announced only then."""
         return bool(self.points) and not self.plain_pick()
 
+    def bends(self) -> bool:
+        """Smooth is on and the draft has the 3+ points it needs to bend into a curve."""
+        return self.smooth and len(self.points) >= 3
+
     def unapplied_smooth(self) -> bool:
         """A plain pick whose preview was smoothed by a Smooth switched on during the pick."""
         return self.plain_pick() and self.smooth and not self.smooth_on_pick
@@ -159,7 +165,7 @@ class PolylineDraft:
 
     def raster_points(self, bounds: tuple[int, int]) -> list[tuple[int, int]]:
         """Pixels to draw: the straight polyline, or the sampled curve when smooth."""
-        if self.smooth and len(self.points) >= 3:
+        if self.bends():
             return sample_catmull_rom(self.xy(), step_px=SMOOTH_STEP_PX, bounds=bounds)
         return self.xy()
 
@@ -224,13 +230,17 @@ class SelectTool(SkeletonTool):
     def press(self, pos, modifiers):
         host = self.host
         topo = host.model.topology(simplify_epsilon=1.5)
-        i = nearest_polyline_index(topo.polylines, _xy(pos), reach(host, PICK_HIT_PX))
+        # Only branches with pixels of their own: an edge between two junction pixels has
+        # none to erase. The others stay at their index.
+        lines = [line if own else [] for line, own in zip(topo.polylines, topo.own, strict=True)]
+        i = nearest_polyline_index(lines, _xy(pos), reach(host, PICK_HIT_PX))
         if i is None:
             host.refresh_hint()
             return
         branch = [(int(x), int(y)) for x, y in topo.polylines[i]]
         host.draft.reset()
         host.draft.edit_original = branch
+        host.draft.edit_pixels = list(topo.own[i])
         host.draft.smooth_on_pick = host.draft.smooth
         host.draft.points = [QPoint(x, y) for x, y in branch]
         host.switch_tool(POLYLINE, keep_draft=True)
@@ -301,8 +311,15 @@ class PolylineTool(SkeletonTool):
 
     tool_id = POLYLINE
 
+    def __init__(self, host):
+        super().__init__(host)
+        # The point this press added to a picked branch (the very object), else None: the
+        # double-click whose first press it was takes it back (S03-02).
+        self._pick_click: QPoint | None = None
+
     def press(self, pos, modifiers):
         host, draft = self.host, self.host.draft
+        self._pick_click = None
         pts = draft.xy()
         hit = nearest_vertex_index(pts, _xy(pos), reach(host, HANDLE_HIT_PX))
         if hit is not None:
@@ -322,7 +339,10 @@ class PolylineTool(SkeletonTool):
                 draft.anchor = QPoint(pos)
                 draft.orig_points = [QPoint(p) for p in draft.points]
                 return
-        draft.points.append(QPoint(pos))
+        point = QPoint(pos)
+        draft.points.append(point)
+        if draft.edit_original is not None:
+            self._pick_click = point
         host.refresh_draft(pos)
 
     def move(self, pos):
@@ -348,34 +368,60 @@ class PolylineTool(SkeletonTool):
         draft = self.host.draft
         if not draft.points:
             return
+        if draft.edit_original is not None:
+            # The double-click's first press added the click as a last point. On a plain
+            # pick, or on the branch itself, that is a chord to the click: take it back
+            # (S03-02). Off the branch of a changed pick it is the line's new end: keep it,
+            # and add where the double-click landed when it drifted, as a new line does.
+            # Commit only if the branch changed; a plain pick stays open.
+            click, self._pick_click = self._pick_click, None
+            if click is not None and draft.points[-1] is click:
+                if self._chord(click):
+                    draft.points.pop()
+                    self.host.refresh_draft()
+                elif pos != click:
+                    draft.points.append(QPoint(pos))
+            if draft.pending():
+                self.commit()
+            return
         if pos != draft.points[-1]:
             draft.points.append(QPoint(pos))
         self.commit()
+
+    def _chord(self, click: QPoint) -> bool:
+        """Whether ``click``, the picked branch's last point, only draws a chord: the rest
+        is still the branch as picked, or the click lies on the rest."""
+        draft = self.host.draft
+        rest = draft.xy()[:-1]
+        if rest == draft.edit_original:
+            return True
+        return nearest_segment_index(rest, _xy(click), reach(self.host, PICK_HIT_PX)) is not None
 
     def key(self, event):
         key = event.key()
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and len(self.host.draft.points) >= 2:
             self.commit()
             return True
-        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.host.draft.edit_original:
+        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.host.draft.edit_pixels:
             self.delete_branch()
             return True
         return False
 
-    def _erase_thickness(self) -> int:
-        return max(5, int(self.host.draw_thickness) + 6)
-
     def commit(self) -> None:
-        """Draw the draft into the skeleton (replacing the picked branch) as one undo step."""
+        """Draw the draft into the skeleton (replacing the picked branch) as one undo step.
+
+        A picked branch left as it was is dropped instead, with no pixel changed and no
+        undo step (S03-02), unless Smooth bends it (the documented pick, S, Enter).
+        """
         host, draft = self.host, self.host.draft
-        if len(draft.points) < 2:
+        if len(draft.points) < 2 or (draft.plain_pick() and not draft.bends()):
             draft.reset()
             host.refresh_draft()
             return
         pts = draft.raster_points(host.image_size())
         host.model.push_undo()
-        if draft.edit_original and len(draft.edit_original) >= 2:
-            host.model.erase_polyline(draft.edit_original, self._erase_thickness())
+        if draft.edit_pixels:  # the picked branch's own pixels, not a band (S03-01)
+            host.model.erase_pixels(draft.edit_pixels)
         host.model.draw_polyline(pts, thickness=host.draw_thickness)
         host.model.skeletonize()
         draft.reset()
@@ -383,16 +429,14 @@ class PolylineTool(SkeletonTool):
         host.render_skeleton(full=True)
 
     def delete_branch(self) -> None:
-        """Remove the picked branch (UXE-12): one undo step."""
+        """Remove the picked branch (UXE-12): one undo step. Only its own pixels go; the
+        junction pixels at its ends stay with the other branches there (S03-01)."""
         host, draft = self.host, self.host.draft
-        branch = draft.edit_original
-        if not branch:
+        pixels = draft.edit_pixels
+        if not pixels:
             return
         host.model.push_undo()
-        if len(branch) >= 2:
-            host.model.erase_polyline(branch, self._erase_thickness())
-        else:
-            host.model.erase_segment(branch[0], branch[0], self._erase_thickness() // 2)
+        host.model.erase_pixels(pixels)
         host.model.skeletonize()
         draft.reset()
         host.refresh_draft()
@@ -400,6 +444,7 @@ class PolylineTool(SkeletonTool):
         host.notify(platform_keys("Branch deleted · Ctrl+Z to undo"), "info")
 
     def deactivate(self):
+        self._pick_click = None
         self.host.draft.reset()
 
     def hint(self):
@@ -412,10 +457,9 @@ class PolylineTool(SkeletonTool):
             "(3+ points)."
         )
         if draft.edit_original:
-            text = (
-                f"Editing branch · {SMOOTH_KEY} smooths · Enter commits · Delete removes it · "
-                "Esc cancels"
-            )
+            # Enter on a branch left as it was only drops the pick (S03-02).
+            enter = "Enter commits · " if draft.pending() or draft.bends() else ""
+            text = f"Editing branch · {SMOOTH_KEY} smooths · {enter}Delete removes it · Esc cancels"
         elif n == 0:
             text = platform_keys(
                 "Polyline · click to place points · Ctrl+click a segment adds a bend"

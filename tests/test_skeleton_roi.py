@@ -14,6 +14,7 @@ and a 2,800-edit run over the three cases.
 from __future__ import annotations
 
 import os
+import weakref
 from itertools import pairwise
 
 import cv2
@@ -122,12 +123,25 @@ def _walk(rng, w: int, h: int, n: int, step: int) -> list[tuple[int, int]]:
     return pts
 
 
+_BRANCHES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _branch(model: SkeletonCorrectionModel, rng) -> list[tuple[int, int]]:
+    """A branch's own pixels, as Select hands them to the tools (S03-01). Taken from the
+    topology of the skeleton as opened, once per model: later edits may have changed some
+    of those pixels, which still makes an erase of skeleton pixels along a branch."""
+    branches = _BRANCHES.get(model)
+    if branches is None:
+        branches = _BRANCHES[model] = [own for own in model.topology().own if own]
+    return branches[int(rng.integers(0, len(branches)))]
+
+
 def _polyline(model: SkeletonCorrectionModel, rng) -> None:
     """PolylineTool.commit: a new line, or a picked branch redrawn."""
     h, w = model.mask.shape
     model.push_undo()
     if rng.random() < 0.3:
-        model.erase_polyline(_walk(rng, w, h, int(rng.integers(2, 6)), 40), 9)
+        model.erase_pixels(_branch(model, rng))
     model.draw_polyline(_walk(rng, w, h, int(rng.integers(2, 9)), 60), thickness=3)
 
 
@@ -159,10 +173,9 @@ def _connect(model: SkeletonCorrectionModel, rng) -> None:
 
 
 def _delete_branch(model: SkeletonCorrectionModel, rng) -> None:
-    """PolylineTool.delete_branch: erase a 9 px band along a branch."""
-    h, w = model.mask.shape
+    """PolylineTool.delete_branch: erase a branch's own pixels."""
     model.push_undo()
-    model.erase_polyline(_walk(rng, w, h, int(rng.integers(2, 6)), 30), 9)
+    model.erase_pixels(_branch(model, rng))
 
 
 EDITS = (_polyline, _eraser, _connect, _delete_branch)
