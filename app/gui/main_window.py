@@ -613,8 +613,12 @@ class MainWindow(QMainWindow):
         Cancel or a failure); a second click while a job runs is refused by the
         handler / job registry, so the chain is never doubled. Both passes run on the
         folder open when Generate was pressed: the skeleton pass is bound to it here,
-        not read again once the masks are done (R7).
+        not read again once the masks are done (R7). Both checkpoints are checked first,
+        so a missing skeleton model never costs a whole mask pass (S11-10).
         """
+        passes = (self.mask_generation_handler, self.skeleton_handler.skeleton_handler)
+        if any(handler.refuse_without_model() for handler in passes):  # one box, mask first
+            return False
         folder = self.mask_generation_handler.project_folder()
         return self.mask_generation_handler.generate_masks(
             on_success=functools.partial(self.skeleton_handler.generate_skeleton, input_dir=folder)
@@ -633,13 +637,13 @@ class MainWindow(QMainWindow):
         """Show freshly generated skeletons without reloading the folder.
 
         ``results_dir`` is the folder the skeleton run wrote (``<project>/skeletons``);
-        an old ``<results>/images`` layout is accepted too.
+        an old ``<results>/images`` layout is accepted too. No toast of its own: the run's
+        own message is the one (S11-09).
         """
         if not os.path.isdir(results_dir):
             QMessageBox.critical(self, "Error", f"Results folder not found at: {results_dir}")
             return
         self.on_outputs_changed()
-        self.notify("Results loaded")
 
     def on_outputs_changed(self):
         """Masks or skeletons changed on disk (a generation run finished): re-read them
@@ -699,17 +703,26 @@ class MainWindow(QMainWindow):
             self.notify("Load an image folder first", "warn")
             return
         folder = layout.root
+
+        def folder_registry():
+            # The folder's own registry: the editor's copy is only in sync once Correct
+            # has opened an image from this folder (it holds the defaults before).
+            try:
+                return load_registry(folder)
+            except RegistryError as exc:
+                self.notify(f"Cannot export: gt/classes.json is invalid ({exc})", "danger")
+                return None
+
+        # Read before the prompt, so an invalid file costs no edits (C6-03).
+        if folder_registry() is None:
+            return
         # Pending edits on the open image belong in the export (the Correct page's class
         # labels first); if they could not be saved and the user kept editing, or
         # cancelled, do not export without them.
         if not all(_released(editor) for editor in self._editors().values()):
             return
-        # The folder's own registry: the editor's copy is only in sync once Correct
-        # has opened an image from this folder (it holds the defaults before).
-        try:
-            registry = load_registry(folder)
-        except RegistryError as exc:
-            self.notify(f"Cannot export: gt/classes.json is invalid ({exc})", "danger")
+        registry = folder_registry()  # read again: a Save at the prompt can write it
+        if registry is None:
             return
         from .export_dataset_dialog import ExportDatasetDialog
 

@@ -99,7 +99,7 @@ def test_skeleton_run_where_every_image_failed_is_a_failure(project, qapp):
     assert sorted(name for name, _ in failed) == ["a.jpg", "b.jpg", "c.jpg"]
     assert project.report_kwargs == [{"nothing_written": True}]
     assert thread.completed is False
-    assert project.window.loaded == []  # load_results would toast "Results loaded"
+    assert project.window.loaded == []  # no results to show
 
 
 def test_the_report_of_a_run_that_wrote_nothing_claims_no_other_outputs(qapp, tmp_path):

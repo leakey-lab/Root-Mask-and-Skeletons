@@ -52,6 +52,11 @@ LOADED = "loaded"  # source of a file opened with Load that is neither of the tw
 SHOWN_ALREADY = "Nothing to load: the skeleton is the prediction already"
 
 
+def _unreadable(path: str) -> Notice:
+    """The notice of a skeleton file that could not be read."""
+    return Notice(f"Could not read skeleton {os.path.basename(path)}", "danger")
+
+
 class SkeletonDocument:
     """The skeleton of one image: model + which file it came from + where it saves.
 
@@ -231,6 +236,13 @@ class SkeletonDocument:
                 self.source = LOADED
         return notices
 
+    def check_file(self, path: str) -> list[Notice]:
+        """What :meth:`load_file` would say of an unreadable ``path`` ([] when it reads);
+        changes nothing. Load skeleton file… asks before its prompt (C6-03)."""
+        if imread_unicode(path, cv2.IMREAD_GRAYSCALE) is not None:
+            return []
+        return [_unreadable(path)]
+
     def prediction_file(self) -> str | None:
         """The prediction file found when the image was opened (Load prediction), or None."""
         return self._prediction if self.image_path else None
@@ -243,7 +255,7 @@ class SkeletonDocument:
             return None, []
         gray = imread_unicode(path, cv2.IMREAD_GRAYSCALE)
         if gray is None:
-            return None, [Notice(f"Could not read skeleton {os.path.basename(path)}", "danger")]
+            return None, [_unreadable(path)]
         plane = thin_raster(gray, self._size)
         if np.array_equal(plane, self.model.mask):
             return None, [Notice(SHOWN_ALREADY, "info")]
@@ -260,7 +272,7 @@ class SkeletonDocument:
         False keeps the saved baseline (Load: an unsaved edit)."""
         gray = imread_unicode(path, cv2.IMREAD_GRAYSCALE)
         if gray is None:
-            notices.append(Notice(f"Could not read skeleton {os.path.basename(path)}", "danger"))
+            notices.append(_unreadable(path))
             return False
         self.save_size = (int(gray.shape[1]), int(gray.shape[0]))
         self.model.load_from_raster(gray, target_size=self._size, saved=saved)

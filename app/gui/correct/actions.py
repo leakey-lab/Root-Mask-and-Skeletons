@@ -85,7 +85,14 @@ class PageActions(QObject):
         start = skeleton.dialog_start()  # the generated skeleton, else skeletons/
         title = "Select Skeleton File"
         path, _ = QFileDialog.getOpenFileName(editor, title, start, SKELETON_FILES)
-        if not path or not editor.session.release([SKELETON]):
+        if not path:
+            return
+        # Read before the prompt, so a file that cannot be read costs no edits (C6-03);
+        # load_file reads it again after the prompt, as a Save there can rewrite it.
+        unreadable = skeleton.document.check_file(path)
+        for notice in unreadable:
+            editor.notify(notice.message, notice.kind)
+        if unreadable or not editor.session.release([SKELETON]):
             return
         for notice in skeleton.load_file(path):
             editor.notify(notice.message, notice.kind)

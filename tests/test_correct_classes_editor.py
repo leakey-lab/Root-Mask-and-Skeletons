@@ -1125,6 +1125,43 @@ def test_export_gt_dataset_saves_the_correct_editor_first(window_with_project, m
     assert len(opened) == 1  # Cancel: no export without the edits
 
 
+def test_export_gt_dataset_refuses_an_invalid_registry_before_the_prompt(
+    window_with_project, monkeypatch
+):
+    # C6-03: gt/classes.json is read before Save / Discard is asked, so a bad file costs no
+    # edits; it is read again after the prompt, as a Save there can write it.
+    import app.gui.export_dataset_dialog as edd
+
+    window, editor = window_with_project.window, window_with_project.editor
+    folder = ProjectLayout.for_image(window_with_project.project.a).root
+    opened, asked, toasts = [], [], []
+    monkeypatch.setattr(
+        edd.ExportDatasetDialog, "exec", lambda dialog: opened.append(dialog.registry) or 0
+    )
+    monkeypatch.setattr(window, "notify", lambda message, kind="success", **_k: toasts.append(kind))
+    editor.set_active_layer(CLASSES)
+    paint(editor, (20, 100), (80, 110))
+    Path(registry_path(folder)).parent.mkdir(parents=True, exist_ok=True)
+    Path(registry_path(folder)).write_text("{", encoding="utf-8")
+    monkeypatch.setattr(editor_prompts, "ask_unsaved", lambda *args: asked.append(args) or DISCARD)
+
+    window.export_gt_dataset()
+
+    assert asked == [] and opened == [] and toasts == ["danger"]
+    assert editor.has_unsaved_changes()  # the edits stay
+
+    custom = default_registry().add(key="dead_root", name="Dead root", color="#7f5af0")
+    save_registry(folder, default_registry())
+
+    def rewrite_at_the_prompt(*args):
+        save_registry(folder, custom)  # as a Save at the prompt can
+        return DISCARD
+
+    monkeypatch.setattr(editor_prompts, "ask_unsaved", rewrite_at_the_prompt)
+    window.export_gt_dataset()
+    assert opened == [custom]
+
+
 def test_the_window_handlers_follow_the_gt_files(window_with_project, monkeypatch):
     """``on_gt_saved`` marks the class labels; ``on_gt_removed`` sets every GT mark from
     the disk (a file that could not be deleted keeps its mark: must-do d);

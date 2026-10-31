@@ -4,8 +4,9 @@
 ``JobRegistry``) from :class:`~app.handlers.deps.HandlerDependencies`, and owns
 the project folder lookup (``ImageManager.project_layout``), starting a
 worker as a named job (RB-07: refused politely while another job runs) and
-wiring its Cancel button (PI-08), and the outcomes both kinds share (every input
-failed, a partial failure, Cancel). ``show_failure_report`` lists the inputs that
+wiring its Cancel button (PI-08), the check that the model's checkpoint exists before
+anything starts (S11-10), and the outcomes both kinds share (every input failed, a
+partial failure, Cancel, an error). ``show_failure_report`` lists the inputs that
 produced no output in ONE non-modal dialog, so a long unattended Generate
 (masks, then skeletons) never stalls on a modal box (UXS-02). A run in which
 every input failed (:func:`every_input_failed`) ends as a failure, so nothing
@@ -17,6 +18,7 @@ worker and its report are freed as soon as the handler lets it go.
 from __future__ import annotations
 
 import logging
+import os
 import weakref
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -93,13 +95,15 @@ class GenerationHandlerBase(HandlerDependencies):
     """Dependencies + job lifecycle for one kind of generation run.
 
     Subclasses set ``job_label`` (the job's user-visible name), ``title`` and ``noun``
-    (the run and what it writes, in its messages) and keep the running worker in
-    ``self._thread`` via :meth:`_start`.
+    (the run and what it writes, in its messages) and ``model_label`` (the model, in
+    the box of a missing checkpoint), override :meth:`weights_path` and keep the
+    running worker in ``self._thread`` via :meth:`_start`.
     """
 
     job_label = "Generating"
     title = "Generation"
     noun = "outputs"
+    model_label = "Model"
 
     def __init__(
         self,
@@ -138,6 +142,32 @@ class GenerationHandlerBase(HandlerDependencies):
         callback = getattr(self.main_window, "on_outputs_changed", None)
         if callable(callback):
             callback()
+
+    # ------------------------------------------------------------------ model
+    def weights_path(self) -> str:
+        """The checkpoint the run loads (a ``runtime`` lookup, read at call time)."""
+        raise NotImplementedError
+
+    @property
+    def model_available(self) -> bool:
+        """True when the checkpoint exists (the model itself loads on first use)."""
+        return os.path.isfile(self.weights_path())
+
+    def refuse_without_model(self) -> bool:
+        """True (and a warning box naming the file) when the checkpoint is missing.
+
+        Asked before anything starts, so a missing file never costs a run: Generate asks
+        both handlers before its mask pass (S11-10).
+        """
+        if self.model_available:
+            return False
+        QMessageBox.warning(
+            self.parent_widget(),
+            f"{self.model_label} missing",
+            f"{self.title} is unavailable: the model weights were not found at\n"
+            f"{self.weights_path()}",
+        )
+        return True
 
     # ------------------------------------------------------------------ lifecycle
     def _start(self, thread: GuardedThread, on_success: Callable[[], None] | None = None) -> bool:
@@ -210,6 +240,14 @@ class GenerationHandlerBase(HandlerDependencies):
             f"{self.title} cancelled{done}; finished {self.noun} were kept", "info"
         )
         self.outputs_changed()  # the kept outputs: badges, display and metrics follow
+
+    def _on_failed(self, thread: GenerationThread, message: str) -> None:
+        """The run raised: the window first shows the outputs written before the error
+        (they stay on disk, R7), then the one error box (L2b: one order for both kinds)."""
+        logging.getLogger(type(self).__module__).error("%s failed: %s", self.title, message)
+        self.feedback.task_failed(f"{self.title} failed")
+        self.outputs_changed()
+        QMessageBox.critical(self.parent_widget(), f"{self.title} failed", message)
 
 
 def every_input_failed(report: BatchReport) -> bool:
