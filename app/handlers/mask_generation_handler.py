@@ -30,7 +30,12 @@ from PyQt6.QtWidgets import QApplication, QMessageBox, QWidget
 from app.dialogs import run_modal
 from app.feedback import UiFeedback
 from app.handlers.deps import SAVED_PATH_STATUS_MS, folder_label
-from app.handlers.generation_base import GenerationHandlerBase, GenerationThread, thread_slot
+from app.handlers.generation_base import (
+    GenerationHandlerBase,
+    GenerationThread,
+    open_folder_action,
+    thread_slot,
+)
 from app.handlers.job_registry import JobRegistry
 from app.inference import runtime
 from app.inference.mask_origin import OverwritePolicy, scan_existing_masks
@@ -246,7 +251,11 @@ class MaskGenerationHandler(GenerationHandlerBase):
             # (W13) The folder's name in the toast, its full path in the status line.
             self.feedback.status(f"Saved to {output_dir}", SAVED_PATH_STATUS_MS)
             folder = folder_label(output_dir, self.project_folder())
-            self.feedback.notify(f"{message}. Saved to the {folder} folder", "success")
+            self.feedback.notify(
+                f"{message}. Saved to the {folder} folder",
+                "success",
+                action=open_folder_action(output_dir),
+            )
         self.outputs_changed()
 
 

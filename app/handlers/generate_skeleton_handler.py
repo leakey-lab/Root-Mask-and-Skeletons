@@ -20,7 +20,12 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from app.handlers.deps import SAVED_PATH_STATUS_MS, folder_label
-from app.handlers.generation_base import GenerationHandlerBase, GenerationThread, thread_slot
+from app.handlers.generation_base import (
+    GenerationHandlerBase,
+    GenerationThread,
+    open_folder_action,
+    thread_slot,
+)
 from app.inference import runtime
 
 logger = logging.getLogger(__name__)
@@ -126,7 +131,11 @@ class GenerateSkeletonHandler(GenerationHandlerBase):
             # (W13) The folder's name in the toast, its full path in the status line.
             self.feedback.status(f"Skeletons saved to {results_dir}", SAVED_PATH_STATUS_MS)
             folder = folder_label(results_dir, self.project_folder())
-            self.feedback.notify(f"Skeletons saved to the {folder} folder", "success")
+            self.feedback.notify(
+                f"Skeletons saved to the {folder} folder",
+                "success",
+                action=open_folder_action(results_dir),
+            )
         self.main_window.load_results(results_dir)
 
 

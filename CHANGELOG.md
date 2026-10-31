@@ -850,7 +850,9 @@ Eight passes, not yet released:
   "<what> · <file name>" shows its title and then the file name in mono on one line, and
   every kind has a close button (success and info had none). A toast may carry one action
   button (`NoticeAction` in `app/feedback.py`, the optional `action=` of `notify`); it
-  closes the toast. The newest toast is in front and the older ones tuck behind it until
+  closes the toast. The done toast of mask and of skeleton generation has an "Open folder"
+  button that shows the output folder in the file manager (none when inputs failed:
+  `open_folder_action` in `app/handlers/generation_base.py`). The newest toast is in front and the older ones tuck behind it until
   the pointer is over the stack, which fans it out; a new toast slides up, the stack glides
   and a dismissed toast sinks as it fades (placed at once on the offscreen platform).
   Every countdown pauses while the pointer is over the stack and while SPROUTS is in the

@@ -23,11 +23,12 @@ import weakref
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import QMessageBox, QWidget
 
 from app.dialogs import show_transient
-from app.feedback import UiFeedback
+from app.feedback import NoticeAction, UiFeedback
 from app.handlers.deps import HandlerDependencies
 from app.handlers.job_registry import JobRegistry
 from app.project_layout import project_layout_of
@@ -250,6 +251,11 @@ class GenerationHandlerBase(HandlerDependencies):
         QMessageBox.critical(self.parent_widget(), f"{self.title} failed", message)
 
 
+def open_folder_action(folder: str) -> NoticeAction:
+    """The done toast's one button: shows ``folder`` in the system file manager."""
+    return NoticeAction("Open folder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(folder)))
+
+
 def every_input_failed(report: BatchReport) -> bool:
     """True when the run attempted inputs and every input failed: none has an output (R6).
 
@@ -302,6 +308,7 @@ __all__ = [
     "GenerationHandlerBase",
     "GenerationThread",
     "every_input_failed",
+    "open_folder_action",
     "show_failure_report",
     "thread_slot",
 ]
