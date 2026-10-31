@@ -28,6 +28,12 @@ dist/
 .pytest_cache/
 .cursorignore
 /field docs ex/
+# Lab field-planning files: real experiment data with credentials and personal contact
+# details. Local reference only, never commit.
+/docs/Field Planning/
+# WinRHIZO Tron user manual: Regent Instruments copyright, "may NOT ... be reproduced ...
+# or made available for download" (p. 2). Local reference only, never commit.
+/docs/WinRHIZOTRON2019USAHR.pdf
 
 # Claude Code session + tooling artifacts
 .claude/
