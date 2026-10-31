@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import QMainWindow, QMessageBox
 
 from app import APP_NAME
 from app.dialogs import run_modal
+from app.feedback import NoticeAction
 from app.gt import RegistryError, load_registry
 from app.handlers.job_registry import JobRegistry
 from app.project_layout import project_layout_of
@@ -345,13 +346,20 @@ class MainWindow(QMainWindow):
     _side_chrome = body.side_chrome
 
     def notify(
-        self, message: str, kind: str = "success", timeout: int = 3200, *, key: str | None = None
+        self,
+        message: str,
+        kind: str = "success",
+        timeout: int | None = None,
+        *,
+        key: str | None = None,
+        action: NoticeAction | None = None,
     ) -> None:
-        """Show a transient toast. ``kind`` in success/info/warn/danger; a ``key`` updates the
-        live toast of that key instead of stacking another."""
+        """Show a transient toast. ``kind`` in success/info/warn/danger; ``timeout`` None is
+        the kind's own lifetime; a ``key`` updates the live toast of that key instead of
+        stacking another; an ``action`` adds its one button."""
         toasts = getattr(self, "toasts", None)
         if toasts is not None:
-            toasts.show(message, kind=kind, timeout=timeout, key=key)
+            toasts.show(message, kind=kind, timeout=timeout, key=key, action=action)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

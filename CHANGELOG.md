@@ -737,6 +737,18 @@ Seven passes, not yet released:
   app version, commit, model SHA-256, calibration and runtime precision.
 
 ### Changed
+- **Toasts are capsules (2026-10-31, owner choice from mockups that combined Sonner and the
+  Coloplast design system).** A toast is a pill instead of a card with a coloured stripe on
+  its left: a ring in the kind's colour around its glyph counts the lifetime down, a save's
+  "<what> · <file name>" shows its title and then the file name in mono on one line, and
+  every kind has a close button (success and info had none). A toast may carry one action
+  button (`NoticeAction` in `app/feedback.py`, the optional `action=` of `notify`); it
+  closes the toast. The newest toast is in front and the older ones tuck behind it until
+  the pointer is over the stack, which fans it out; a new toast slides up, the stack glides
+  and a dismissed toast sinks as it fades (placed at once on the offscreen platform).
+  Every countdown pauses while the pointer is over the stack and while SPROUTS is in the
+  background. Success and info toasts last 4 s instead of 3.2 s; warnings at least 6 s and
+  errors until closed, as before. Mockups: `.superpowers/brainstorm/` (local).
 - **Python 3.14 and the newest dependencies (2026-10-27, owner decision).** Python 3.14
   (from 3.10: `requires-python >= 3.14`, CI on 3.14, ruff `py314`); PyTorch 2.14.1 and
   torchvision 0.29.1 from the CUDA 13.2 index (`cu132`, NVIDIA driver of the 580 series or

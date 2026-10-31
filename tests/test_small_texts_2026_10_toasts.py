@@ -1,10 +1,11 @@
 """A save toast with a long file name stays on one line (KNOWN_ISSUES #7).
 
 "Saved mask · <file name>" wrapped onto two lines when the name was long: the name fitted
-on a line of its own, so it was not shortened, but the whole line did not fit. Now the
-name of a "<what> · <name>" toast is elided in the middle (its start and its extension
-stay) when the line would wrap; the full text stays in the tooltip. Other messages wrap
-as before.
+on a line of its own, so it was not shortened, but the whole line did not fit. Now a
+"<what> · <name>" toast shows its title and then the name (mono), elided in the middle (its
+start and its extension stay) on the same line; only a name left under MIN_NAME_PX beside
+its title takes a line of its own (2026-10-31 capsule). The full text stays in the tooltip.
+Other messages wrap as before.
 """
 
 from __future__ import annotations
@@ -29,24 +30,36 @@ def host(app):
     delete_widgets(made)
 
 
-def _label(toast) -> QLabel:
-    return toast.findChild(QLabel, "toastText")
+def _title(toast) -> QLabel:
+    return toast.findChild(QLabel, "toastTitle")
+
+
+def _name(toast) -> QLabel:
+    return toast.findChild(QLabel, "toastDetail")
+
+
+def _one_line(toast) -> bool:
+    title, name = _title(toast), _name(toast)
+    title_box, name_box = title.geometry(), name.geometry()
+    return (
+        not title.wordWrap()
+        and name_box.left() > title_box.right()
+        and name_box.top() < title_box.bottom()  # the same row (centred, smaller font)
+    )
 
 
 # "mask and skeleton" is left out: the offscreen platform's wide font leaves its name
-# under MIN_NAME_PX (the app's font leaves it about 230 px).
+# under MIN_NAME_PX beside its title (the app's font leaves it about 230 px).
 @pytest.mark.parametrize("what", ["mask", "GT"])
 def test_a_long_file_name_is_elided_in_the_middle_on_one_line(host, what):
     message = f"Saved {what} · {NAME}"
     toast = ToastManager(host).show(message)
     QApplication.processEvents()
 
-    label = _label(toast)
-    assert not label.wordWrap()
-    assert "\n" not in label.text()
-    assert label.text().startswith(f"Saved {what} · 24EF")
-    assert label.text().endswith(".jpg")
-    assert "…" in label.text()
+    assert _title(toast).text() == f"Saved {what}"
+    name = _name(toast).text()
+    assert name.startswith("24EF") and name.endswith(".jpg") and "…" in name
+    assert _one_line(toast)
     assert toast.width() <= 460
     assert host.rect().contains(toast.geometry())
     assert toast.toolTip() == message
@@ -57,34 +70,18 @@ def test_a_short_name_is_left_whole(host):
     toast = ToastManager(host).show("Saved mask · L44.jpg")
     QApplication.processEvents()
 
-    assert _label(toast).text() == "Saved mask · L44.jpg"
-    assert not _label(toast).wordWrap()
+    assert (_title(toast).text(), _name(toast).text()) == ("Saved mask", "L44.jpg")
+    assert _one_line(toast)
 
 
-def test_a_name_with_no_room_left_beside_its_lead_wraps(host):
+def test_a_name_with_no_room_left_beside_its_title_takes_its_own_line(host):
     message = f"Saved the mask, the skeleton and the ground truth tracing of this image · {NAME}"
     toast = ToastManager(host).show(message)
     QApplication.processEvents()
 
-    assert _label(toast).wordWrap()
-    assert _label(toast).text().startswith("Saved the mask, the skeleton")
-
-
-def test_one_line_needs_a_name_room_of_min_name_px(app):
-    """The fitting rule on its own, with the application's font."""
-    from PyQt6.QtGui import QFontMetrics
-
-    from app.gui.widgets.toasts import MIN_NAME_PX, name_on_one_line
-
-    metrics = QFontMetrics(QApplication.font())
-    lead = "Saved mask · "
-    room = metrics.horizontalAdvance(lead) + MIN_NAME_PX + 40
-    line = name_on_one_line(lead + NAME, metrics, room)
-    assert line is not None and line.startswith(lead + "2") and line.endswith("jpg")
-    assert metrics.horizontalAdvance(line) <= room
-    assert name_on_one_line(lead + NAME, metrics, room - 50) is None  # under MIN_NAME_PX
-    assert name_on_one_line(lead + "L44.jpg", metrics, room) is None  # fits as it is
-    assert name_on_one_line(f"Could not save {NAME} here", metrics, room) is None
+    assert _title(toast).text().startswith("Saved the mask, the skeleton")
+    assert _name(toast).geometry().top() >= _title(toast).geometry().bottom()
+    assert _name(toast).text().endswith(".jpg")
 
 
 def test_a_sentence_still_wraps(host):
@@ -92,8 +89,9 @@ def test_a_sentence_still_wraps(host):
     toast = ToastManager(host).show(message, "danger")
     QApplication.processEvents()
 
-    assert _label(toast).wordWrap()
-    assert _label(toast).text().endswith(": disk full")
+    assert _title(toast).wordWrap()
+    assert _title(toast).text().endswith(": disk full")
+    assert not _name(toast).isVisibleTo(toast)
 
 
 def test_several_words_after_the_dot_still_wrap(host):
@@ -101,8 +99,9 @@ def test_several_words_after_the_dot_still_wrap(host):
     toast = ToastManager(host).show(message.strip(), "info")
     QApplication.processEvents()
 
-    assert _label(toast).wordWrap()
-    assert "…" not in _label(toast).text()
+    assert _title(toast).wordWrap()
+    assert "…" not in _title(toast).text()
+    assert not _name(toast).isVisibleTo(toast)
 
 
 def test_an_update_in_place_refits_the_name(host):
@@ -112,5 +111,5 @@ def test_an_update_in_place_refits_the_name(host):
     assert manager.show(f"Saved mask · {NAME}", key="saved") is toast
     QApplication.processEvents()
 
-    assert not _label(toast).wordWrap()
-    assert _label(toast).text().endswith(".jpg") and "…" in _label(toast).text()
+    assert _one_line(toast)
+    assert _name(toast).text().endswith(".jpg") and "…" in _name(toast).text()
