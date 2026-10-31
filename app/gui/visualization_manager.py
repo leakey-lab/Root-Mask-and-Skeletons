@@ -499,6 +499,8 @@ class DashboardController:
                     f"Saved {os.path.basename(path)} in {os.path.dirname(path)}", "success"
                 )
             )
+        if notify is not None and hasattr(dashboard, "export_failed"):
+            dashboard.export_failed.connect(lambda message: notify(message, "warn"))
         self._sources[spec.kind] = _source_signature(csv_path)
         # Set the attribute before the page switch: MainWindow collapses the
         # library when the current page is one of its dashboards.

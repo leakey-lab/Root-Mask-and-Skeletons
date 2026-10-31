@@ -173,6 +173,9 @@ class DashVizWindow(QMainWindow):
     server_closed = pyqtSignal()
     #: Path of an export (Plotly camera button) saved next to the CSV.
     export_saved = pyqtSignal(str)
+    #: One-line message for an export that failed: its file could not be saved, or the
+    #: server could not build the "Export CSV" table.
+    export_failed = pyqtSignal(str)
 
     window_title = "Visualization"
     download_prefix = "plot"
@@ -304,6 +307,7 @@ class DashVizWindow(QMainWindow):
             return  # closed while the data was loading
         self.processor = processor
         self.dash_app = dash_app
+        self._hook_csv_export_failures(self.export_failed.emit)  # before the server serves
         self._stage = _Stage.STARTING
         self._set_status("Starting the dashboard server…")
         thread = self.server_thread_class(dash_app, self.port)
@@ -383,9 +387,18 @@ class DashVizWindow(QMainWindow):
         _disconnect(worker.failed)
         release_qthread(worker)  # never blocks: a build still running finishes on its own
 
+    def _hook_csv_export_failures(self, report: Callable[[str], None] | None) -> None:
+        """Point the page's "Export CSV" failure hook (``DashboardShell.on_export_failed``)
+        at *report*; None unhooks it. Dash runs the export on a server request thread:
+        a signal's emit is safe there and reaches the window's slots on the GUI thread."""
+        shell = getattr(self.dash_app, "shell", None)
+        if shell is not None and hasattr(shell, "on_export_failed"):
+            shell.on_export_failed = report
+
     def _stop_background_work(self) -> bool:
         """Release the init worker and stop the server; True if a server was stopped."""
         self._release_init_worker()
+        self._hook_csv_export_failures(None)
         thread, self.server_thread = self.server_thread, None
         if thread is None:
             return False
@@ -446,5 +459,12 @@ class DashVizWindow(QMainWindow):
             return
         if download.state() == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
             self.export_saved.emit(path)
-        else:
-            logger.warning("Export to %s failed: %s", path, download.interruptReasonString())
+            return
+        reason = download.interruptReasonString()
+        logger.warning("Export to %s failed: %s", path, reason)
+        name, folder = os.path.basename(path), os.path.dirname(path)
+        self.export_failed.emit(
+            f"Could not save {name} in {folder}: {reason}"
+            if reason
+            else f"Could not save {name} in {folder}"
+        )

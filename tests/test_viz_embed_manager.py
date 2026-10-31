@@ -42,6 +42,7 @@ class StubDashboard(QMainWindow):
 
     server_closed = pyqtSignal()
     export_saved = pyqtSignal(str)
+    export_failed = pyqtSignal(str)
     made: list = []
 
     def __init__(self, csv_path):
@@ -407,6 +408,16 @@ def test_exports_are_announced_in_the_main_window(env):
     mw.root_length_viz.export_saved.emit(str(env.project / "skeletons" / "plot.svg"))
 
     assert mw.notices and "plot.svg" in mw.notices[-1][0]
+
+
+def test_failed_exports_are_announced_as_warnings(env):
+    mw = env.mw
+    vm.show_root_area_visualization(mw)
+    message = f"Could not save plot.svg in {env.project / 'mask'}: Insufficient Permissions"
+
+    mw.root_area_viz.export_failed.emit(message)
+
+    assert mw.notices[-1] == (message, "warn")
 
 
 # --------------------------------------------------------------------------- #

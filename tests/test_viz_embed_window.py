@@ -545,6 +545,54 @@ def test_only_completed_exports_are_announced(make_window, tmp_path):
     assert [os.path.normcase(p) for p in saved] == [os.path.normcase(str(tmp_path / "plot.svg"))]
 
 
+def test_a_failed_export_is_reported_with_its_file_and_reason(make_window, tmp_path):
+    window = make_window()
+    saved, failed = [], []
+    window.export_saved.connect(saved.append)
+    window.export_failed.connect(failed.append)
+    broken = FakeDownload(window.web_view.page(), suggested="other.svg")
+
+    window.handle_download(broken)
+    broken.finish(DownloadState.DownloadInterrupted)
+
+    assert saved == []
+    assert failed == [f"Could not save other.svg in {tmp_path}: Network failed"]
+
+
+class ShellDash(StubDash):
+    """A Dash app with the shell hook of DashboardShell (``on_export_failed``)."""
+
+    def __init__(self):
+        self.shell = SimpleNamespace(on_export_failed=None)
+
+
+def test_a_failed_csv_export_on_a_server_thread_reaches_the_window(make_window):
+    dash = ShellDash()
+    window = make_window(build=lambda: (object(), dash))
+    assert wait_until(lambda: dash.shell.on_export_failed is not None)
+    failed = []
+    window.export_failed.connect(failed.append)
+    message = "Could not export the Totals by Tube view: KeyError: 'Tube'"
+
+    # Dash runs callbacks on the server's request threads, never the GUI thread.
+    thread = threading.Thread(target=dash.shell.on_export_failed, args=(message,))
+    thread.start()
+    thread.join()
+
+    assert wait_until(lambda: failed)
+    assert failed == [message]
+
+
+def test_closing_unhooks_csv_export_failures(make_window):
+    dash = ShellDash()
+    window = make_window(build=lambda: (object(), dash))
+    assert wait_until(lambda: dash.shell.on_export_failed is not None)
+
+    window.cleanup_server()
+
+    assert dash.shell.on_export_failed is None
+
+
 # --------------------------------------------------------------------------- #
 #  Prewarm (PKG-VIZ, V2): what the first open of a session used to wait for
 # --------------------------------------------------------------------------- #
