@@ -121,9 +121,7 @@ def missing_dashboard_data(
         title = f"{running}…" if running else "Waiting for a run to finish"
         return title, f"The {noun} dashboard opens when it has finished.", "", None
     try:
-        # Through the project's measurement index: once its pool search has walked, a few stats.
-        index = visualization_manager.measurement_index_of(window, layout)
-        if spec.find_csv(layout, index).path:
+        if spec.find_csv(layout).path:  # a few stats
             return None
     except Exception:  # noqa: BLE001 - the dashboard controller reports it then
         logger.exception("Could not look for the %s CSV", kind)
@@ -134,8 +132,7 @@ def missing_dashboard_data(
         button, csv_path = "Measure Length", os.path.join(layout.skeletons_dir, ROOT_LENGTHS_CSV)
     else:
         inputs, made = manager.masks, "masks"
-        masks_dir = layout.resolve_masks_dir() or layout.mask_dir
-        button, csv_path = "Measure Area", os.path.join(masks_dir, ROOT_AREAS_CSV)
+        button, csv_path = "Measure Area", os.path.join(layout.mask_dir, ROOT_AREAS_CSV)
     if inputs:
         stage, step = "Measure", f"Run Measure → {button} to chart the {noun} of this trial."
     else:

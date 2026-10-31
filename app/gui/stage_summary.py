@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import csv
 import os
-from collections.abc import Collection, Container, Iterable
+from collections.abc import Callable, Collection, Container, Iterable
 from dataclasses import dataclass
 
 from app.config import SOURCE_COLUMN
@@ -35,14 +35,19 @@ from app.inference.measure_inputs import (
     scan_stamps,
 )
 from app.naming import stem_key
-from app.project_layout import SKELETON_SUFFIX, skeleton_stem
+from app.project_layout import SKELETON_SUFFIX, group_skeletons, skeleton_stem, skip_gt_variants
 
 __all__ = ["Freshness", "generate_text", "input_freshness", "measure_text", "missing"]
 
+_Group = Callable[[Iterable[tuple[str, str]]], tuple[dict[str, str], list[tuple[str, str]]]]
 #: Suffixes listed by the name rule of Measure's own listing (masks and GT files: the
-#: extension in any case; skeletons: the exact suffix; hidden names too), so the count is of
-#: the files Measure reads.
-_NAME_RULES = {SKELETON_SUFFIX: skeleton_stem, ".png": png_stem}
+#: extension in any case; skeletons: the suffix in any case; hidden names too), and the file
+#: it keeps of several with one stem (masks: the name that sorts first; skeletons: the exact
+#: suffix first, #3), so the count is of the files Measure reads.
+_NAME_RULES: dict[str, tuple[Callable[[str], str | None], _Group]] = {
+    SKELETON_SUFFIX: (skeleton_stem, group_skeletons),
+    ".png": (png_stem, group_by_stem),
+}
 
 
 @dataclass(frozen=True)
@@ -155,11 +160,12 @@ def measure_text(
 
 
 def _only_with_image(
-    files: Iterable[tuple[str, str]], images: Collection[str]
+    files: Iterable[tuple[str, str]], images: Collection[str], group: _Group = group_by_stem
 ) -> tuple[set[str], int, int]:
     """``(paths Measure would read, files without an image, duplicates)`` of ``files``
-    (``(stem, path)`` pairs): what :func:`~app.inference.input_split.split_inputs` sorts."""
-    listed, shadowed = group_by_stem(files)
+    (``(stem, path)`` pairs, several of one stem kept as ``group`` keeps them): what
+    :func:`~app.inference.input_split.split_inputs` sorts."""
+    listed, shadowed = group(files)
     split = split_inputs(listed, images, shadowed)
     return set(split.kept.values()), len(split.without_image), len(split.duplicates)
 
@@ -172,18 +178,30 @@ def _stem_of(path: str, cut: int) -> str:
 
 
 def _listed(
-    folder: str | None, suffix: str, root: str, images: Collection[str] | None
+    folder: str | None,
+    suffix: str,
+    root: str,
+    images: Collection[str] | None,
+    gt_stems: Collection[str] = (),
 ) -> tuple[dict[str, Stamp], int, int]:
     """``(input key -> stamp, without an image, duplicates)`` of the ``*suffix`` files of
-    ``folder`` Measure would read (with ``images``: those of an image in the project)."""
+    ``folder`` Measure would read (with ``images``: those of an image in the project).
+    ``gt_stems`` (skeletons): the stems of the images' GT files; a suffix in another case is
+    not read for those images (:func:`~app.project_layout.skip_gt_variants`, #3)."""
     if not folder:
         return {}, 0, 0
     cut = len(suffix)
-    stamps = scan_stamps(folder, suffix, root, stem_of=_NAME_RULES.get(suffix))
-    if images is None:
+    stem_of, group = _NAME_RULES.get(suffix, (None, group_by_stem))
+    stamps = scan_stamps(folder, suffix, root, stem_of=stem_of)
+    if images is None and not gt_stems:
         return stamps, 0, 0
     files = ((_stem_of(path, cut), path) for path, _size, _mtime in stamps.values())
-    keep, without_image, duplicates = _only_with_image(files, images)
+    if gt_stems:
+        files = skip_gt_variants(files, gt_stems)
+    if images is None:
+        keep, without_image, duplicates = {path for _stem, path in files}, 0, 0
+    else:
+        keep, without_image, duplicates = _only_with_image(files, images, group)
     return {key: st for key, st in stamps.items() if st[0] in keep}, without_image, duplicates
 
 
@@ -246,10 +264,12 @@ def _gt_first_freshness(
     files that are gone. Without a record (by file time): an image's GT file alone when it
     has one, else its prediction, is changed when written after the CSV; an image with a GT
     file is changed whatever the times when the CSV has no ``Source`` column (written before
-    O1: Measure would now read that file)."""
-    predicted, p_without, p_duplicates = _listed(folder, suffix, root, images)
+    O1: Measure would now read that file). A skeleton whose suffix is in another case is
+    not an input of an image with a GT file, not even a duplicate, as in Measure (#3)."""
     traced, g_without, g_duplicates = _listed(gt_folder, ".png", root, images)
     gt_of = {stem_key(_stem_of(stamp[0], len(".png"))): key for key, stamp in traced.items()}
+    gt_stems = gt_of if suffix == SKELETON_SUFFIX else ()  # #3: Measure Length's rule
+    predicted, p_without, p_duplicates = _listed(folder, suffix, root, images, gt_stems)
     measured = record.inputs if record is not None else {}
     current: dict[str, Stamp] = {}  # the files compared with the record
     by_time: list[tuple[Stamp, bool]] = []  # per image: (the file compared by time, a GT file)
@@ -320,7 +340,7 @@ def input_freshness(
     The temp file of a write in progress (``.<name>.<token>.tmp``) is not an input.
     ``*.png`` files and generated skeletons are listed as Measure lists them, hidden names
     too (:func:`~app.inference.input_split.png_stem`: the extension in any case;
-    :func:`~app.project_layout.skeleton_stem`: the exact suffix); other suffixes match
+    :func:`~app.project_layout.skeleton_stem`: the suffix in any case); other suffixes match
     without case and skip hidden names. With ``record`` (the CSV's
     :func:`~app.inference.measure_inputs.load_inputs_record`; keys relative to
     ``project_root``, default the parent of ``folder`` as in Measure), an input

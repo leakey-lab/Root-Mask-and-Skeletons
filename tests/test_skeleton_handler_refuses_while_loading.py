@@ -33,14 +33,11 @@ class _IdleGeneration:
         return False
 
 
-def _project(folder, *, outputs: bool, older: bool = False):
-    """Two photos; with ``outputs`` their skeletons and masks, with ``older`` also masks in
-    the older ``output/mask`` folder (Measure Area then warns that it measures that one)."""
+def _project(folder, *, outputs: bool):
+    """Two photos; with ``outputs`` their skeletons and masks."""
     img = np.zeros((48, 64), np.uint8)
     cv2.line(img, (0, 0), (63, 47), 255, 2)
     subs = [("skeletons", "_fake.png"), ("mask", ".png")] if outputs else []
-    if older:
-        subs.append((os.path.join("output", "mask"), ".png"))
     for stem in ("a", "b"):
         cv2.imwrite(str(folder / f"{stem}.jpg"), img)
         for sub, suffix in subs:
@@ -66,7 +63,7 @@ def _notes(window):
 def test_nothing_of_the_open_project_is_read_while_a_folder_loads(
     tmp_path, qapp, monkeypatch, call
 ):
-    _project(tmp_path, outputs=True, older=True)
+    _project(tmp_path, outputs=True)
 
     def fail(*_args, **_kwargs):
         pytest.fail("the project was resolved or listed while a folder loads")
@@ -86,9 +83,9 @@ def test_nothing_of_the_open_project_is_read_while_a_folder_loads(
 @pytest.mark.parametrize("call", ENTRY_POINTS)
 @pytest.mark.parametrize("left", ["with_outputs", "without_outputs", "first_load"])
 def test_the_only_message_while_a_folder_loads_is_the_refusal(tmp_path, qapp, call, left):
-    """No message about the project being left: not its missing outputs, not its older
-    mask folder, not 'No images loaded' while the first folder loads."""
-    _project(tmp_path, outputs=left == "with_outputs", older=left == "with_outputs")
+    """No message about the project being left: not its missing outputs, not 'No images
+    loaded' while the first folder loads."""
+    _project(tmp_path, outputs=left == "with_outputs")
     folder = None if left == "first_load" else str(tmp_path)
     handler, window = _handler(SimpleNamespace(original_folder=folder, images={}), loading=True)
     getattr(handler, call)()

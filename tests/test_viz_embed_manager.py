@@ -26,7 +26,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-import app.project_layout as project_layout
 from app.gui import visualization_manager as vm
 from app.gui.panels import Panel
 from tests.qt_teardown import flush_deleted
@@ -325,22 +324,6 @@ def test_missing_data_leaves_the_panels_and_opengl_alone(env):
     assert mw.gl_calls == []
     assert mw.right_panel.currentIndex() == 0
     assert [box[0] for box in env.boxes] == ["information"]
-
-
-def test_primary_csv_skips_the_legacy_folder_search(env, monkeypatch):
-    calls = []
-
-    def spy(*args, **kwargs):
-        calls.append(args)
-        return None
-
-    monkeypatch.setattr(project_layout, "find_test_latest_dir", spy)
-    monkeypatch.setattr(vm, "find_test_latest_dir", spy)
-
-    vm.show_root_length_visualization(env.mw)
-
-    assert len(StubLength.made) == 1
-    assert calls == []
 
 
 def test_show_waits_while_the_data_is_being_measured(env):

@@ -16,8 +16,6 @@ from app.inference.metrics import write_metric_csv
 from tests.leak_census import assert_freed, no_gc_fixture  # noqa: F401
 
 STEM = "24EFCAM1_T001_L044_2024.07.18_111530_001_SMM"
-#: A legacy folder that only the ``test_latest`` walk finds.
-WALKED = ("results", "run1", "test_latest", "images")
 
 
 def _write_lengths(folder) -> None:
@@ -34,13 +32,13 @@ def test_a_new_index_is_freed_by_refcount(tmp_path, no_gc):
     assert_freed(ref, "a new measurement index")
 
 
-def test_an_index_that_walked_and_parsed_is_freed_by_refcount(tmp_path, no_gc):
-    _write_lengths(tmp_path.joinpath(*WALKED))
+def test_an_index_that_parsed_is_freed_by_refcount(tmp_path, no_gc):
+    _write_lengths(tmp_path / "skeletons")
     index = MeasurementIndex(str(tmp_path))
-    index.prewarm()  # the worker's search: walks, keeps what the walk found, parses
+    index.prewarm()  # the worker's search: finds, parses, lists the GT folders
     assert index.lookup(STEM, load=False).length_mm == 9.25
-    assert index.find_lengths_csv() is not None  # the dashboards' check, from the kept walk
+    assert index.outdated(STEM) == {"length": False, "area": False}
     index.invalidate()  # a Measure job end
     ref = weakref.ref(index)
     del index
-    assert_freed(ref, "a walked and parsed measurement index")
+    assert_freed(ref, "a parsed measurement index")

@@ -76,8 +76,9 @@ _CACHE_LIMIT = 64
 #: The largest ``reference_size_px`` value accepted (keeps its ratio a finite float).
 _MAX_SIZE_PX = 1_000_000_000
 #: How many folders above an output file :func:`load_for_output` looks for the project file
-#: (``<root>/output/skeletonizer/test_latest/images/root_lengths.csv`` is 5).
-_OUTPUT_LEVELS = 5
+#: (``<root>/skeletons/root_lengths.csv`` needs 1, a CSV one folder deeper 2; the older
+#: layout's 4-5 are not read, #38).
+_OUTPUT_LEVELS = 2
 _FOV_KEYS = ("fov_width_mm", "fov_height_mm")
 
 
@@ -243,9 +244,9 @@ def load_for_output(
     output_path: str, project_root: str | os.PathLike[str] | None = None
 ) -> ProjectCalibration:
     """The project calibration of an output file: its ``project_root``'s when the caller
-    knows it; else the project file of the nearest folder above it, at most five levels up
-    (``<root>/skeletons/root_lengths.csv`` is two, ``<root>/output/mask/…`` three, the legacy
-    ``<root>/[output/]skeletonizer/test_latest/images/…`` four or five); else the default."""
+    knows it; else the project file of the nearest folder above it, at most two folders up
+    (``<root>/skeletons/root_lengths.csv`` and ``<root>/mask/root_areas.csv`` are one);
+    else the default."""
     if project_root is not None:
         return load_project_calibration(project_root)
     folder = os.path.dirname(os.path.abspath(output_path))

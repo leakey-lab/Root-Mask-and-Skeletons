@@ -31,7 +31,7 @@ from app.config import (
     SKELETONS_DIRNAME,
 )
 from app.data_processing.measurement_index import MeasurementIndex
-from app.project_layout import SKELETON_SUFFIX, ImageScan, project_layout_of
+from app.project_layout import ImageScan, project_layout_of, skeleton_stem
 from app.provenance import RUN_MANIFEST_FILENAME
 
 from .. import visualization_manager
@@ -64,10 +64,11 @@ GT_FOLDER_OPEN = (
 
 
 def _has_prediction(folder: str) -> bool:
-    """True when ``folder`` (a ``skeletons/``) holds a ``*_fake.png``; stops at the first."""
+    """True when ``folder`` (a ``skeletons/``) holds a ``*_fake.png`` (the suffix in any case,
+    as Measure lists them); stops at the first."""
     try:
         with os.scandir(folder) as entries:
-            return any(e.name.endswith(SKELETON_SUFFIX) for e in entries)
+            return any(skeleton_stem(e.name) is not None for e in entries)
     except OSError:
         return False
 

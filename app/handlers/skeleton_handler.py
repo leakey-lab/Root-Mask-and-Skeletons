@@ -46,7 +46,7 @@ from app.inference.measure_run import (
 from app.inference.measure_sources import SIZE, UNEDITED, UNREADABLE
 from app.inference.metric_thread import MetricCalculatorThread
 from app.masks.store import MASK_THRESHOLD
-from app.project_layout import ProjectLayout, project_layout_of
+from app.project_layout import ProjectLayout, project_layout_of, skip_gt_variants
 from app.workers import release_qthread
 
 from .generate_skeleton_handler import GenerateSkeletonHandler
@@ -134,19 +134,11 @@ class SkeletonHandler(HandlerDependencies):
         layout = self._layout()
         if layout is None:
             return
-        folder = layout.resolve_skeletons_dir()
-        if folder is None:
-            if not self._has_gt(layout.gt_skeletons_dir):
-                self._warn("No skeleton images found. Generate skeletons first.")
-                return
-            folder = layout.skeletons_dir  # GT only: the CSV goes where Measure writes it
-        self._measure(
-            LENGTH,
-            layout,
-            folder,
-            lambda d: (layout.scan_skeletons(d), []),
-            layout.gt_skeletons_dir,
-        )
+        folder = layout.skeletons_dir  # with GT files only, the CSV still goes here
+        if not os.path.isdir(folder) and not self._has_gt(layout.gt_skeletons_dir):
+            self._warn("No skeleton images found. Generate skeletons first.")
+            return
+        self._measure(LENGTH, layout, folder, layout.scan_skeleton_files, layout.gt_skeletons_dir)
 
     def calculate_root_area(self):
         """Measure the root area of every image with a mask: its GT mask
@@ -157,21 +149,10 @@ class SkeletonHandler(HandlerDependencies):
         layout = self._layout()
         if layout is None:
             return
-        folder = layout.resolve_masks_dir()
-        if folder is None:
-            if not self._has_gt(layout.gt_mask_dir):
-                self._warn("No mask images found. Generate masks first.")
-                return
-            folder = layout.mask_dir  # GT only: the CSV goes where Measure writes it
-        existing = [d for d in layout.mask_dir_candidates if os.path.isdir(d)]
-        if len(existing) > 1:
-            logger.warning("Both %s exist; measuring %s", " and ".join(existing), folder)
-            # Generate and Correct save to mask/: say that it is left out (R7).
-            others = ", ".join(os.path.relpath(d, layout.root) for d in existing if d != folder)
-            self._warn(
-                f"Measuring the older {os.path.relpath(folder, layout.root)} folder: "
-                f"masks in {others} are not measured."
-            )
+        folder = layout.mask_dir  # with GT files only, the CSV still goes here
+        if not os.path.isdir(folder) and not self._has_gt(layout.gt_mask_dir):
+            self._warn("No mask images found. Generate masks first.")
+            return
         self._measure(AREA, layout, folder, scan_png_files, layout.gt_mask_dir)
 
     def retry_measure(self, kind: str) -> bool:
@@ -223,8 +204,13 @@ class SkeletonHandler(HandlerDependencies):
         # O37: a mask or skeleton whose image is gone gets no row; the files stay on disk.
         # GT files follow the same rules; they are named with their folder (gt/...).
         by_key = images_by_key(image_stems)
-        split = split_inputs(images, image_stems, shadowed, by_key=by_key)
         gt_split = split_inputs(gt_files, image_stems, gt_shadowed, by_key=by_key)
+        if spec.kind == LENGTH.kind and gt_split.kept:
+            # #3: a skeleton whose suffix is in another case (B_fake.PNG) is not read for an
+            # image with a GT skeleton file, so that image's row stays as it was before #3.
+            images = dict(skip_gt_variants(images.items(), gt_split.kept))
+            shadowed = list(skip_gt_variants(shadowed, gt_split.kept))
+        split = split_inputs(images, image_stems, shadowed, by_key=by_key)
         gt_prefix = os.path.relpath(gt_folder, layout.root).replace(os.sep, "/") + "/"
         without_image = [*split.without_image, *(gt_prefix + n for n in gt_split.without_image)]
         duplicates = [*split.duplicates, *(gt_prefix + n for n in gt_split.duplicates)]

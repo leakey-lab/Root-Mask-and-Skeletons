@@ -171,12 +171,10 @@ def test_what_a_killed_atomic_write_leaves_is_swept(tmp_path, monkeypatch, targe
 def test_output_dirs_are_the_folders_the_app_writes_into(tmp_path):
     root = str(tmp_path)
     join = os.path.join
+    # The older layout (output/mask, [output/]skeletonizer/test_latest/images) is retired (#38).
     assert ProjectLayout(root).output_dirs == (
-        join(root, "output", "mask"),
         join(root, "mask"),
         join(root, "skeletons"),
-        join(root, "output", "skeletonizer", "test_latest", "images"),
-        join(root, "skeletonizer", "test_latest", "images"),
         join(root, "gt"),
         join(root, "gt", "mask"),
         join(root, "gt", "skeletons"),
@@ -184,24 +182,14 @@ def test_output_dirs_are_the_folders_the_app_writes_into(tmp_path):
     assert os.listdir(tmp_path) == []  # describing the folders creates none
 
 
-@pytest.mark.parametrize(
-    ("mask_parts", "skeleton_parts"),
-    [
-        (("mask",), ("skeletons",)),
-        (("output", "mask"), ("output", "skeletonizer", "test_latest", "images")),
-        (("output", "mask"), ("skeletonizer", "test_latest", "images")),
-    ],
-)
-def test_output_dirs_hold_the_folders_measure_writes_its_csvs_into(
-    tmp_path, mask_parts, skeleton_parts
-):
-    # Measure writes root_areas.csv / root_lengths.csv (+ .provenance.json) into the
-    # folder it measured: skeleton_handler's resolve_masks_dir / resolve_skeletons_dir.
+def test_output_dirs_hold_the_folders_measure_writes_its_csvs_into(tmp_path):
+    # Measure writes root_areas.csv / root_lengths.csv (+ .provenance.json) next to the
+    # predictions it reads, in mask/ and skeletons/ (skeleton_handler).
     layout = ProjectLayout(str(tmp_path))
-    os.makedirs(os.path.join(str(tmp_path), *mask_parts))
-    os.makedirs(os.path.join(str(tmp_path), *skeleton_parts))
-    assert layout.resolve_masks_dir() in layout.output_dirs
-    assert layout.resolve_skeletons_dir(search_test_latest=False) in layout.output_dirs
+    _file(layout.mask_dir, "root_areas.csv")
+    _file(layout.skeletons_dir, "root_lengths.csv")
+    assert os.path.dirname(layout.find_areas_csv()) in layout.output_dirs
+    assert os.path.dirname(layout.find_lengths_csv()) in layout.output_dirs
 
 
 @pytest.mark.parametrize(

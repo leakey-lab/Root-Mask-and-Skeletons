@@ -24,9 +24,15 @@ SPROUTS works on one folder of images (the *project*) and writes next to it:
 `<stem>` is the image file name without its last extension: `X.png.jpg` has the stem
 `X.png`, so its GT files are `gt/mask/X.png.png`, `gt/skeletons/X.png.png` and
 `gt/X.png.png`, and its prediction is `skeletons/X.png_fake.png`. Images are read in their
-stored orientation (EXIF orientation ignored). Older projects may have skeletons
-in `output/skeletonizer/test_latest/images/` or masks in `output/mask/`; Measure still
-finds them there.
+stored orientation (EXIF orientation ignored). The older layout (skeletons in
+`[output/]skeletonizer/test_latest/images/`, masks in `output/mask/`) is not read since
+2026-10-31: those files and CSVs are not found. A skeleton's `_fake.png` suffix is read in
+any letter case (`B_fake.PNG`, since 2026-10-31), for an image without a GT skeleton file
+only: an image with `gt/skeletons/<stem>.png` (valid or not) is measured as before, and a
+suffix in another case is not read for it. Where a case-sensitive disk holds several
+skeletons of one image, a file with the exact suffix is measured before one with the suffix
+in another case (`A_fake.png` before `a_FAKE.png` for image `a`), and the others are
+duplicates.
 
 Stems compare without case, on every platform: `A.png`, `a.jpg` and `a.png` are one
 image. When several files share a stem, SPROUTS uses one of them everywhere: the one the
@@ -116,7 +122,7 @@ changes a CSV value.
 
 | Column | Type | Unit | Meaning |
 |---|---|---|---|
-| `Image` | text | | Image stem: the prediction's file name without `_fake.png` / `.png`, or the GT file's without `.png` when the image has no prediction |
+| `Image` | text | | Image stem: the prediction's file name without `_fake.png` / `.png` (in any letter case), or the GT file's without `.png` when the image has no prediction Measure reads |
 | `Tube` | integer | | Tube number from the file name; empty if absent or if the row failed |
 | `Position` | integer | | Position along the tube; empty if absent or if the row failed |
 | `Date` | text `YYYY.MM.DD` | | Capture date from the file name (dots, not ISO 8601 dashes); empty if absent or failed |
@@ -352,8 +358,8 @@ ignored. Missing: the default field of view. Invalid: the default, and Measure s
 18×13.5 mm.`). A CSV whose provenance records another field of view (or, for length, another
 `parameters.estimator`) is marked outdated in the metrics bar and on the Measure status line
 until measured again; a CSV without a provenance `calibration` is never marked. The
-dashboards' export finds the file of the CSV's project by looking up to five folders above
-the CSV, nearest first.
+dashboards' export finds the file of the CSV's project by looking up to two folders above
+the CSV, nearest first (five before 2026-10-31, for the older layout).
 
 ## Windows app build information
 

@@ -76,7 +76,7 @@ def test_public_names_still_resolve():
         from app.visualization.root_length_visulization import RootLengthVisualization as Length
         assert RootLengthVisualization is Length and RootAreaVisualization is Area
         assert vm.RootLengthVisualization is Length and vm.RootAreaVisualization is Area
-        assert callable(vm.find_test_latest_dir)
+        assert not hasattr(vm, "find_test_latest_dir")  # the older layout is retired (#38)
         assert not hasattr(viz, "get_encoded_image")  # removed in S15-07 tier 2
         print("ok")
     """)

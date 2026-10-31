@@ -24,7 +24,7 @@ LOADING_REFUSED = "A folder is loading. Try again when it has loaded."
 
 def folder_label(folder: str, root: str | None = None) -> str:
     """``folder`` as a toast names it: relative to the project ``root`` when inside it
-    (``skeletons``, ``output\\mask``), else the folder's own name (W13).
+    (``skeletons``, ``gt\\mask``), else the folder's own name (W13).
 
     A toast wraps at spaces, so a full path is one word it can only elide in the
     middle; the full path goes to the status line instead.

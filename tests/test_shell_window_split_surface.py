@@ -93,7 +93,6 @@ SIGNATURES = {
     "close_root_area_visualization": "()",
     "close_root_length_visualization": "()",
     "export_gt_dataset": "() -> None",
-    "find_test_latest_dir": "(start_path, max_depth=3)",
     "find_tree_item_by_image_name": "(image_name)",
     "generate_all": "()",
     "highlight_saved_mask": "(image_path)",

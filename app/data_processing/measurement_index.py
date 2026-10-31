@@ -19,11 +19,8 @@ Contract:
 * Qt-free and thread-safe: :meth:`MeasurementIndex.prewarm` is meant for a
   worker thread; ``lookup(stem, load=False)`` never parses and never blocks,
   which is what the GUI thread should call.
-* The GUI thread's calls (``lookup(load=False)``, ``needs_load``, ``outdated``) look
-  for a CSV only where Measure writes it (a few stats). The legacy ``test_latest`` search
-  walks the project folders and their parents (about 100 ms at 46k images), so only the
-  worker's :meth:`MeasurementIndex.prewarm` runs it; the index keeps what that walk found,
-  and :meth:`MeasurementIndex.find_lengths_csv` (the dashboards' check) uses it.
+* A CSV is looked for only where Measure writes it (a few stats, on any thread); the
+  older layout's folders are not searched (#38).
 * GT first (O1): a row's ``Source`` says which file it was measured from, the GT file
   (``gt/skeletons/<stem>.png``, ``gt/mask/<stem>.png``) or the prediction next to the CSV;
   freshness follows that file, and the provenance sidecar says why a GT file was not used
@@ -40,13 +37,12 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from functools import partial
 from typing import Any, NamedTuple
 
-from app import project_layout
 from app.calibration import ProjectCalibration, fov_of, method_note
 from app.config import AREA_VALUE_COLUMN, LENGTH_VALUE_COLUMN, SOURCE_COLUMN
 from app.gt.files import SOURCE_GT, SOURCE_PREDICTION
+from app.inference.input_split import png_stem
 from app.inference.measure_inputs import (
     InputsRecord,
     content_sha256,
@@ -56,7 +52,7 @@ from app.inference.measure_inputs import (
     load_inputs_record,
 )
 from app.naming import image_stem, stem_key
-from app.project_layout import SKELETON_SUFFIX, ProjectLayout
+from app.project_layout import SKELETON_SUFFIX, ProjectLayout, skeleton_stem
 from app.provenance import read_sidecar
 
 logger = logging.getLogger(__name__)
@@ -195,12 +191,13 @@ def _read_metric_csv(path: str, value_column: str) -> _Rows:
 class MetricTable:
     """One metric CSV, located lazily and re-parsed only when it changes.
 
-    ``locate`` returns the CSV path (or ``None``); ``locate_fast`` (default: ``locate``)
-    is the search the GUI thread's calls (``get(load=False)``, :meth:`needs_load`) use,
-    while :meth:`load` and ``get(load=True)`` (a worker's) use ``locate``, which may walk
-    folders. A path that was found is re-used until it disappears; a failed search is
-    retried at most every ``relocate_after_s`` seconds. The record of the CSV's inputs
-    (``<csv>.inputs.json``, R5) is read with it: :attr:`record`.
+    ``locate`` returns the CSV path (or ``None``; a few stats). A path that was found is
+    re-used until it disappears; a failed search is retried at most every
+    ``relocate_after_s`` seconds. The record of the CSV's inputs (``<csv>.inputs.json``,
+    R5) is read with it: :attr:`record`. ``suffix`` and ``stem_of`` are the name rule of
+    the predictions next to the CSV, ``root`` the project folder its record's keys are
+    relative to (:meth:`prediction_name`; without ``root`` the name is always
+    ``<stem><suffix>``).
     """
 
     def __init__(
@@ -208,22 +205,26 @@ class MetricTable:
         value_column: str,
         locate: Callable[[], str | None],
         *,
-        locate_fast: Callable[[], str | None] | None = None,
+        suffix: str = ".png",
+        stem_of: Callable[[str], str | None] = png_stem,
+        root: str | None = None,
         relocate_after_s: float = 2.0,
         clock: Callable[[], float] = time.monotonic,
     ):
         self.value_column = value_column
         self._locate = locate
-        self._locate_fast = locate_fast or locate
+        self._suffix = suffix
+        self._stem_of = stem_of
+        self._root = root
         self._relocate_after_s = relocate_after_s
         self._clock = clock
         self._lock = threading.Lock()
         self._path: str | None = None
-        self._searched_at: float | None = None  # the last search (either kind)
-        self._searched_full_at: float | None = None  # the last full search
+        self._searched_at: float | None = None  # the last failed search's time
         self._loaded_sig: _TableSignature | None = None
         self._rows: _Rows = _NO_ROWS
         self._record: InputsRecord | None = None
+        self._renamed: dict[str, str] = {}
         self._gt_skipped: dict[str, str] = {}
         self._calibration: dict[str, float] | None = None
         self._method: dict | None = None
@@ -275,46 +276,51 @@ class MetricTable:
         ``unreadable``: the CSV's provenance), ``""`` when it was or there is none."""
         return self._gt_skipped.get(stem_key(stem), "")
 
+    def prediction_name(self, stem: str) -> str:
+        """The file name of the prediction a row of ``stem`` (the row's own stem) was
+        measured from: ``<stem><suffix>``, or the name the record of the loaded CSV's
+        inputs has for it when its suffix is in another case (``B_fake.PNG``, ``A.PNG``)."""
+        return self._renamed.get(stem) or stem + self._suffix
+
     def invalidate(self) -> None:
         """Forget the located path and the parsed rows (e.g. after a Measure run)."""
         with self._lock:
-            self._path, self._searched_at, self._searched_full_at = None, None, None
+            self._path, self._searched_at = None, None
             self._loaded_sig, self._rows, self._record = None, _NO_ROWS, None
             self._gt_skipped, self._calibration, self._method = {}, None, None
+            self._renamed = {}
             self._held = None
 
-    def _resolve(self, full: bool) -> _Found:
-        """The CSV and its signature (lock held); ``full`` searches with ``locate``, else
-        ``locate_fast``, once per :meth:`held` block of this thread."""
-        if full:
+    def _resolve(self, load: bool) -> _Found:
+        """The CSV and its signature (lock held); without ``load`` once per :meth:`held`
+        block of this thread."""
+        if load:
             self._held = None  # a load: the held calls after it look again
-            return self._find(full)
+            return self._find()
         hold = self._hold
         token = hold[1] if hold is not None and hold[0] == threading.get_ident() else None
         held = self._held
         if token is not None and held is not None and held[0] == token:
             return held[1]
-        found = self._find(full)
+        found = self._find()
         if token is not None:
             self._held = (token, found)
         return found
 
-    def _find(self, full: bool) -> _Found:
+    def _find(self) -> _Found:
         """:meth:`_resolve`'s look for the CSV, with its stats."""
         if self._path is not None:
             sig = _table_signature(self._path)
             if sig is not None:
                 return self._path, sig
             self._path = None  # moved or deleted: search again now
-            self._searched_at = self._searched_full_at = None
+            self._searched_at = None
         now = self._clock()
-        last = self._searched_full_at if full else self._searched_at
+        last = self._searched_at
         if last is not None and now - last < self._relocate_after_s:
             return None
         self._searched_at = now
-        if full:
-            self._searched_full_at = now
-        path = (self._locate if full else self._locate_fast)()
+        path = self._locate()
         if not path:
             return None
         path = os.path.normpath(path)
@@ -325,13 +331,12 @@ class MetricTable:
         return self._path, sig
 
     def _current(self, load: bool) -> _Rows | None:
-        """Rows matching the CSV on disk, or ``None`` (absent, or cold with ``load=False``).
-
-        ``load=False`` (the GUI thread) searches with ``locate_fast`` only."""
-        found = self._resolve(full=load)
+        """Rows matching the CSV on disk, or ``None`` (absent, or cold with ``load=False``)."""
+        found = self._resolve(load)
         if found is None:
             self._loaded_sig, self._rows, self._record = None, _NO_ROWS, None
             self._gt_skipped, self._calibration, self._method = {}, None, None
+            self._renamed = {}
             return None
         path, sig = found
         if sig != self._loaded_sig:
@@ -340,6 +345,9 @@ class MetricTable:
             if self._loaded_sig is None or sig[0] != self._loaded_sig[0]:
                 self._rows = _read_metric_csv(path, self.value_column)
             self._record = load_inputs_record(path)
+            self._renamed = _renamed_predictions(
+                self._record, path, self._root, self._suffix, self._stem_of
+            )
             sidecar = read_sidecar(path)  # written with the record; read once per load
             self._gt_skipped = _gt_skipped_of(sidecar)
             self._calibration = fov_of(sidecar.get("calibration")) if sidecar else None
@@ -359,33 +367,15 @@ class MetricTable:
             self._lock.release()
 
     def needs_load(self) -> bool:
-        """True when a CSV exists whose current contents are not parsed yet (looked for
-        with ``locate_fast``: a GUI-thread call)."""
+        """True when a CSV exists whose current contents are not parsed yet."""
         with self._lock:
-            found = self._resolve(full=False)
+            found = self._resolve(load=False)
             return found is not None and found[1] != self._loaded_sig
 
     def load(self) -> None:
         """Parse the CSV now if it changed (call from a worker thread)."""
         with self._lock:
             self._current(load=True)
-
-
-class _Walk:
-    """The legacy ``test_latest`` walk (:func:`app.project_layout.find_test_latest_dir`,
-    looked up at call time), keeping what it found. It never refers back to its index, so
-    refcounting frees an index: a cycle would survive a ``gc.freeze()`` (:mod:`app.gc_policy`)."""
-
-    __slots__ = ("found",)
-
-    def __init__(self) -> None:
-        #: ``(folder or None,)``: what the last walk found; ``None`` before one ran.
-        self.found: tuple[str | None] | None = None
-
-    def __call__(self, root: str) -> str | None:
-        found = project_layout.find_test_latest_dir(root)
-        self.found = (found,)
-        return found
 
 
 class MeasurementIndex:
@@ -402,15 +392,12 @@ class MeasurementIndex:
         clock: Callable[[], float] = time.monotonic,
     ):
         self.layout = ProjectLayout(project_root)
-        #: The legacy ``test_latest`` walk and what it last found (``found``), which
-        #: :meth:`invalidate` keeps: the app never makes such a folder.
-        self._walk = _Walk()
-        opts = {"relocate_after_s": relocate_after_s, "clock": clock}
+        opts = {"root": self.layout.root, "relocate_after_s": relocate_after_s, "clock": clock}
         self._length = MetricTable(
             LENGTH_VALUE_COLUMN,
-            # with the legacy test_latest walk: workers only
-            partial(self.layout.find_lengths_csv, walk=self._walk),
-            locate_fast=partial(self.layout.find_lengths_csv, search_test_latest=False),
+            self.layout.find_lengths_csv,
+            suffix=SKELETON_SUFFIX,
+            stem_of=skeleton_stem,
             **opts,
         )
         self._area = MetricTable(AREA_VALUE_COLUMN, self.layout.find_areas_csv, **opts)
@@ -442,16 +429,6 @@ class MeasurementIndex:
             return file_key(path, root, self._prefixes)
         return input_key(path, root)
 
-    def find_lengths_csv(self) -> str | None:
-        """The project's ``root_lengths.csv``, as :meth:`ProjectLayout.find_lengths_csv`
-        finds it, with stats only once a walk for a legacy ``test_latest`` folder has run
-        (:meth:`prewarm`, at project open): that walk's folder is used. Before one ran it
-        walks itself, as the layout does. The dashboards' check on the GUI thread."""
-        walked = self._walk.found
-        if walked is None:
-            return self.layout.find_lengths_csv(walk=self._walk)
-        return self.layout.find_lengths_csv(walk=lambda _root: walked[0])
-
     def lookup(self, stem: str, *, load: bool = True) -> Measurement:
         """``(length_mm, area_mm2, error, length_source, area_source)`` for ``stem`` (a
         stem as the Library lists it, or an image path; a bare name is a stem, ``_key``).
@@ -479,9 +456,9 @@ class MeasurementIndex:
         return self._length.needs_load() or self._area.needs_load()
 
     def prewarm(self) -> None:
-        """Look for the CSVs everywhere (legacy folders too) and parse any new or changed
-        one (≈90–360 ms for 46k rows, plus the legacy search: run off the GUI thread), and
-        list the GT folders (one scandir each), which the GUI thread's lookups use."""
+        """Look for the CSVs and parse any new or changed one (≈90–360 ms for 46k rows: run
+        off the GUI thread), and list the GT folders (one scandir each), which the GUI
+        thread's lookups use."""
         self._length.load()
         self._area.load()
         layout = self.layout
@@ -566,8 +543,8 @@ class MeasurementIndex:
         parsed CSVs are read (GUI thread); a GT file is looked for with a stat
         (:meth:`_gt_file`)."""
         stem = _key(stem)
-        length = self._measured("length", stem, SKELETON_SUFFIX)
-        area = self._measured("area", stem, ".png")
+        length = self._measured("length", stem)
+        area = self._measured("area", stem)
         return {
             metric: None if found is None else (self._input_key(found[0]), found[1])
             for metric, found in (("length", length), ("area", area))
@@ -576,7 +553,7 @@ class MeasurementIndex:
     def _table(self, metric: str) -> MetricTable:
         return self._length if metric == "length" else self._area
 
-    def _measured(self, metric: str, stem: str, suffix: str) -> tuple[str, str] | None:
+    def _measured(self, metric: str, stem: str) -> tuple[str, str] | None:
         """``(path, source)`` of the file ``stem``'s row of ``metric`` was measured from."""
         table = self._table(metric)
         csv_path = table.path
@@ -585,7 +562,7 @@ class MeasurementIndex:
             return None
         if row.source == SOURCE_GT:
             return self._gt_file(metric, stem) or self._gt_path(metric, stem), SOURCE_GT
-        return _prediction_of(csv_path, row, suffix), SOURCE_PREDICTION
+        return _prediction_of(csv_path, table.prediction_name(row.stem)), SOURCE_PREDICTION
 
     def outdated(self, stem: str) -> dict[str, bool]:
         """``{"length": bool, "area": bool}``: whether the files each value of ``stem`` was
@@ -632,7 +609,7 @@ class MeasurementIndex:
             return True  # a CSV from before O1: Measure would now read this GT file
         if gt is None and row.source == SOURCE_GT:
             return True  # the file it was measured from is gone
-        prediction = _prediction_of(csv_path, row, suffix)
+        prediction = _prediction_of(csv_path, table.prediction_name(row.stem))
         if row.source != SOURCE_GT and _another_named_like(stem, prediction, suffix):
             return True  # a new Measure would read that one (split_inputs keeps its name)
         record = table.record
@@ -653,9 +630,40 @@ class MeasurementIndex:
         return any(sig is not None and sig[0] > csv_sig[0] for sig in signatures)
 
 
-def _prediction_of(csv_path: str, row: _Row, suffix: str) -> str:
-    """The prediction ``row`` was measured from: ``<csv dir>/<row's own stem><suffix>``."""
-    return os.path.join(os.path.dirname(csv_path), row.stem + suffix)
+def _prediction_of(csv_path: str, name: str) -> str:
+    """The prediction a row was measured from: ``<csv dir>/<name>``
+    (:meth:`MetricTable.prediction_name` of the row's own stem)."""
+    return os.path.join(os.path.dirname(csv_path), name)
+
+
+def _renamed_predictions(
+    record: InputsRecord | None,
+    csv_path: str,
+    root: str | None,
+    suffix: str,
+    stem_of: Callable[[str], str | None],
+) -> dict[str, str]:
+    """``stem -> file name`` of the predictions next to ``csv_path`` that ``record`` (keys
+    relative to the project folder ``root``) names with ``suffix`` in another case
+    (``B_fake.PNG``, ``A.PNG``; #3): the file a row of that stem was measured from, whose
+    name the row's stem and ``suffix`` do not give. Empty without a record or ``root``, and
+    where every name has the exact suffix (one pass over its keys)."""
+    if record is None or not root:
+        return {}
+    others = [key for key in record.inputs if not key.endswith(suffix)]
+    if not others:
+        return {}
+    prefix = input_key(os.path.dirname(os.path.abspath(csv_path)), root)
+    prefix = "" if prefix == "." else prefix + "/"
+    renamed: dict[str, str] = {}
+    for key in others:
+        if not key.startswith(prefix) or "/" in key[len(prefix) :]:
+            continue  # another folder's file (a GT file)
+        name = key[len(prefix) :]
+        stem = stem_of(name)
+        if stem is not None and prefix + stem + suffix not in record.inputs:
+            renamed[stem] = name
+    return renamed
 
 
 def _another_named_like(stem: str, prediction: str, suffix: str) -> bool:

@@ -503,10 +503,6 @@ class MainWindow(QMainWindow):
         """Safely close and cleanup the root area visualization."""
         visualization_manager.close_root_area_visualization(self)
 
-    def find_test_latest_dir(self, start_path, max_depth=3):
-        """Efficiently search for 'test_latest' directory."""
-        return visualization_manager.find_test_latest_dir(start_path, max_depth)
-
     def on_visualization_server_closed(self):
         """Handle root length visualization server closed event."""
         if self.root_length_viz:

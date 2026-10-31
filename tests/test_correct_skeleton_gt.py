@@ -250,7 +250,7 @@ def test_the_layout_has_no_corrections_folder_any_more():
         "scan_corrected_stems",
     ):
         assert not hasattr(ProjectLayout, member), member
-    assert len(ProjectLayout("x").output_dirs) == 8
+    assert len(ProjectLayout("x").output_dirs) == 5  # the older layout is retired too (#38)
     from app import project_layout
 
     assert not hasattr(project_layout, "CORRECTED_SKELETON_SUFFIX")
