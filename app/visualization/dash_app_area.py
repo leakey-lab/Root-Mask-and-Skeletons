@@ -295,7 +295,7 @@ class DashAppArea:
                     y=rows[value],
                     name=day,
                     marker_color=colour,
-                    **theme.bar_labels(rows[value].round(2), bars, colour),
+                    **theme.bar_labels(rows[value].round(2), bars),
                     hovertemplate=theme.hover(
                         "Position: %{x}", [("Area", "%{y:.2f} mm²"), ("Date", day)]
                     ),
@@ -325,8 +325,9 @@ class DashAppArea:
         # Plain dicts, not validated (_validate=False): add_trace validated every trace and
         # then the figure again (57 ms for 160 tubes), the dicts validated once 18 ms, now
         # 6 ms. The same JSON (tests/test_viz_data_time_view.py compares it).
+        # The trace name is already "Tube 12": the title is the name alone (S14-06).
         hovertemplate = theme.hover(
-            "Tube %{fullData.name}",
+            "%{fullData.name}",
             [("Date", "%{x|%Y-%m-%d}"), ("Total Area", "%{y:.2f} mm²")],
         )
         traces = []

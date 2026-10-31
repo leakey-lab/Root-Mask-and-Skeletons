@@ -168,7 +168,7 @@ def _reference_area(area):
                 mode="lines+markers",
                 name=f"Tube {int(tube)}",
                 hovertemplate=theme.hover(
-                    "Tube %{fullData.name}",
+                    "%{fullData.name}",
                     [("Date", "%{x|%Y-%m-%d}"), ("Total Area", "%{y:.2f} mm²")],
                 ),
             )
@@ -203,6 +203,23 @@ def test_the_length_time_figure_is_unchanged(charts, tubes, field, variance, leg
 
 def test_the_area_time_figure_is_unchanged(area):
     assert _json(area._growth_over_time_figure()) == _json(_reference_area(area))
+
+
+def _hover_title(trace) -> str:
+    """The hover box's first line as plotly.js shows it for ``trace`` (only the trace
+    name reference is filled in; the time hovers carry no other one in their title)."""
+    title = trace["hovertemplate"].split("<br>")[0]
+    return title.replace("%{fullData.name}", trace["name"])
+
+
+def test_the_area_time_hover_names_the_tube_once(area):
+    # S14-06: the traces are named "Tube 12", and the title was "Tube %{fullData.name}",
+    # which plotly.js showed as "Tube Tube 12".
+    figure = area._growth_over_time_figure().to_plotly_json()
+
+    assert [_hover_title(t) for t in figure["data"]] == [
+        f"<b>Tube {int(tube)}</b>" for tube in area.data_cache.tubes
+    ]
 
 
 def test_the_time_figures_are_plotly_figures_the_memo_and_callers_can_use(charts, area):

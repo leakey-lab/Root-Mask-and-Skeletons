@@ -191,6 +191,33 @@ def test_hover_outside_the_lines_view_sends_nothing(app_with_images):
     assert status == 204
 
 
+@pytest.fixture
+def app_with_one_image(tmp_path):
+    """Tube 1 on 2024.07.18 is measured at L5 and L15; the one image is L15's, inside
+    the interval L11-L20 but not at its end."""
+    stem = "24EFCAM1_T001_L015_2024.07.18_111618_001_SMM"
+    path = tmp_path / f"{stem}.jpg"
+    Image.fromarray(np.full((48, 64, 3), 90, np.uint8)).save(path)
+    return build_length_app(tmp_path, FakeImageManager({stem: str(path)}))
+
+
+def _profile_hover(dashboard, end: int) -> str:
+    figure = dashboard.show_growth_lines(1)
+    trace = next(t for t in figure.data if t.name == "2024-07-18")
+    return trace.text[list(trace.y).index(end)]
+
+
+def test_depth_profile_hover_finds_an_image_anywhere_in_the_interval(app_with_one_image):
+    # S14-05: the hover checked only the interval's end (L20) and said "Not Available"
+    # while the side panel showed L15's image for the same point.
+    status, out = _hover(app_with_one_image.app, "lines", y=20)
+    sources = [n for n in _json_nodes(out["image-container"]["children"]) if n["type"] == "Img"]
+    assert status == 200 and len(sources) == 1  # the side panel shows the image
+
+    assert "Image  <b>Available</b>" in _profile_hover(app_with_one_image, 20)
+    assert "Image  <b>Not Available</b>" in _profile_hover(app_with_one_image, 10)
+
+
 def _json_nodes(node):
     if isinstance(node, list):
         for child in node:

@@ -1,9 +1,10 @@
-"""Length dashboard: the names other code uses survive the CQ-07 split, and nothing heavier loads.
+"""Length dashboard: the surface left after the CQ-07 split, and nothing heavier loads.
 
 ``dash_app.py`` was split into ``dash_length_layout``, ``dash_length_views`` and
-``dash_length_callbacks``. ``DashApp`` keeps every method with the same kind (method
-or static method) and parameters, the module keeps the constants it defined, and the
-new modules import nothing the dashboard did not import before.
+``dash_length_callbacks``, and the new modules import nothing the dashboard did not
+import before. The compatibility layer the split kept (15 underscore delegators on
+``DashApp`` and 7 module aliases) is gone (S15-07 tier 2): nothing used it, the
+callbacks call the modules directly.
 """
 
 from __future__ import annotations
@@ -26,29 +27,24 @@ SPLIT_MODULES = (
     "app.visualization.dash_length_callbacks",
 )
 
-# Attributes DashApp defines itself: name -> (kind, parameters), as before the split.
+# Attributes DashApp defines itself: name -> (kind, parameters).
 DASH_APP_OWN = {
-    "_availability_view": ("function", ("self", "tubes", "dates")),
-    "_controls": ("function", ("self",)),
-    "_controls_summary": ("function", ("self", "view", "tube", "selected_tubes", "faceted_tubes",
-                                       "faceted_dates")),
-    "_export_table": ("function", ("self", "view", "tube", "selected_tubes", "viz_options",
-                                   "faceted_tubes", "faceted_dates")),
-    "_faceted_info": ("staticmethod", ("tubes", "dates")),
-    "_faceted_options_card": ("function", ("self",)),
-    "_faceted_outputs": ("function", ("self", "tubes", "dates")),
-    "_faceted_styles": ("staticmethod", ("tubes",)),
-    "_hover_date": ("staticmethod", ("point",)),
-    "_legend_patch": ("staticmethod", ("view", "visible")),
-    "_lines_tube": ("function", ("self", "selected_tube")),
-    "_render_view": ("function", ("self", "view", "selected_tube", "selected_tubes",
-                                  "viz_options", "legend_visible", "tubes", "dates")),
+    "_parse_images_after_this_response": ("function", ("self",)),
     "_setup_callbacks": ("function", ("self",)),
     "_setup_layout": ("function", ("self",)),
-    "_thumbnail": ("function", ("self", "tube", "position", "date_str")),
-    "_tube_selection_card": ("function", ("self",)),
-    "_viz_options_card": ("staticmethod", ()),
-}  # fmt: skip
+}
+# The compatibility layer removed in S15-07 tier 2: delegators to the layout and view
+# modules, and the module constants dash_app.py defined before the split.
+REMOVED_DELEGATORS = (
+    "_availability_view", "_controls", "_controls_summary", "_export_table", "_faceted_info",
+    "_faceted_options_card", "_faceted_outputs", "_faceted_styles", "_hover_date",
+    "_legend_patch", "_lines_tube", "_render_view", "_thumbnail", "_tube_selection_card",
+    "_viz_options_card",
+)  # fmt: skip
+REMOVED_MODULE_ALIASES = (
+    "_DATE_TOKEN", "_FACETED_GRAPH_STYLE", "_GRAPH_STYLE", "_HIDDEN", "_IMAGES_SHOWN",
+    "_SHOWN", "_VIEW_PANELS_JS",
+)  # fmt: skip
 # Inherited from DashVisualizations (the figures); unchanged by the split.
 DASH_APP_INHERITED = {
     "_faceted_figure", "_field_average_traces", "_growth_lines_figure",
@@ -65,6 +61,7 @@ DASH_APP_INSTANCE_ATTRS = {
 def test_dash_app_keeps_every_method_with_its_kind_and_parameters():
     from app.visualization.dash_app import DashApp
 
+    assert {name for name in vars(DashApp) if not name.startswith("__")} == set(DASH_APP_OWN)
     for name, (kind, parameters) in DASH_APP_OWN.items():
         attribute = inspect.getattr_static(DashApp, name)
         assert type(attribute).__name__ == kind, name
@@ -79,19 +76,16 @@ def test_dash_app_instance_keeps_its_attributes(tmp_path):
     assert not missing, f"DashApp instances lost {missing}"
 
 
-def test_module_constants_are_still_importable_from_dash_app():
+def test_the_old_compatibility_layer_is_gone():
     import app.visualization.dash_app as dash_app
-    from app.visualization import dash_length_callbacks, dash_length_layout, dash_length_views
-    from app.visualization.dash_app import LENGTH_SHELL
+    from app.visualization import dash_length_layout
 
-    assert LENGTH_SHELL is dash_length_layout.LENGTH_SHELL
-    assert dash_app._SHOWN is dash_length_layout.SHOWN
-    assert dash_app._HIDDEN is dash_length_layout.HIDDEN
-    assert dash_app._IMAGES_SHOWN is dash_length_layout.IMAGES_SHOWN
-    assert dash_app._GRAPH_STYLE is dash_length_layout.GRAPH_STYLE
-    assert dash_app._FACETED_GRAPH_STYLE is dash_length_layout.FACETED_GRAPH_STYLE
-    assert dash_app._DATE_TOKEN is dash_length_views.DATE_TOKEN
-    assert dash_app._VIEW_PANELS_JS is dash_length_callbacks.VIEW_PANELS_JS
+    assert len(REMOVED_DELEGATORS) == 15 and len(REMOVED_MODULE_ALIASES) == 7
+    kept = sorted(name for name in REMOVED_DELEGATORS if hasattr(dash_app.DashApp, name))
+    assert not kept, f"DashApp still has {kept}"
+    kept = sorted(name for name in REMOVED_MODULE_ALIASES if hasattr(dash_app, name))
+    assert not kept, f"dash_app still defines {kept}"
+    assert dash_app.LENGTH_SHELL is dash_length_layout.LENGTH_SHELL  # the page's shell
 
 
 @pytest.mark.parametrize("module", SPLIT_MODULES)

@@ -392,9 +392,11 @@ dated 2026-10-27, with no display or data change:
   It must match plotly.py's plotly.js version, and the dashboards may use only its trace
   types (scatter, bar, pie): `tests/test_viz_dash_plotly_bundle.py` fails otherwise, and
   `app/assets/THIRD_PARTY.md` says how to update it. The plotly.js 3 defaults that
-  plotly.js 4 changed are set back: no "Upload to Cloud" modebar button, a 300 ms
-  double-click (`dash_shell.graph_config`) and the bar label colours
-  (`theme.inside_label_colour`).
+  plotly.js 4 changed are set back: no "Upload to Cloud" modebar button and a 300 ms
+  double-click (`dash_shell.graph_config`). Bar labels take plotly.js 4's colour (owner
+  decision #51, 2026-10-31): a label inside a bar is white on the fourth date-ramp blue
+  `#4f97d1` and the blends next to it (trials with 5, 8-10 or 12 or more dates), where
+  plotly.js 3 drew it dark grey `#444`.
 - **Zoom through Dash 4.4.1.** `app/assets/sprouts-uirevision.js` keeps a zoom when a
   callback redraws the view with the same `uirevision` (Select All, Clear All): Dash 4.4.1
   lost it (plotly/dash#4093).

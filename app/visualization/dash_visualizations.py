@@ -115,7 +115,7 @@ def stacked_bar_figure(cache, label: str, unit: str) -> go.Figure:
                     marker_color=colour,
                     x=x,
                     y=values,
-                    **theme.bar_labels(theme.value_labels(values), len(tubes), colour),
+                    **theme.bar_labels(theme.value_labels(values), len(tubes)),
                     hovertemplate=theme.hover(
                         "%{x}",
                         [
@@ -193,6 +193,7 @@ class DashVisualizations:
 
         dates = self.data_cache.dates
         ramp = theme.date_colors(len(dates))  # the date's place among ALL dates of the trial
+        images = self.available_images
         for date, colour in zip(dates, ramp, strict=True):
             table = self.data_cache.get_interval_data(tube, date, size)
             if not table:
@@ -207,7 +208,12 @@ class DashVisualizations:
                 averages.append(stats["avg"])
                 if stats["count"] > 0:
                     max_length = max(max_length, stats["max"])
-                    has_image = (tube, pos, date_str) in self.available_images
+                    # The side panel shows every image of the interval, not only its
+                    # end position's: "Available" when any of them has one (S14-05).
+                    has_image = any(
+                        (tube, position, date_str) in images
+                        for position in range(pos - size + 1, pos + 1)
+                    )
                     hover_info.append(self._interval_hover(pos, date_str, stats, unit, has_image))
                 else:
                     hover_info.append(f"No Data  Interval L{pos - size + 1}-L{pos}")

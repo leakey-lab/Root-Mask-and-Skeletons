@@ -20,7 +20,6 @@ _EXPORTS: dict[str, str] = {
     "DashVisualizations": ".dash_visualizations",
     "DataCache": ".dash_data_cache",
     "build_available_images_map": ".dash_image_utils",
-    "get_encoded_image": ".dash_image_utils",
     # Qt windows
     "DashVizWindow": ".viz_window",
     "RootLengthVisualization": ".root_length_visulization",

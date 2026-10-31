@@ -69,14 +69,15 @@ def test_public_names_still_resolve():
             RootAreaVisualization,
             RootLengthVisualization,
             build_available_images_map,
-            get_encoded_image,
         )
+        import app.visualization as viz
         from app.visualization.root_area_visualization import DashServerThreadArea
         from app.visualization.root_area_visualization import RootAreaVisualization as Area
         from app.visualization.root_length_visulization import RootLengthVisualization as Length
         assert RootLengthVisualization is Length and RootAreaVisualization is Area
         assert vm.RootLengthVisualization is Length and vm.RootAreaVisualization is Area
         assert callable(vm.find_test_latest_dir)
+        assert not hasattr(viz, "get_encoded_image")  # removed in S15-07 tier 2
         print("ok")
     """)
     assert result.returncode == 0, result.stderr[-2000:]
