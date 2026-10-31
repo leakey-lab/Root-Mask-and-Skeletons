@@ -2,9 +2,10 @@
 
 A click opens an image; the arrow keys move the selection and the image loads once they
 come to rest (:data:`TREE_LOAD_DELAY_MS`), so holding a key decodes only the image it stops
-on; PgDn / PgUp step through the shown images, from the image open in an editor when one
-is on screen. The selected image opens on the page on screen (the display or Correct),
-and the metrics bar follows.
+on; PgDn / PgUp step through the shown images, from the image on screen (the one open in
+an editor, else the tree's image row, else the display's image when a group row is
+current). The selected image opens on the page on screen (the display or Correct), and
+the metrics bar follows; its row is always revealed (:func:`reveal_row`).
 
 These are functions of the window, bound as :class:`~app.gui.main_window.MainWindow`
 methods under their old names (``MainWindow.on_image_selected`` is
@@ -54,20 +55,38 @@ def leaf_for_image(window: "MainWindow", image_path: str, leaves: list | None = 
     return item
 
 
+def reveal_row(tree, item) -> None:
+    """Make ``item`` the tree's current row and scroll to it, opening the groups above it.
+
+    Qt's ``scrollToItem`` opens collapsed groups only while the tree runs no expand
+    animation (250 ms): paging fast across collapsed groups left the opened image's row
+    inside a closed group, and the next arrow key then started from the top (H1-01).
+    Opening the groups here works during an animation too.
+    """
+    parent = item.parent()
+    while parent is not None:  # innermost first: only the outermost closed group animates
+        if not parent.isExpanded():
+            parent.setExpanded(True)
+        parent = parent.parent()
+    tree.setCurrentItem(item)
+    tree.scrollToItem(item)
+
+
 def select_tree_image(window: "MainWindow", image_path: str) -> None:
     """Make ``image_path``'s leaf the tree's current item (without loading it)."""
     item = window._leaf_for_image(image_path)
     if item is not None:
         window._shown_leaf_name = item.data(0, USER_ROLE)  # it is already open
-        window.file_list.setCurrentItem(item)
-        window.file_list.scrollToItem(item)
+        reveal_row(window.file_list, item)
 
 
 def navigate_image(window: "MainWindow", delta: int) -> None:
     """Select and open the next/previous visible image leaf in the library tree.
 
-    In the editor (Correct), steps from the image open in it; otherwise
-    (or when nothing is open there) from the tree selection.
+    Steps from the image on screen: in the editor (Correct), the image open in it;
+    otherwise (or when nothing is open there) the tree's current image row. After a
+    click on a tube, date or field row, from the image the display shows (X6-01), as
+    Correct does; with nothing shown, PgDn opens the first image.
     """
     current = None
     editor = window._editors().get(window.right_panel.currentIndex())
@@ -75,11 +94,14 @@ def navigate_image(window: "MainWindow", delta: int) -> None:
         current = window._leaf_for_image(editor.current_image_path)
     if current is None:
         current = window.file_list.currentItem()
+        if current is None or not current.data(0, USER_ROLE):  # a group row, or none
+            shown = window._leaf_for_image(window.display_controller.current_image)
+            if shown is not None:
+                current = shown
     target = window.library_index.step(current, delta, visible_only=True)
     if target is None:
         return
-    window.file_list.setCurrentItem(target)
-    window.file_list.scrollToItem(target)
+    reveal_row(window.file_list, target)
     window.on_image_selected(target)
 
 

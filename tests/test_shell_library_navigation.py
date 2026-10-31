@@ -20,12 +20,14 @@ from concurrent.futures import Future
 import cv2
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QApplication, QTreeWidget
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QAbstractItemView, QApplication, QTreeWidget
 
 from app.gui import display_controller as display_module
 from app.gui.canvas_layers.photo import PhotoLayerItem
 from app.gui.display_read_ahead import DisplayReadAhead
-from app.gui.library_index import LibraryIndex, index_names
+from app.gui.library_index import USER_ROLE, LibraryIndex, index_names
 from app.io_utils import file_stamp, path_key
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import wait_until as _wait
@@ -319,3 +321,125 @@ def test_a_search_asks_the_correct_page_for_its_position_again(window, monkeypat
     mw.library_search_controller.apply_now()
     assert offered == [mw.library_index.position_of]
     assert mw.library_index.position_of(STEMS[1]) == (1, 1)
+
+
+# ------------------------------------------- paging across groups (H1-01, X6-01)
+# One image in tubes 1 and 2, two in tube 3: each PgDn from tube 1 enters another tube.
+GROUPED = [
+    "24EFCAM1_T001_L011_2024.07.18_111511_001_SMM",
+    "24EFCAM1_T002_L011_2024.07.18_111512_001_SMM",
+    "24EFCAM1_T003_L011_2024.07.18_111513_001_SMM",
+    "24EFCAM1_T003_L012_2024.07.18_111514_001_SMM",
+]
+
+
+@pytest.fixture
+def grouped_window(app, tmp_path, no_prompts):
+    folder = tmp_path / "grouped"
+    folder.mkdir()
+    for i, stem in enumerate(GROUPED):
+        image = np.random.default_rng(i).integers(0, 255, (48, 64, 3), dtype=np.uint8)
+        assert cv2.imwrite(str(folder / f"{stem}.jpg"), image)
+    made = [build_window(tmp_path / "settings.ini", show=False)]
+    made[0].show()
+    open_folder(made[0], folder, len(GROUPED))
+    yield made[0]
+    delete_widgets(made, prepare=quiet_window)
+    QApplication.processEvents()
+
+
+def _shown_in_tree(tree, item) -> bool:
+    """The row is in the tree's layout: every group above it is open."""
+    parent = item.parent()
+    while parent is not None:
+        if not parent.isExpanded():
+            return False
+        parent = parent.parent()
+    return tree.visualItemRect(item).isValid()
+
+
+def test_fast_paging_across_collapsed_groups_reveals_each_opened_row(grouped_window):
+    # The tree animates opening a group (250 ms), and Qt's scrollToItem opens no group
+    # while an animation runs: the second fast PgDn used to leave its row hidden (H1-01).
+    mw = grouped_window
+    tree = mw.file_list
+    assert tree.isAnimated()
+    tree.collapseAll()
+    leaves = mw.library_index.leaves()
+    for expected in leaves[:3]:  # three tube changes, no pause between them
+        mw._page_image(1)
+        assert mw.display_controller.current_name == expected.data(0, USER_ROLE)
+        assert tree.currentItem() is expected
+        assert _shown_in_tree(tree, expected)
+
+    # The next arrow key steps on from the opened row (it used to jump to the top).
+    tree.setFocus()
+    QTest.keyClick(tree, Qt.Key.Key_Down)
+    assert tree.currentItem() is leaves[3]
+
+
+def _settled(tree) -> None:
+    """Wait out the tree's expand animation (a click during it can miss its row)."""
+    assert _wait(lambda: tree.state() == QAbstractItemView.State.NoState)
+
+
+def _click_row(tree, item) -> None:
+    parent = item.parent()
+    while parent is not None:
+        parent.setExpanded(True)
+        parent = parent.parent()
+    _settled(tree)
+    tree.scrollToItem(item)
+    _settled(tree)
+    rect = tree.visualItemRect(item)
+    assert rect.isValid()
+    QTest.mouseClick(tree.viewport(), Qt.MouseButton.LeftButton, pos=rect.center())
+    QApplication.processEvents()
+
+
+def _open(mw, item) -> None:
+    mw.file_list.setCurrentItem(item)
+    mw.on_image_selected(item)
+
+
+def test_pgdn_after_a_group_click_goes_on_from_the_image_on_screen(grouped_window):
+    # X6-01 (owner: A, as Correct does): PgDn used to open tube 1's image.
+    mw = grouped_window
+    leaves = mw.library_index.leaves()
+    _open(mw, leaves[1])
+    tube = leaves[2].parent().parent()
+    _click_row(mw.file_list, tube)
+    assert mw.file_list.currentItem() is tube
+
+    mw._page_image(1)
+
+    assert mw.display_controller.current_name == GROUPED[2]
+    assert mw.file_list.currentItem() is leaves[2]
+
+
+def test_pgup_after_a_group_click_goes_on_from_the_image_on_screen(grouped_window):
+    # X6-01: PgUp used to do nothing from a group row.
+    mw = grouped_window
+    leaves = mw.library_index.leaves()
+    _open(mw, leaves[2])
+    for row in (leaves[0].parent(), leaves[0].parent().parent()):  # a date, then a tube row
+        _click_row(mw.file_list, row)
+        assert mw.file_list.currentItem() is row
+
+        mw._page_image(-1)
+
+        assert mw.display_controller.current_name == GROUPED[1]
+        assert mw.file_list.currentItem() is leaves[1]
+        _open(mw, leaves[2])
+
+
+def test_paging_from_a_group_row_with_nothing_on_screen_opens_the_first_image(grouped_window):
+    # Nothing shown yet: PgDn starts at the first image, as it does from no selection.
+    mw = grouped_window
+    tube = mw.library_index.leaves()[2].parent().parent()
+    _click_row(mw.file_list, tube)
+    assert mw.display_controller.current_name is None
+
+    mw._page_image(1)
+
+    assert mw.display_controller.current_name == GROUPED[0]

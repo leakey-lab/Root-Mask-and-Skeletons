@@ -48,13 +48,26 @@ class Event:
 
 
 class Item:
-    """A library row holding ``name`` (None: a group row)."""
+    """A library row holding ``name`` (None: a group row), under the group ``parent``."""
 
-    def __init__(self, name: str | None) -> None:
+    def __init__(self, name: str | None, parent=None, *, expanded=True, opened=None) -> None:
         self.name = name
+        self._parent = parent
+        self.expanded = expanded
+        self.opened = [] if opened is None else opened  # names ``setExpanded`` reached
 
     def data(self, _column, _role):
         return self.name
+
+    def parent(self):
+        return self._parent
+
+    def isExpanded(self) -> bool:  # noqa: N802 - Qt API
+        return self.expanded
+
+    def setExpanded(self, expanded: bool) -> None:  # noqa: N802 - Qt API
+        self.expanded = expanded
+        self.opened.append(self.name)
 
 
 # ------------------------------------------------------------------ closing
@@ -360,21 +373,28 @@ def test_the_debounce_opens_a_new_image_and_leaves_the_keyboard_on_the_tree():
     assert opened == [item]
 
 
-def paging_window(opened: list, step_to, *, editor=None) -> SimpleNamespace:
-    selected = []
+def paging_window(
+    opened: list, step_to, *, editor=None, current=None, shown=None
+) -> SimpleNamespace:
+    """``current``: the tree's current row (default an image row); ``shown``: the path
+    on the display."""
+    selected, scrolled = [], []
+    row = Item("tree") if current is None else current
     window = SimpleNamespace(
         right_panel=SimpleNamespace(currentIndex=lambda: Panel.CORRECT),
         file_list=SimpleNamespace(
-            currentItem=lambda: Item("tree"),
+            currentItem=lambda: row,
             setCurrentItem=selected.append,
-            scrollToItem=lambda _item: None,
+            scrollToItem=scrolled.append,
         ),
         library_index=SimpleNamespace(step=lambda current, delta, visible_only: step_to(current)),
+        display_controller=SimpleNamespace(current_image=shown),
         on_image_selected=opened.append,
         selected=selected,
+        scrolled=scrolled,
     )
     window._editors = lambda: {} if editor is None else {Panel.CORRECT: editor}
-    window._leaf_for_image = lambda path: Item(f"leaf of {path}")
+    window._leaf_for_image = lambda path: Item(f"leaf of {path}") if path else None
     return window
 
 
@@ -394,6 +414,45 @@ def test_paging_stops_after_the_last_image():
     window = paging_window(opened, lambda _current: None)
     navigator.navigate_image(window, 1)
     assert window.selected == [] and opened == []
+
+
+def test_paging_from_a_group_row_steps_from_the_image_on_the_display():
+    # X6-01 (owner: A): after a click on a tube, date or field row, PgDn / PgUp go on
+    # from the image on screen, as Correct does (they used to start from the group row).
+    opened, froms = [], []
+    target = Item("next")
+    window = paging_window(
+        opened,
+        lambda current: froms.append(current.name) or target,
+        current=Item(None),
+        shown="shown.jpg",
+    )
+    navigator.navigate_image(window, 1)
+    assert froms == ["leaf of shown.jpg"] and opened == [target]
+
+
+def test_paging_from_a_group_row_with_nothing_shown_steps_from_the_row():
+    opened, froms = [], []
+    group = Item(None)
+    window = paging_window(
+        opened, lambda current: froms.append(current) or Item("first"), current=group
+    )
+    navigator.navigate_image(window, 1)
+    assert froms == [group]  # LibraryIndex.step gives the first image from a group row
+
+
+def test_paging_opens_every_closed_group_above_the_opened_row():
+    # H1-01: Qt's scrollToItem opens no group during the tree's expand animation, so a
+    # fast PgDn across collapsed groups left the row hidden; the navigator opens them.
+    opened, expanded = [], []
+    field = Item("field", opened=expanded)
+    tube = Item("tube", field, expanded=False, opened=expanded)
+    target = Item("next", Item("date", tube, expanded=False, opened=expanded))
+    window = paging_window(opened, lambda _current: target)
+    navigator.navigate_image(window, 1)
+    assert expanded == ["date", "tube"]  # innermost first; the open field is left alone
+    assert window.selected == [target] and window.scrolled == [target]
+    assert opened == [target]
 
 
 def test_an_editor_that_kept_its_image_points_the_library_back(tmp_path):
