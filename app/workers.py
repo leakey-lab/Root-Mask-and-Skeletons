@@ -36,6 +36,7 @@ both build on it.
 
 from __future__ import annotations
 
+import importlib
 import logging
 import threading
 import time
@@ -93,9 +94,12 @@ def is_user_condition(exc: BaseException) -> bool:
     their own user-facing message and need no traceback in the log.
     """
     try:  # lazy: io_utils is optional here and must never break the error path
-        from app.io_utils import FileLockedError, FolderNotWritableError
+        io_utils = importlib.import_module("app.io_utils")
     except Exception:
-        FileLockedError = FolderNotWritableError = None
+        io_utils = None
+    # One name at a time: a missing one must not hide the other.
+    FileLockedError = getattr(io_utils, "FileLockedError", None)
+    FolderNotWritableError = getattr(io_utils, "FolderNotWritableError", None)
     try:  # lazy as well; batch_engine imports no torch at import
         from app.inference.batch_engine import FixedBatchOutOfMemory
     except Exception:
