@@ -106,6 +106,7 @@ jobs:
               "resources/themes/dark_theme.qss",
               "resources/icons/sprouts/sprouts_logo.svg",
               "resources/app_icon.ico",
+              "resources/fonts/IBMPlexSans-Regular.ttf",
               "app/assets/style.css",
           ):
               assert os.path.isfile(get_resource_path(rel)), rel

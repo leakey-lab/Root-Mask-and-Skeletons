@@ -59,6 +59,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_DATAS: tuple[tuple[str, str], ...] = (
     ("resources/themes", "resources/themes"),
     ("resources/icons", "resources/icons"),
+    ("resources/fonts", "resources/fonts"),  # Qt UI fonts (app/gui/widgets/fonts.py)
     ("resources/app_icon.ico", "resources"),
     ("resources/app_icon.png", "resources"),
     ("app/assets", "app/assets"),

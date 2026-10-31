@@ -9,7 +9,8 @@ measured image (its STATUS words set a 1,112-1,126 px minimum until they elided,
 
 Widths need real fonts: offscreen Qt on Windows has an empty font database (every glyph a
 box) unless ``QT_QPA_FONTDIR`` names a font folder, which must be set before the application
-exists. So a child process measures, on the offscreen platform with the system fonts. The
+exists. So a child process measures, on the offscreen platform with the system fonts and the
+app's own (IBM Plex, which ``main.apply_stylesheet`` registers before the stylesheet). The
 dashboards are stand-ins there (no browser offscreen); their pages hold no chrome text.
 """
 

@@ -33,11 +33,13 @@ ROOT = Path(__file__).resolve().parents[1]
 # Installed per CUDA/CPU build (README "Installation"); pip must never pull them in.
 _TORCH = {"torch", "torchvision"}
 # Files the app opens at run time relative to the repo root (resources/resource_utils.py,
-# app/gui/widgets/icons.py, app/gui/ui_panels.py, main.py) and the folder Dash serves
-# (app/visualization/dash_app*.py -> app/assets, including vendored fonts and licences).
+# app/gui/widgets/icons.py, app/gui/widgets/fonts.py, app/gui/ui_panels.py, main.py) and the
+# folder Dash serves (app/visualization/dash_app*.py -> app/assets, including vendored fonts
+# and licences).
 _RUNTIME_ASSET_GLOBS = (
     "resources/themes/**/*",
     "resources/icons/**/*",
+    "resources/fonts/**/*",
     "resources/app_icon.*",
     "app/assets/**/*",
 )

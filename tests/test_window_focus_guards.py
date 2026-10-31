@@ -1,13 +1,16 @@
 """Focus guards of the window (Qt toolkit item 4): the click-focus audit of the Correct page
-and the focus-ring rule of widget stylesheets. Allowed offenders are listed by issue id (none
-since C5-03 and K1b-01 were fixed; their tests stay as regression guards).
+and of every button, and the focus-ring rule of widget stylesheets. Allowed offenders are
+listed by issue id (none since C5-03 and K1b-01 were fixed; their tests stay as regression
+guards).
 
 Click focus (UXE-03). The canvas holds the hold keys (Space pans, B sizes the brush) and the
 gesture keys; a control with click focus takes them, and Space then clicks it again. Qt gives
 each control its own focus policy (buttons, sliders and combo boxes default to StrongFocus)
-and has no focus scope, so every control over the canvas and on the top bar's Correct page
-must be Tab-only (``widgets.keep_canvas_focus``). Allowed: the Enhance popover's content
-(its combo box and sliders keep click focus on purpose) and text fields.
+and has no focus scope. Every button of the app is Tab-only (owner item #44,
+``widgets.focus.use_tab_only_buttons``, installed by ``main.main`` and the suite's
+QApplication), and every other control over the canvas and on the top bar's Correct page must
+be Tab-only too (``widgets.keep_canvas_focus``). Allowed: the Enhance popover's content (its
+combo box and sliders keep click focus on purpose) and text fields.
 
 Focus rings (UXS-08). A widget's own stylesheet beats the application's whatever the
 specificity, so a widget stylesheet that sets ``border`` on a focusable control hides the
@@ -27,7 +30,14 @@ from pathlib import Path
 
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QAbstractSpinBox, QLineEdit, QPlainTextEdit, QTextEdit, QWidget
+from PyQt6.QtWidgets import (
+    QAbstractButton,
+    QAbstractSpinBox,
+    QLineEdit,
+    QPlainTextEdit,
+    QTextEdit,
+    QWidget,
+)
 
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
@@ -142,6 +152,29 @@ def test_classes_and_export_dataset_leave_the_keyboard_on_the_canvas(window):
     assert _topbar_click_focus(window) == []
     for button in (window.gt_classes_button, window.gt_export_button):
         assert button.focusPolicy() == Qt.FocusPolicy.TabFocus  # Tab still reaches it
+
+
+def _buttons_with_click_focus(root: QWidget) -> list[str]:
+    """Buttons under ``root`` that take click focus once polished (as before they are first
+    shown; buttons on pages never shown are not polished yet)."""
+    offenders = []
+    for button in root.findChildren(QAbstractButton):
+        if not button.isWidgetType():  # a stale wrapper (see widgets.focus.keep_canvas_focus)
+            continue
+        button.ensurePolished()
+        if _takes_click_focus(button):
+            offenders.append(_described(button))
+    return offenders
+
+
+def test_no_button_of_the_window_or_its_dialogs_takes_the_keyboard_on_a_click(window, dialogs):
+    # Owner item #44: every button is Tab-only, not only those over the canvas.
+    buttons = window.findChildren(QAbstractButton)
+    assert len(buttons) > 50  # the audit sees the whole window
+    offenders = _buttons_with_click_focus(window)
+    for dialog in dialogs:
+        offenders += _buttons_with_click_focus(dialog)
+    assert offenders == []
 
 
 # --------------------------------------------------------------------------- focus rings

@@ -76,10 +76,11 @@ include = ["app*", "resources*"]
 exclude = ["*__pycache__*", "resources.App Image"]
 
 # Whole asset trees ("**" is recursive in setuptools): Dash serves every file in app/assets
-# (vendored CSS, fonts and their licence texts), Qt loads the theme and icons.
+# (vendored CSS, fonts and their licence texts), Qt loads the theme, icons and UI fonts (with
+# their licence text).
 [tool.setuptools.package-data]
 app = ["assets/**/*"]
-resources = ["themes/**/*", "icons/**/*", "app_icon.ico", "app_icon.png"]
+resources = ["themes/**/*", "icons/**/*", "fonts/**/*", "app_icon.ico", "app_icon.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

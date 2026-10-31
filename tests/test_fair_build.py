@@ -213,6 +213,9 @@ def test_spec_wires_repo_paths_icon_version_and_build_info(bs, tmp_path, monkeyp
     datas = analysis["datas"]
     assert all(Path(src).exists() for src, _dest in datas)
     assert (str(tmp_path / "work" / "build_info.json"), ".") in datas
+    # The Qt UI fonts (app/gui/widgets/fonts.py) once, at the path the app reads them from.
+    fonts = [dest for src, dest in datas if Path(src).resolve() == (ROOT / "resources/fonts")]
+    assert fonts == ["resources/fonts"]
     assert "app.gt.registry" in analysis["hiddenimports"]
     assert analysis["binaries"] == bs.torchvision_op_libraries()
 

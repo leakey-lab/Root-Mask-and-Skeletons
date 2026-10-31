@@ -58,8 +58,44 @@ plotly.js version `plotly.offline.get_plotlyjs_version()` reports, replace
 `pytest tests/test_viz_dash_plotly_bundle.py tests/test_viz_dash_autosize_guard.py
 tests/test_viz_dash_uirevision.py`. Read plotly.js's release notes for changed defaults: the
 dashboards set plotly.js 3's back where plotly.js 4 changed them (`showSendToCloud` and
-`doubleClickDelay` in `dash_shell.graph_config`, the bar label colours in
-`theme.inside_label_colour`). If a dashboard needs a trace type the basic bundle lacks,
+`doubleClickDelay` in `dash_shell.graph_config`); the bar value labels take plotly.js 4's
+own contrast colour (owner decision #51, 2026-10-31). If a dashboard needs a trace type the basic bundle lacks,
 delete the file instead: dcc.Graph then loads the full bundle.
+
+## Qt UI fonts (`resources/fonts/`)
+
+The desktop UI (the Qt stylesheet and `app/design/tokens.py`) names IBM Plex Sans and IBM
+Plex Mono first. Qt cannot read the `.woff2` files above (they stay for the dashboards), so
+the same releases ship as TTF files in `resources/fonts/`, which `app/gui/widgets/fonts.py`
+registers at start-up, before the stylesheet loads. They are copied unmodified from the
+`fonts/complete/ttf/` folder of IBM's GitHub release archives:
+
+- IBM Plex Sans 1.1.0: https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-sans%401.1.0/ibm-plex-sans.zip
+  (SHA-256 `fb365d910566e6d199cc2c15579a7dd9a267128e18431a394ed81f1970c69200`; GitHub lists
+  no digest for this 2024 asset, so it was checked against the npm package
+  `@ibm/plex-sans@1.1.0`, whose registry checksum matched: its 171 files are byte-identical
+  in the archive).
+- IBM Plex Mono 2.5.0: https://github.com/IBM/plex/releases/download/%40ibm%2Fplex-mono%402.5.0/ibm-plex-mono.zip
+  (SHA-256 `6d23f01257663d8cc49a0d64c22ced630b79e0e2a0ac08a0da86e9a38bbc481c`, the digest
+  GitHub lists for the asset).
+
+Only the weights the UI uses are shipped: Sans 400 / 500 / 600 / 700 and Mono 400 / 600
+(the 800 of two titles draws in Bold). The fonts are complete (no subset). Licence: SIL OFL
+1.1, `resources/fonts/IBM-Plex-OFL-1.1.txt` (the archives' `LICENSE.txt`, the same text as
+`licenses/IBM-Plex-OFL-1.1.txt`).
+
+| File | Version | License | SHA-256 (as vendored) |
+|---|---|---|---|
+| `resources/fonts/IBMPlexSans-Regular.ttf` | IBM Plex Sans 1.1.0 | SIL OFL 1.1 | `975dcda37d80f038dcd143c22e33ca2d97a0cc5a929aace1c749153b0fe1afa5` |
+| `resources/fonts/IBMPlexSans-Medium.ttf` | IBM Plex Sans 1.1.0 | SIL OFL 1.1 | `331c8639d7598b2cde62a911a71db195e30cb655cd6bdf2e324a7e984955f907` |
+| `resources/fonts/IBMPlexSans-SemiBold.ttf` | IBM Plex Sans 1.1.0 | SIL OFL 1.1 | `a20caf8286023a6a7a85e40b1d2a4ae9fc3e3b1f9eda8f4c542dd4986af67bb1` |
+| `resources/fonts/IBMPlexSans-Bold.ttf` | IBM Plex Sans 1.1.0 | SIL OFL 1.1 | `9e6c74a889a700d707613d24548fe4ffa6bc59559a0689d2cf9e133bdcdafb2f` |
+| `resources/fonts/IBMPlexMono-Regular.ttf` | IBM Plex Mono 2.5.0 | SIL OFL 1.1 | `7c6fbddca4b700be918f5f6183d9bd4464fa427fe435f0b480d77fe2bb8c5a43` |
+| `resources/fonts/IBMPlexMono-SemiBold.ttf` | IBM Plex Mono 2.5.0 | SIL OFL 1.1 | `f04d7c488ddf7d1fa99f2574efc3406ea4cbe17bb1af3a1ab960f84d0c96a172` |
+
+To update: download the new release archives, check their SHA-256 against the release,
+copy the same TTFs in unmodified, update this table and run `pytest tests/test_ui_fonts.py
+tests/test_window_width_budget.py tests/test_shell_chrome_topbar.py` (a new font changes
+text widths).
 
 Code outside this folder: see `THIRD_PARTY_NOTICES.md` at the repository root.
