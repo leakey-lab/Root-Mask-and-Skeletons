@@ -48,9 +48,9 @@ merged one run the very same script. A driver has: ``open(image_path)``, ``set_c
 plane, 2-D uint8), ``reviewed()``, ``dirty()`` and ``warnings()`` (the number of remap warnings
 of the load).
 
-- ``reviewed()`` is the sorted set Save writes: the hand ticks united with the classes that
-  have pixels. Unticking a class that has pixels changes nothing, and Ignore (255) never
-  appears.
+- ``reviewed()`` is the sorted set Save writes: the hand ticks only (owner decision
+  2026-10-30; the goldens were re-recorded then, every class-id pixel unchanged). Pixels never
+  tick a class, and Ignore (255) never appears.
 - ``dirty()`` is True while Save would write something new: after an edit, and from the open
   on when the load remapped ids. An undo back to the saved state makes it False, and an undo
   past the saved state makes it True again.

@@ -16,13 +16,11 @@
      "3": "root_tip"
     },
     "exists": true,
-    "file_sha256_informational": "0cdc439e4d45818761ca2cc055911e72d7f40e791fbf47ad1c532696f1a41b49",
+    "file_sha256_informational": "6c50bb19e232a513dd17f9fae8c6a58267b15ee1cb6a2a6de19fcb9b91961cfe",
     "ids_sha256": "588b485379ac45c7e7dd2d2b72cba69959f598d6eb92ef8a0790e53534f7a951",
     "mode": "P",
-    "palette_sha256": "7908de00ad7bb8d9111b8ffc73c292631be17e1bab9603297e439f6d1fa0eed6",
+    "palette_sha256": "9b4521ee01c0db48f1e79d307cfd1532c01ef019e3a7e05cd2bd66025ce984f0",
     "reviewed": [
-     "nodule",
-     "root",
      "root_tip"
     ],
     "size": [
@@ -83,85 +81,40 @@
    "per_op_reviewed": [
     [],
     [],
+    [],
+    [],
     [
-     "root"
+     "nodule"
     ],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
     [
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root",
      "root_tip"
     ],
     [
-     "nodule",
-     "root",
+     "root_tip"
+    ],
+    [],
+    [
      "root_tip"
     ],
     [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root",
      "root_tip"
     ],
     [
-     "nodule",
-     "root",
-     "root_tip"
-    ],
-    [
-     "nodule",
-     "root",
      "root_tip"
     ]
    ],
    "reviewed": [
-    "nodule",
-    "root",
     "root_tip"
    ],
    "save_returned": true,
@@ -181,10 +134,10 @@
      "3": "root_tip"
     },
     "exists": true,
-    "file_sha256_informational": "def803a60fce823b6b8a67df683d5ceddc209c84de28da0d2dd3988935e81854",
+    "file_sha256_informational": "08536527475ae20c4c577ca20d88197d85868d2bea3671f3d970ba382707a4f4",
     "ids_sha256": "0e99f634c389eaa980f44744ec626c41237d6af18be75e34347b9b8c88f087f0",
     "mode": "P",
-    "palette_sha256": "7908de00ad7bb8d9111b8ffc73c292631be17e1bab9603297e439f6d1fa0eed6",
+    "palette_sha256": "9b4521ee01c0db48f1e79d307cfd1532c01ef019e3a7e05cd2bd66025ce984f0",
     "reviewed": [],
     "size": [
      640,
@@ -222,14 +175,11 @@
      "3": "root_tip"
     },
     "exists": true,
-    "file_sha256_informational": "944abef671935132fccd65cb0b775c6a37c1972ed9fa44543b7c8497a146074a",
+    "file_sha256_informational": "0b1490385368e9fc8927e76236b0eccf69d4716effd56b6ff07a308bd5299a8b",
     "ids_sha256": "38b670fe6237f53b860de70f5972a5aff6c065682c72b0a23ab2b08e6ec7a5b5",
     "mode": "P",
-    "palette_sha256": "7908de00ad7bb8d9111b8ffc73c292631be17e1bab9603297e439f6d1fa0eed6",
-    "reviewed": [
-     "nodule",
-     "root"
-    ],
+    "palette_sha256": "9b4521ee01c0db48f1e79d307cfd1532c01ef019e3a7e05cd2bd66025ce984f0",
+    "reviewed": [],
     "size": [
      640,
      480
@@ -286,73 +236,27 @@
    "per_op_reviewed": [
     [],
     [],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ]
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    []
    ],
-   "reviewed": [
-    "nodule",
-    "root"
-   ],
+   "reviewed": [],
    "save_returned": true,
    "warnings": 0
   },
@@ -372,13 +276,11 @@
      "3": "root_tip"
     },
     "exists": true,
-    "file_sha256_informational": "cd1bc5e71ebf91ee1bd1d2f889b70baa96f522e0f6679b75a277f06d725f0deb",
+    "file_sha256_informational": "ce4d8b13b0316da494493602a6f438b4146b459888e71b200f7c09644e4b87dd",
     "ids_sha256": "c2abf6ad9ea85021e51257d6306567d8f5d3600daa6c49922717297454a29f97",
     "mode": "P",
-    "palette_sha256": "7908de00ad7bb8d9111b8ffc73c292631be17e1bab9603297e439f6d1fa0eed6",
-    "reviewed": [
-     "root"
-    ],
+    "palette_sha256": "9b4521ee01c0db48f1e79d307cfd1532c01ef019e3a7e05cd2bd66025ce984f0",
+    "reviewed": [],
     "size": [
      640,
      480
@@ -446,52 +348,22 @@
     [],
     [],
     [],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ]
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    []
    ],
-   "reviewed": [
-    "root"
-   ],
+   "reviewed": [],
    "save_returned": true,
    "warnings": 0
   },
@@ -511,10 +383,10 @@
      "3": "root_tip"
     },
     "exists": true,
-    "file_sha256_informational": "c06035522745d56e4c4cac010cf232595e495f59c4a7c22a24014cdbece68a16",
+    "file_sha256_informational": "a3475c9ff9eb53fc7a555e0d904a11c93431376b05372da3e6ee413594204956",
     "ids_sha256": "8d9f2ac243a0a125a64e1d33b46b80f97c009322e19f2f1355c91dff882d6d9d",
     "mode": "P",
-    "palette_sha256": "7908de00ad7bb8d9111b8ffc73c292631be17e1bab9603297e439f6d1fa0eed6",
+    "palette_sha256": "9b4521ee01c0db48f1e79d307cfd1532c01ef019e3a7e05cd2bd66025ce984f0",
     "reviewed": [
      "root"
     ],
@@ -563,13 +435,11 @@
      "3": "root_tip"
     },
     "exists": true,
-    "file_sha256_informational": "60311d8f12eb69f7026d2813c68fc612ec176cc4ca719ae012d6ef773b1464f3",
+    "file_sha256_informational": "7f818481a8e1195afab233a19c7c1678fe33a6cea43bf87d1ce4aab866e18463",
     "ids_sha256": "c66a748f95319ded1bbc4a1e31c58c2a6c84807a2b3ea25e713c466b79f609a4",
     "mode": "P",
-    "palette_sha256": "7908de00ad7bb8d9111b8ffc73c292631be17e1bab9603297e439f6d1fa0eed6",
+    "palette_sha256": "9b4521ee01c0db48f1e79d307cfd1532c01ef019e3a7e05cd2bd66025ce984f0",
     "reviewed": [
-     "nodule",
-     "root",
      "root_tip"
     ],
     "size": [
@@ -624,74 +494,29 @@
    "per_op_reviewed": [
     [],
     [],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root"
-    ],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
     [],
     [
-     "nodule",
-     "root"
-    ],
-    [
-     "nodule",
-     "root",
      "root_tip"
     ],
     [
-     "nodule",
-     "root",
      "root_tip"
     ]
    ],
    "reviewed": [
-    "nodule",
-    "root",
     "root_tip"
    ],
    "save_returned": true,
@@ -705,7 +530,8 @@
   "pillow": "12.2.0",
   "purpose": "class-label goldens of the Trace GT editor before the Correct merge; cases.* is the contract",
   "pyqt": "6.11.0",
-  "qt": "6.11.0"
+  "qt": "6.11.0",
+  "rerecorded": "2026-10-30 after two owner decisions: the default Root class colour #56b4e9 (palette hash) and hand ticks only (reviewed lists, dirty flags); every class-id pixel unchanged"
  },
  "ops": {
   "dirty_and_history": [

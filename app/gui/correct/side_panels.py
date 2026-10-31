@@ -16,8 +16,7 @@ a row click, a tick and the gear go to the layer and the page; the layer's
 every committed plane change, never a mouse move) puts its registry, active class and ticks
 on the panel, each only when it changed (a stroke costs two small set compares). A click on
 the panel hands the keys back to the canvas; a box ticked from the keyboard keeps them for
-the next box; a box that locks under the focus (its class got pixels) hands them to the
-canvas first, so a Space never ticks the box after it.
+the next box. Only the annotator ticks a box: pixels never tick or lock one.
 """
 
 from __future__ import annotations
@@ -77,7 +76,7 @@ class SidePanels(_FloatingPanel):
         self._layer: ClassesLayer | None = None
         self._canvas: QWidget | None = None
         self._registry: Registry | None = None  # what the class panel shows
-        self._reviewed: tuple | None = None  # (hand ticks, classes with pixels) it shows
+        self._reviewed: frozenset[str] | None = None  # the hand ticks it shows
 
     # ------------------------------------------------------------------ the card
     def set_active_layer(self, layer_id: str) -> None:
@@ -155,15 +154,11 @@ class SidePanels(_FloatingPanel):
             self.reposition()
             QTimer.singleShot(0, self.reposition)  # the new rows count once they are shown
         panel.set_active(layer.active_class())  # it does nothing when the class is shown
-        document = layer.document
-        reviewed = (document.ticked(), frozenset(document.present_keys()))
+        reviewed = layer.document.ticked()
         if reviewed == self._reviewed:
             return
         self._reviewed = reviewed
-        focused = panel.focused_key()
-        if focused is not None and focused in reviewed[1]:
-            self._canvas.setFocus()  # the box locks under the focus: Space must not move on
-        panel.set_reviewed(set(reviewed[0]), set(reviewed[1]))
+        panel.set_reviewed(set(reviewed))
 
     def _pick(self, key: str) -> None:
         """A row was clicked: paint with its class; the keys go back to the canvas."""

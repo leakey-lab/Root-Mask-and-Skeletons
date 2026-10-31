@@ -102,7 +102,7 @@ def test_palette_matches_registry(tmp_path):
         im.load()
         assert im.mode == "P"
         palette = im.getpalette()
-        assert palette[3:6] == [0x5F, 0xD6, 0xA0]  # root
+        assert palette[3:6] == [0x56, 0xB4, 0xE9]  # root
         ignore = registry.by_key("ignore")
         ig_id = ignore.id
         expected_ignore_rgb = [int(ignore.color[i : i + 2], 16) for i in (1, 3, 5)]

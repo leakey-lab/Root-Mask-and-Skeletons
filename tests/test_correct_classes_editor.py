@@ -485,7 +485,7 @@ def test_the_brush_paints_in_the_active_class_colour(page):
     press(page, "2")  # nodule
     assert page.layers[CLASSES].brush_color.name() == "#ff7eb6"
     press(page, "1")
-    assert page.layers[CLASSES].brush_color.name() == "#5fd6a0"
+    assert page.layers[CLASSES].brush_color.name() == "#56b4e9"
 
 
 def test_b_tap_requests_the_brush_of_the_active_raster_layer(make_editor, project):
@@ -614,6 +614,9 @@ def test_the_classes_row_says_what_is_saved(page):
     assert row_text(page, CLASSES) == "No class labels"
     paint(page, (20, 100), (80, 110))
     assert row_text(page, CLASSES) == "Unsaved"
+    assert page.save()
+    assert row_text(page, CLASSES) == "GT · 0/3 checked"  # pixels tick no class
+    box(page, "root").click()
     assert page.save()
     assert row_text(page, CLASSES) == "GT · 1/3 checked"
 
@@ -1265,18 +1268,16 @@ def test_the_focused_box_draws_a_focus_ring(themed, page, checked):
     assert (before != after).any(axis=2).mean() > 0.1
 
 
-def test_a_box_that_locks_while_it_has_the_focus_hands_the_keys_to_the_canvas(page):
-    drag(page, (20, 20))  # a root dab
+def test_a_focused_box_stays_usable_when_its_class_gets_pixels(page):
     root = box(page, "root")
-    assert not root.isEnabled() and root.isChecked()  # the class has pixels: locked
-    page.undo()
-    assert root.isEnabled() and not root.isChecked()
     root.setFocus(Qt.FocusReason.TabFocusReason)
 
-    page.redo()  # the pixels are back: the box locks under the focus
+    drag(page, (20, 20))  # a root dab: the box neither ticks nor locks
 
-    assert not root.isEnabled() and root.isChecked()
-    assert QApplication.focusWidget() is page.graphics_view
+    assert root.isEnabled() and not root.isChecked()
+    assert QApplication.focusWidget() is root
+    QTest.keyClick(root, Qt.Key.Key_Space)
+    assert root.isChecked() and ticked(page) == {"root"}
 
 
 def test_the_class_keys_still_work_from_a_focused_box(page):
@@ -1319,6 +1320,7 @@ def test_a_refused_tick_goes_back(make_editor, project_bad_registry):
 # ============================================================================ Discard
 def test_discard_restores_the_saved_labels_and_their_checks(page, prompts):
     paint(page, (10, 30), (70, 30))  # root
+    page.class_panel.reviewed_changed.emit("root", True)
     assert page.save()
     saved = ids(page).copy()
     press(page, "2")
@@ -1641,18 +1643,20 @@ def test_the_panel_widens_for_longer_names_after_a_registry_change(made):
     assert panel.width() == narrow
 
 
-def test_a_locked_box_says_why_it_is_locked(made):
-    host = QWidget()
-    made.append(host)
-    panel = ClassPanel(host)
-    panel.set_registry(default_registry())
-    panel.set_reviewed({"nodule"}, {"root"})
-    root, nodule = panel._rows["root"].checkbox, panel._rows["nodule"].checkbox
-    assert not root.isEnabled() and root.isChecked()
-    assert nodule.isEnabled() and nodule.isChecked()
-    assert "pixels" in root.toolTip() and root.toolTip() != nodule.toolTip()
-    panel.set_reviewed(set(), set())
-    assert root.isEnabled() and root.toolTip() == nodule.toolTip()
+def test_painting_classes_ticks_no_box(page):
+    """Each class is ticked by hand, one by one: painting never ticks or locks a box (owner
+    bug report 2026-10-30: every painted class was ticked at once)."""
+    rows = page.class_panel._rows
+    for key, y in (("root", 40), ("root_tip", 80)):
+        page.layers[CLASSES].set_active_class(key)
+        drag(page, (20, y), (120, y))
+    settle(page)
+
+    boxes = {key: rows[key].checkbox for key in ("root", "nodule", "root_tip")}
+    assert all(box.isEnabled() and not box.isChecked() for box in boxes.values())
+    boxes["root_tip"].click()
+    assert page.layers[CLASSES].document.reviewed() == {"root_tip"}
+    assert [key for key, box in boxes.items() if box.isChecked()] == ["root_tip"]
 
 
 # ===================================================================== the class editor

@@ -106,10 +106,10 @@ def test_reviewed_checkbox_toggle_emits_and_set_reviewed_is_silent(app):
     assert got == [("nodule", True)]
 
     got.clear()
-    panel.set_reviewed({"root"}, {"root"})
+    panel.set_reviewed({"root"})
     assert got == []
     assert panel._rows["root"].checkbox.isChecked() is True
-    assert panel._rows["root"].checkbox.isEnabled() is False
+    assert panel._rows["root"].checkbox.isEnabled() is True  # a box is never locked
 
 
 def test_key_for_shortcut_defaults(app):

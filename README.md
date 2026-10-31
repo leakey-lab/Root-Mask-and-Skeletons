@@ -355,9 +355,9 @@ are kept across restarts.
 - **Classes** (purple; the class labels): Brush, Eraser and Fill in the colour of the
   active class, picked in the class panel that shows under the Layers panel while the
   class labels are edited (or with `1`–`9`, `0` = Ignore). Each class keeps its own
-  brush size; Fill reads the active class's outlines only; a class with pixels stays
-  *checked*, and the panel's boxes mark the classes looked for on the image (the
-  dataset export filters on them). It opens and saves only `gt/<stem>.png`
+  brush size; Fill reads the active class's outlines only; the panel's boxes, ticked by
+  hand one class at a time, mark the classes fully annotated on the image (the dataset
+  export filters on them). It opens and saves only `gt/<stem>.png`
   (`gt/classes.json` is written first when missing) and never reads or writes `mask/`,
   `skeletons/` or the GT mask and skeleton. Saving an untouched image writes nothing:
   tick the boxes to record that you looked and found nothing. While `gt/classes.json` is
@@ -462,7 +462,7 @@ never read or write `mask/` or `skeletons/`. They label classes; they do not mea
 - `gt/<stem>.png` — the class labels of an image: an 8-bit palette PNG where each pixel is one
   class id (`0` background, `1`–`254` classes, `255` Ignore). Any image viewer
   shows it in the class colours. A text chunk records the class list and which
-  classes were checked on that image.
+  classes were checked (fully annotated) on that image.
 - `gt/classes.json` — the project's classes (id, key, name, colour). Defaults:
   Root, Nodule, Root tip, Ignore. Edit them with **Classes…**; a deleted class is
   retired (its id is never reused); a retired class is listed under "Retired" in the
@@ -470,14 +470,14 @@ never read or write `mask/` or `skeletons/`. They label classes; they do not mea
   is edited by hand and a field has the wrong type, the app names the class and field
   and turns GT saving off until it is fixed.
 
-A saved file means the image was annotated, even when nothing is painted: tick the classes
-you looked for and save ("checked, nothing present" is a valid negative example).
+A saved file means the image was annotated, even when nothing is painted: tick each class
+you finished and save ("checked, nothing present" is a valid negative example).
 
 **Painting:** the class labels use Correct's Brush, Eraser and Fill, with the class panel
 under the Layers panel while they are edited. The brush paints the active class and replaces whatever was
-under it (one class per pixel). Each class has a ✓ box: it ticks itself when the
-class has pixels, and you tick it by hand for "looked for it, none present" (with the
-mouse, or reach the boxes with Tab and press Space).
+under it (one class per pixel). Each class has a ✓ box that only you tick, when that
+class is fully annotated on the image (also "none present"); painting never ticks it
+(with the mouse, or reach the boxes with Tab and press Space).
 
 | Key | Action |
 |---|---|

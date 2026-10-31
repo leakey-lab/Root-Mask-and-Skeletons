@@ -6,8 +6,9 @@ the id plane with its patch history, the "checked" ticks, the pixels per id and 
 last saved; the former Trace GT editor's storage half without Qt (colours: ``classes_paint``; the
 files read: ``classes_files``).
 
-The rules (the GT goldens pin them): reviewed (what Save writes) = the hand ticks + the
-classes with pixels, whose boxes are locked; a save makes the reviewed set the ticks. Dirty
+The rules (the GT goldens pin them): reviewed (what Save writes) = the hand ticks only; a
+class with pixels is not ticked until the annotator ticks it (owner decision 2026-10-30:
+"checked" means the class is done on this image, ticked one class at a time). Dirty
 = the ticks or a class count differ from the saved ones, else a pixel does, or the open
 remapped ids (until saved or discarded; a lossy remap asks until saved). Save always writes
 the file, ``gt/classes.json`` first when missing (its failure keeps the file). An invalid
@@ -187,15 +188,14 @@ class ClassesDocument(PlaneDocument):
         return frozenset(self._ticked)
 
     def reviewed(self) -> frozenset[str]:
-        """What Save writes as checked: the ticks and the classes with pixels."""
-        return frozenset(self._ticked | self.present_keys())
+        """What Save writes as checked: the hand ticks (pixels never tick a class)."""
+        return frozenset(self._ticked)
 
     def set_ticked(self, key: str, on: bool) -> bool:
-        """Tick ``key`` by hand; False (no change): it has pixels, Ignore, unknown, locked."""
+        """Tick ``key`` by hand, with or without pixels; False (no change): Ignore, unknown,
+        nothing open, read-only."""
         known = {c.key for c in self.registry.classes if not c.is_ignore}
         if not self.is_open() or self.registry_error or key not in known:
-            return False
-        if key in self.present_keys():
             return False
         if on != (key in self._ticked):
             (self._ticked.add if on else self._ticked.discard)(key)

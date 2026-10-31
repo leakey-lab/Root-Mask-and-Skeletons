@@ -261,6 +261,7 @@ def test_painted_classes_save_their_ids_and_ticks_and_never_touch_the_mask(scene
     layer.set_active_class("nodule")
     stroke(layer, (40, 5), (40, 55), size=6)
     assert layer.is_dirty()
+    assert layer.set_ticked("root", True) and layer.set_ticked("nodule", True)  # by hand
 
     outcome = layer.save()
 
@@ -311,12 +312,53 @@ def test_the_brush_colour_is_the_active_class_colour(scene, gt_project):
     layer.set_active_class("no_such_class")  # refused: the active class stays
     assert layer.active_class() == "ignore"
     layer.set_active_class("root")
-    assert layer.brush_color.name() == "#5fd6a0"
+    assert layer.brush_color.name() == "#56b4e9"
 
     stroke(layer, (50, 50), size=6)
-    assert tuple(pixmap_to_argb_array(layer.canvas.image)[50, 50]) == (0xA0, 0xD6, 0x5F, 255)
-    layer.hover(QPoint(60, 60))  # the ring keeps the layer's colour
-    assert layer.ring.inner.pen().color() == QColor(tokens.ACCENT)
+    assert tuple(pixmap_to_argb_array(layer.canvas.image)[50, 50]) == (0xE9, 0xB4, 0x56, 255)
+
+
+def ring_colour(layer: ClassesLayer) -> str:
+    return layer.ring.inner.pen().color().name()
+
+
+def test_the_ring_takes_the_active_class_colour(scene, gt_project):
+    """The ring shows the class the brush paints, not the layer's purple (bug 2026-10-30:
+    Root tip, or a new class, kept a ring like Root's)."""
+    layer, _, _ = open_layer(scene, gt_project.image, (640, 480))
+    layer.hover(QPoint(60, 60))
+
+    layer.set_active_class("root")
+    assert ring_colour(layer) == "#56b4e9"
+    layer.set_active_class("root_tip")
+    assert ring_colour(layer) == "#ffd166"
+    layer.set_active_class("ignore")
+    assert ring_colour(layer) == "#8a8f98"
+    assert ring_colour(layer) != QColor(tokens.ACCENT).name()
+
+
+def test_the_eraser_ring_stays_dashed_in_the_class_colour(scene, gt_project):
+    layer, _, _ = open_layer(scene, gt_project.image, (640, 480))
+    layer.set_tool("eraser")
+    layer.set_active_class("nodule")
+
+    pen = layer.ring.inner.pen()
+    assert (pen.color().name(), pen.style()) == ("#ff7eb6", Qt.PenStyle.DashLine)
+    layer.set_tool("brush")
+    pen = layer.ring.inner.pen()
+    assert (pen.color().name(), pen.style()) == ("#ff7eb6", Qt.PenStyle.SolidLine)
+
+
+def test_a_new_or_recoloured_class_recolours_the_ring(scene, gt_project):
+    layer, _, _ = open_layer(scene, gt_project.image, (640, 480))
+
+    layer.apply_registry(layer.registry().add(key="xyz", name="XYZ", color="#3a86ff"))
+    layer.set_active_class("xyz")
+    assert ring_colour(layer) == "#3a86ff"
+    layer.apply_registry(layer.registry().update("xyz", color="#00b4d8"))
+    assert ring_colour(layer) == "#00b4d8"
+    layer.apply_registry(layer.registry().retire("xyz"))  # gone: back to the first class
+    assert layer.active_class() == "root" and ring_colour(layer) == "#56b4e9"
 
 
 def test_per_class_brush_size_is_remembered(scene, gt_project):
@@ -354,7 +396,7 @@ def test_retired_class_pixels_survive_open_and_save(scene, project):
     tracing = read_tracing(project.labels)
     assert (tracing.ids[5:15, 5:15] == 4).all() and tracing.ids[40, 60] == 1
     assert set(np.unique(tracing.ids).tolist()) == {0, 1, 4}
-    assert {"root", "nodule"} <= tracing.reviewed
+    assert tracing.reviewed == {"nodule"}  # the file's tick kept; painted root not ticked
 
 
 # ============================================================================== ticks
@@ -368,15 +410,16 @@ def test_ticks_are_locked_while_the_class_has_pixels(scene, project):
     stroke(layer, (10, 30), (70, 30), size=6)
     assert heard  # the class panel hears of the new pixels
 
-    assert layer.set_ticked("root", False) is False and "root" in layer.document.reviewed()
+    assert layer.document.reviewed() == frozenset()  # pixels never tick a class
+    assert layer.set_ticked("root", True) is True
     assert layer.set_ticked("nodule", True) is True
     assert layer.document.reviewed() == {"root", "nodule"}
 
-    layer.clear()  # the pixels are gone: root is no longer checked
-    assert layer.document.reviewed() == {"nodule"}
-    layer.undo()  # they are back: root is checked and locked again
+    layer.clear()  # the pixels go; the ticks stay ("checked, none present")
     assert layer.document.reviewed() == {"root", "nodule"}
-    assert layer.set_ticked("root", False) is False
+    layer.undo()
+    assert layer.set_ticked("root", False) is True
+    assert layer.document.reviewed() == {"nodule"}
 
 
 def test_an_empty_save_writes_a_file_with_the_ticks(scene, project):
@@ -667,6 +710,7 @@ def test_undo_back_to_the_saved_labels_is_saved_again(scene, project):
     layer = opened.layer
     layer.set_active_class("root")
     stroke(layer, (10, 30), (70, 30), size=6)
+    layer.set_ticked("root", True)
     assert layer.save().ok
     layer.set_active_class("nodule")
     stroke(layer, (40, 5), (40, 55), size=6)

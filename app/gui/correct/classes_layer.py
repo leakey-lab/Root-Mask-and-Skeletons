@@ -4,8 +4,9 @@
 item at z 1.2, Brush / Eraser / Fill, the ring, the history replay, the view state) over the
 Qt-free :class:`~app.gui.correct.classes_document.ClassesDocument` (the class-id plane, the
 "checked" ticks, the registry, ``gt/<stem>.png``). It paints in the active class's colour
-(:attr:`ClassesLayer.brush_color`) while its ring, rail and row keep the layer's purple;
-Fill reads the active class's outlines only; each class keeps its own brush size.
+(:attr:`ClassesLayer.brush_color`) and its brush ring follows that colour, while its rail
+and row keep the layer's purple; Fill reads the active class's outlines only; each class
+keeps its own brush size.
 
 While ``gt/classes.json`` is invalid the layer is read-only: a press, Clear, a tick and the
 page's Classes… are refused (:meth:`ClassesLayer.locked`), the first refusal on an image with
@@ -14,7 +15,7 @@ open that sent unknown classes to Ignore, ``save_needs_prompt`` is True until a 
 PgDn asks instead of saving silently (``GuardedSaveLayer``). The page hears of every change
 the class panel shows through ``on_classes_changed``: an open, a save, Discard, a new
 registry, a tick (also a refused one: the box goes back), the active class and every plane
-change (a class gains or loses its pixels, so its box locks or unlocks).
+change.
 """
 
 from __future__ import annotations
@@ -66,6 +67,7 @@ class ClassesLayer(RasterLayer):
         )
         self.on_classes_changed: Callable[[], None] | None = None
         self._refused = False  # the read-only notice was shown for the open image
+        self._footprint.set_color(self.brush_color)
 
     @property
     def brush_color(self) -> QColor:
@@ -91,8 +93,8 @@ class ClassesLayer(RasterLayer):
         self.document.set_brush_size(self.document.active_key, self._size)
 
     def set_ticked(self, key: str, on: bool) -> bool:
-        """Tick (or untick) ``key``'s "checked" box; False when refused (the class has
-        pixels, Ignore, read-only). The page hears of it either way."""
+        """Tick (or untick) ``key``'s "checked" box, by hand only (pixels never tick it);
+        False when refused (Ignore, read-only). The page hears of it either way."""
         done = not self.locked() and self.document.set_ticked(key, on)
         if done:
             self._changed()
@@ -177,5 +179,8 @@ class ClassesLayer(RasterLayer):
         self._classes_changed()
 
     def _classes_changed(self) -> None:
+        """The active class or the registry may have changed: the ring shows the class the
+        brush paints; then the page hears of it."""
+        self._footprint.set_color(self.brush_color)
         if self.on_classes_changed is not None:
             self.on_classes_changed()

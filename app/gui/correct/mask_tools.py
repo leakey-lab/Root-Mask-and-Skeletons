@@ -215,8 +215,9 @@ def build_tools(host: MaskToolHost) -> dict[str, MaskTool]:
 class FootprintRing:
     """The current tool's footprint on the pointer's pixel: the layer's brush ring.
 
-    ``preview`` (a :class:`~app.gui.brush_preview.BrushPreview` in the layer colour, above
-    both layers) shows while the layer allows it (active, visible, open, a sized tool) and
+    ``preview`` (a :class:`~app.gui.brush_preview.BrushPreview` in the layer colour, the
+    class labels' in the active class's: :meth:`set_color`; above both layers) shows while
+    the layer allows it (active, visible, open, a sized tool) and
     ``is_panning()`` is False; it is dashed for a tool that erases. :meth:`place` runs on
     every pointer move, so it only moves the ring unless its visibility changes.
     """
@@ -227,7 +228,8 @@ class FootprintRing:
         """A hidden solid ring of ``color`` and ``diameter`` px in ``scene``."""
         self.preview = BrushPreview(scene, color=color)
         self.preview.set_diameter(diameter)
-        self._color = color
+        self._color = QColor(color)
+        self._dashed = False
         self._is_panning = is_panning
         self._pos: QPoint | None = None
         self._allowed = False
@@ -235,7 +237,15 @@ class FootprintRing:
 
     def set_tool(self, tool: MaskTool) -> None:
         """Draw ``tool``'s footprint: dashed when the tool erases."""
-        self.preview.set_style(self._color, dashed=tool.erase)
+        self._dashed = tool.erase
+        self.preview.set_style(self._color, dashed=self._dashed)
+
+    def set_color(self, color: QColor | str) -> None:
+        """Draw the ring in ``color`` (the class labels: the active class's), keeping its dash."""
+        color = QColor(color)
+        if color != self._color:
+            self._color = color
+            self.preview.set_style(color, dashed=self._dashed)
 
     def set_diameter(self, diameter: int) -> None:
         """The footprint's diameter in image pixels (the brush size)."""

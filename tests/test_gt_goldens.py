@@ -36,7 +36,8 @@ def test_the_golden_file_has_the_cases_and_pins_ids_ticks_and_the_file():
         "file",
     }
     assert len(case["per_op_ids_sha256"]) == len(GT_OPS["two_classes_crossing"])
-    assert case["reviewed"] == ["nodule", "root", "root_tip"] and case["file"]["mode"] == "P"
+    # hand ticks only (re-recorded 2026-10-30): the painted root and nodule are not ticked
+    assert case["reviewed"] == ["root_tip"] and case["file"]["mode"] == "P"
     assert case["file"]["transparency"] == 0
     # root painted, nodule painted, root_tip ticked only
     assert case["counts"]["2"] > 0 and case["counts"]["1"] > case["counts"].get("3", 0) == 0
@@ -50,7 +51,7 @@ def test_the_golden_file_has_the_cases_and_pins_ids_ticks_and_the_file():
     misses = [i for i, op in enumerate(ops) if op[0] == "click" and per_op[i] == per_op[i - 1]]
     fills = [i for i, op in enumerate(ops) if op[0] == "click" and per_op[i] != per_op[i - 1]]
     assert len(misses) == 4 and len(fills) == 1  # only the fill inside the active class's outline
-    assert fill["reviewed"] == ["nodule", "root"] and set(fill["counts"]) == {"0", "1", "2"}
+    assert fill["reviewed"] == [] and set(fill["counts"]) == {"0", "1", "2"}  # nothing ticked
     assert fill["counts"]["1"] > fill["counts"]["2"] > 0  # the root fill overwrote half the nodule
     for name, record in data["cases"].items():  # one entry per op; Save leaves nothing unsaved
         assert len(record["per_op_dirty"]) == len(record["per_op_reviewed"]) == len(GT_OPS[name])
@@ -59,13 +60,13 @@ def test_the_golden_file_has_the_cases_and_pins_ids_ticks_and_the_file():
     dirty = history["per_op_dirty"]
     saves = [i for i, op in enumerate(GT_OPS["dirty_and_history"]) if op[0] == "save"]
     assert [dirty[i] for i in saves] == [False, False] and history["dirty_before_save"] is True
-    # tick (4) and its takeback (5); the locked box of a painted class (6) is no change
+    # tick (4) and its takeback (5); unticking the painted, unticked root (6) is no change
     assert (dirty[4], dirty[5], dirty[6]) == (True, False, False)
     # stroke (9), undo (10), redo (11), undo (12), undo past the save (13), redo (14), redo (15)
     assert dirty[9:16] == [True, False, True, False, True, False, True]
     # a saved tick unticked (18) and ticked again (19); Clear (20) and its Undo (21)
     assert dirty[18:22] == [True, False, True, False]
-    assert history["per_op_reviewed"][6] == ["root"]  # the painted class stays checked
+    assert history["per_op_reviewed"][6] == []  # painting ticks no class
     ignore = data["cases"]["ignore_interplay"]
-    assert set(ignore["counts"]) == {"0", "1", "255"} and ignore["reviewed"] == ["root"]
+    assert set(ignore["counts"]) == {"0", "1", "255"} and ignore["reviewed"] == []
     assert ignore["file"]["classes"]["255"] == "ignore"

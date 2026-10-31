@@ -229,14 +229,15 @@ background (transparent in the palette), `1`-`254` classes from `gt/classes.json
 Ignore (excluded from training loss). The palette shows each class in its colour. A text
 chunk `sprouts_gt` holds JSON: `{"v": 1, "classes": {"<id>": "<key>", ...}, "reviewed":
 ["<key>", ...]}`, the id-to-key map the file was written with and the classes the
-annotator checked on this image ("looked for it"). A saved file with nothing painted is a
+annotator ticked as fully annotated on this image (by hand only since 2026-10-30; files
+saved before then also list every class that had pixels). A saved file with nothing painted is a
 valid negative example.
 
 ### `gt/classes.json`
 
 ```json
 {"version": 1, "classes": [
-  {"id": 1, "key": "root", "name": "Root", "color": "#5fd6a0", "retired": false},
+  {"id": 1, "key": "root", "name": "Root", "color": "#56b4e9", "retired": false},
   {"id": 255, "key": "ignore", "name": "Ignore", "color": "#8a8f98", "retired": false}]}
 ```
 

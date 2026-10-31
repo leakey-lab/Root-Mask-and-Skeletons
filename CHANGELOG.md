@@ -60,6 +60,23 @@ Seven passes, not yet released:
   a 161-finding audit implemented by per-area packages, then integrated and reviewed.
 
 ### Fixed
+- **Correct, Classes layer: the brush ring now shows the active class's colour (2026-10-30,
+  owner bug report).** The ring took the layer's purple once, at build, so picking Root tip,
+  or a new class, left it looking the same as for Root; the paint itself was already in the
+  class colour. The ring now follows the active class, also when the class editor adds,
+  recolours or retires one; the eraser ring stays dashed. Display only: no CSV value or
+  output pixel changes.
+- **Correct, Classes layer: the default Root class is sky blue `#56b4e9`, no longer the mask
+  layer's green `#5fd6a0` (2026-10-30, owner decision "yes change").** Root strokes blended
+  into the mask under them. A test keeps every default class colour apart from the mask,
+  skeleton and Classes layer colours. A project that already has `gt/classes.json` keeps
+  its colours (recolour Root in Classes…). See *Scientific output changes*.
+- **Correct, Classes layer: each class is ticked "checked" by hand, one at a time
+  (2026-10-30, owner bug report).** Painting a class used to tick and lock its box, so
+  every painted class was checked at once. A box now ticks only when the annotator ticks
+  it, and can be unticked while the class has pixels: "checked" means the class is fully
+  annotated on the image. The locked-box tooltip and fill are gone. See *Scientific output
+  changes*.
 - **Windows bundle: Generate failed in the app built on Python 3.14 (U2, 2026-10-29).**
   torchvision 0.29 renamed its operator libraries to `_C_stable.pyd` / `image_stable.pyd`,
   which PyInstaller's hook does not collect, so a frozen `import torchvision` raised
@@ -1242,6 +1259,19 @@ Seven passes, not yet released:
   as pre-commit already ran it.
 
 ### Scientific output changes
+- **Default Root class colour `#56b4e9` (was `#5fd6a0`, 2026-10-30).** In a project without
+  `gt/classes.json`, the next class-labels save writes the new colour into
+  `gt/classes.json` and into the palette entry of id 1 in `gt/<stem>.png`; Export dataset
+  lists it as Root's colour. The class ids (the pixel values) do not change, so no label,
+  CSV value, mask or skeleton pixel changes. Projects that already have `gt/classes.json`
+  are unchanged.
+- **Class labels: `reviewed` holds the hand ticks only (2026-10-30).** A class-labels save
+  no longer adds every class with pixels to the `reviewed` list of `gt/<stem>.png`.
+  Export dataset's "only fully checked images" (on by default) reads that list, so an image
+  saved from now on is exported only once every class is ticked by hand. Files saved before
+  keep their lists (painted classes included) until saved again. Class-id pixels are
+  unchanged; `tests/data/gt_goldens.json` was re-recorded with every class-id hash equal
+  (only the `reviewed` lists and the palette hash of the Root colour change).
 - **macOS and Linux on ARM (arm64): Correct opens and edits a skeleton as on x86
   (2026-10-30).** OpenCV's arm64 wheels (carotene / KleidiCV HAL) rounded the bilinear
   upscale of a prediction differently (`thin_raster`: 2-44 skeleton pixels of the three

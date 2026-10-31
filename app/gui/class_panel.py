@@ -15,8 +15,8 @@ ticks it (walkthrough W18: the boxes could be ticked only with the mouse).
 
 Long class names are elided at the right (the full name is the name's tooltip), so
 the panel keeps a bounded width and the "checked" boxes never scroll out of sight;
-the rows scroll vertically only. A box locked checked because its class has pixels
-says so in its tooltip and shows a dimmer fill than a box ticked by hand.
+the rows scroll vertically only. Only the annotator ticks a box, one class at a time:
+pixels never tick or lock one.
 
 This module never touches ``app/gui/widgets/*`` — it only consumes the
 existing ``_FloatingPanel``/``IconButton``/``keep_canvas_focus``/``ElidedLabel`` primitives.
@@ -25,7 +25,6 @@ existing ``_FloatingPanel``/``IconButton``/``keep_canvas_focus``/``ElidedLabel``
 from __future__ import annotations
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -45,18 +44,11 @@ from app.gui.widgets.text_fit import ElidedLabel, label_advance
 
 _MARGIN = 14
 _MAX_HEIGHT_FRACTION = 0.6
-_REVIEWED_TOOLTIP = "Checked: this class was looked for on this image"
-_LOCKED_TOOLTIP = "Checked: this class has pixels on this image. Erase them to untick it."
+_REVIEWED_TOOLTIP = "Tick when this class is fully annotated on this image"
 # A class name shows at most this wide (longer names are elided), and can shrink to
 # the minimum when the rows scroll and the scroll bar takes its share.
 _NAME_MAX_PX = 140
 _NAME_MIN_PX = 36
-
-
-def _locked_fill() -> str:
-    """The fill of a box locked checked: the checked colour, dimmed."""
-    color = QColor(tokens.SEL)
-    return f"rgba({color.red()}, {color.green()}, {color.blue()}, 0.45)"
 
 
 class _NameLabel(ElidedLabel):
@@ -134,12 +126,6 @@ class _ClassRow(QFrame):
         if not class_def.is_ignore:
             self.checkbox = QCheckBox()
             self.checkbox.setToolTip(_REVIEWED_TOOLTIP)
-            # Locked checked (the class has pixels): a dimmer fill than a hand tick.
-            fill = _locked_fill()
-            self.checkbox.setStyleSheet(
-                f"QCheckBox::indicator:checked:disabled {{ background: {fill}; "
-                f"border-color: {fill}; }}"
-            )
             self.checkbox.toggled.connect(self._on_checkbox_toggled)
             row.addWidget(self.checkbox)
         # A click falls through to the nearest focusable ancestor, so the row
@@ -166,13 +152,11 @@ class _ClassRow(QFrame):
         self._active = active
         self._apply_style()
 
-    def set_reviewed(self, checked: bool, locked: bool) -> None:
+    def set_reviewed(self, checked: bool) -> None:
         if self.checkbox is None:
             return
         self._suppress_toggle = True
         self.checkbox.setChecked(checked)
-        self.checkbox.setEnabled(not locked)
-        self.checkbox.setToolTip(_LOCKED_TOOLTIP if locked else _REVIEWED_TOOLTIP)
         self._suppress_toggle = False
 
     def _apply_style(self) -> None:
@@ -304,10 +288,10 @@ class ClassPanel(_FloatingPanel):
     def active_key(self) -> str:
         return self._active_key
 
-    def set_reviewed(self, reviewed: set[str], locked: set[str]) -> None:
-        """Checkbox checked for keys in ``reviewed|locked``; disabled for ``locked``."""
+    def set_reviewed(self, reviewed: set[str]) -> None:
+        """Checkbox checked for the keys in ``reviewed`` (the hand ticks), silently."""
         for key, row in self._rows.items():
-            row.set_reviewed(key in reviewed or key in locked, key in locked)
+            row.set_reviewed(key in reviewed)
 
     def focused_key(self) -> str | None:
         """The class whose "checked" box has the keyboard focus (reached by Tab), or None."""

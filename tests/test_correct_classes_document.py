@@ -282,19 +282,21 @@ def test_a_file_that_cannot_be_used_opens_empty_not_shown_and_kept(gt_project, k
 
 
 # ------------------------------------------------------------------------------ ticks
-def test_ticks_are_locked_while_pixels_exist(gt_project):
+def test_only_hand_ticks_check_a_class(gt_project):
+    """Pixels never tick a class: the annotator ticks each class when it is done (owner
+    decision 2026-10-30; until then a class with pixels was ticked and locked)."""
     doc = opened(gt_project)
     commit(doc, (100, 100, 20, 20), 1)  # root pixels
 
-    assert doc.set_ticked("root", False) is False and "root" in doc.reviewed()
-    assert doc.set_ticked("root", True) is False and doc.ticked() == frozenset()
-    assert doc.present_keys() == {"root"}
+    assert doc.present_keys() == {"root"} and doc.reviewed() == frozenset()
+    assert doc.set_ticked("root", True) is True and doc.reviewed() == {"root"}
+    assert doc.set_ticked("root", False) is True and doc.reviewed() == frozenset()
     assert doc.set_ticked("ignore", True) is False  # Ignore is never checked
     assert doc.set_ticked("no_such_class", True) is False
-    assert doc.set_ticked("nodule", True) is True and doc.reviewed() == {"root", "nodule"}
+    assert doc.set_ticked("nodule", True) is True and doc.reviewed() == {"nodule"}
 
-    undo(doc)  # the pixels are gone: the box unlocks
-    assert doc.reviewed() == {"nodule"} and doc.set_ticked("root", True) is True
+    undo(doc)  # the pixels go; the ticks stay as they are
+    assert doc.reviewed() == {"nodule"}
 
 
 def test_a_tick_and_its_takeback_leave_the_document_clean(gt_project):
@@ -385,17 +387,17 @@ def test_an_empty_save_writes_a_file(gt_project):
     assert doc.status() == LayerStatus("clean", "GT · 0/3 checked", LABELS)
 
 
-def test_save_writes_the_ticks_and_the_present_classes_and_makes_them_the_ticks(gt_project):
+def test_save_writes_the_hand_ticks_and_makes_them_the_saved_ticks(gt_project):
     doc = opened(gt_project)
-    commit(doc, (100, 100, 20, 20), 1)
+    commit(doc, (100, 100, 20, 20), 1)  # root pixels, root not ticked
     doc.set_ticked("root_tip", True)
 
     assert doc.save().ok
 
-    assert read_tracing(gt_project.labels).reviewed == {"root", "root_tip"}
-    assert doc.ticked() == {"root", "root_tip"} and not doc.is_dirty()
-    undo(doc)  # root's pixels go; its tick stays (it was saved)
-    assert doc.reviewed() == {"root", "root_tip"} and doc.is_dirty()
+    assert read_tracing(gt_project.labels).reviewed == {"root_tip"}
+    assert doc.ticked() == {"root_tip"} and not doc.is_dirty()
+    undo(doc)  # root's pixels go; the ticks stay
+    assert doc.reviewed() == {"root_tip"} and doc.is_dirty()
     assert doc.status() == LayerStatus("dirty")
 
 
@@ -442,13 +444,13 @@ def test_a_first_save_without_a_file_writes_nothing_when_the_registry_fails(
     assert os.path.isfile(registry_path(gt_project.folder))
 
 
-def test_save_writes_the_same_checks_as_present_keys(gt_project):
+def test_save_writes_the_hand_ticks_only(gt_project):
     doc = opened(gt_project, size=(120, 90))
     rng = np.random.default_rng(4)
     for i, _ in enumerate(_random_session(doc, rng, 30)):
         if i % 5 == 4:
             plane = doc.history.plane.copy()
-            expected = doc.ticked() | present_keys(Tracing(plane), doc.registry)
+            expected = doc.ticked()
             assert doc.save().ok
             tracing = read_tracing(gt_project.labels)
             assert np.array_equal(tracing.ids, plane)
@@ -459,6 +461,7 @@ def test_save_writes_the_same_checks_as_present_keys(gt_project):
 def test_revert_puts_back_the_saved_ids_and_ticks_with_an_empty_history(gt_project):
     doc = opened(gt_project)
     commit(doc, (100, 100, 20, 20), 1)
+    doc.set_ticked("root", True)
     assert doc.save().ok
     saved = doc.history.plane.copy()
     commit(doc, (10, 10, 30, 30), 2)
@@ -653,6 +656,7 @@ def test_a_read_of_files_that_changed_since_is_not_used(gt_project):
 def test_matches_disk_reads_the_files_again(gt_project):
     doc = opened(gt_project)
     commit(doc, (100, 100, 20, 20), 1)
+    doc.set_ticked("root", True)
     assert doc.save().ok
     assert doc.matches_disk()
 
@@ -670,6 +674,7 @@ def test_read_back_hands_the_clean_document_back(gt_project):
     doc = opened(gt_project)
     commit(doc, (100, 100, 20, 20), 1)
     assert doc.read_back(doc.file_stamps()) is None  # unsaved
+    doc.set_ticked("root", True)
     assert doc.save().ok
     stamps = doc.file_stamps()
 

@@ -106,7 +106,7 @@ class LayerDriver:
         return self.layer.document.history.plane
 
     def reviewed(self) -> set[str]:
-        """What Save writes: the hand ticks and the classes with pixels."""
+        """What Save writes: the hand ticks."""
         return set(self.layer.document.reviewed())
 
     def dirty(self) -> bool:
