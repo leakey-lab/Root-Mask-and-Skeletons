@@ -32,7 +32,10 @@ import pytest
 from app.gui.skeleton_graph_model import SkeletonCorrectionModel
 
 STRICT = os.environ.get("SPROUTS_PERF_TESTS") == "1"
-pytestmark = pytest.mark.skipif(not STRICT, reason="wall-clock budget: set SPROUTS_PERF_TESTS=1")
+pytestmark = [
+    pytest.mark.wallclock,
+    pytest.mark.skipif(not STRICT, reason="wall-clock budget: set SPROUTS_PERF_TESTS=1"),
+]
 
 
 def dense_skeleton(size: tuple[int, int], seed: int) -> np.ndarray:

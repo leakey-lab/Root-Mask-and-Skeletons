@@ -156,6 +156,7 @@ def test_a_stale_read_is_read_again_and_never_handed_over(tmp_path):
     assert ahead.take(path) is not None
 
 
+@pytest.mark.wallclock
 def test_take_never_waits_for_a_running_job(tmp_path):
     path = photo(tmp_path)
     release = threading.Event()

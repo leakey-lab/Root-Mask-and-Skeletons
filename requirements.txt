@@ -29,6 +29,11 @@
 # --- GUI ---
 PyQt6==6.11.0
 PyQt6-WebEngine==6.11.0
+# Qt itself and sip come as separate wheels the two above pull in; pinned to the tested build
+# (Qt x.y goes with PyQt6 x.y: upgrade them together; tests/test_fair_packaging.py).
+PyQt6-Qt6==6.11.2
+PyQt6-WebEngine-Qt6==6.11.2
+PyQt6-sip==13.13.0
 
 # --- Imaging / scientific ---
 numpy==2.5.4

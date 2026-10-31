@@ -237,6 +237,7 @@ def test_the_project_sweep_covers_every_output_folder(tmp_path):
     assert all(os.path.exists(p) for p in kept)
 
 
+@pytest.mark.wallclock
 def test_a_loaded_project_is_swept_on_a_daemon_thread_after_its_scan(app, tmp_path, monkeypatch):
     import cv2
 

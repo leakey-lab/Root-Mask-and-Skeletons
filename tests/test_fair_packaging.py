@@ -20,6 +20,7 @@ import glob
 import os
 import tomllib
 import warnings
+from importlib import metadata
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,9 @@ import app
 ROOT = Path(__file__).resolve().parents[1]
 # Installed per CUDA/CPU build (README "Installation"); pip must never pull them in.
 _TORCH = {"torch", "torchvision"}
+# The wheels the Qt bindings install: Qt itself (bindings -> its Qt build) and sip.
+_QT_BUILDS = {"pyqt6": "pyqt6-qt6", "pyqt6-webengine": "pyqt6-webengine-qt6"}
+_QT_RUNTIME = {*_QT_BUILDS.values(), "pyqt6-sip"}
 # Files the app opens at run time relative to the repo root (resources/resource_utils.py,
 # app/gui/widgets/icons.py, app/gui/widgets/fonts.py, app/gui/ui_panels.py, main.py) and the
 # folder Dash serves (app/visualization/dash_app*.py -> app/assets, including vendored fonts
@@ -98,6 +102,31 @@ def test_runtime_dependencies_mirror_requirements_txt_without_torch():
             f"{name} pin outside pyproject range"
         )
         assert str(declared[name].marker) == str(pin.marker), f"{name} platform marker differs"
+
+
+def test_qt_runtime_wheels_are_pinned_with_their_bindings():
+    """PyQt6 and PyQt6-WebEngine pull in Qt itself and sip as separate wheels; they are pinned
+    too, so a later install gets the Qt build the suite ran with (owner item #53)."""
+    pinned = {canonicalize_name(r.name): r for r in _requirements(ROOT / "requirements.txt")}
+    assert _QT_RUNTIME <= pinned.keys()
+
+    def pin(name: str) -> Version:
+        (spec,) = pinned[name].specifier
+        return Version(spec.version)
+
+    for bindings, qt in _QT_BUILDS.items():  # PyQt6 x.y needs Qt x.y
+        assert pin(qt).release[:2] == pin(bindings).release[:2], f"{qt} vs {bindings}"
+    for bindings in _QT_BUILDS:
+        try:
+            if Version(metadata.version(bindings)) != pin(bindings):
+                continue  # another build installed: its requirements say nothing about the pins
+        except metadata.PackageNotFoundError:
+            continue
+        for line in metadata.requires(bindings) or ():
+            req = Requirement(line)
+            name = canonicalize_name(req.name)
+            if name in _QT_RUNTIME and (req.marker is None or req.marker.evaluate()):
+                assert req.specifier.contains(pin(name)), f"{bindings} wants {req}"
 
 
 def test_packages_found_are_the_app_and_its_resources_only(expanded):

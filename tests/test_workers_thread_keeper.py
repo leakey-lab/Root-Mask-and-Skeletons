@@ -175,6 +175,7 @@ def test_release_in_a_result_slot_never_waits_for_the_thread(app):
         del thread
 
 
+@pytest.mark.wallclock
 def test_release_of_a_running_plain_qthread_never_blocks_and_outlives_its_references():
     # In a child process: destroying a running QThread aborts the whole process. A thread
     # that was not started through GuardedThread is kept from the release on.

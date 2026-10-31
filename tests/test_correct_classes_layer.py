@@ -886,6 +886,7 @@ def _median_check_ms(layer, count=30) -> float:
     return statistics.median(times)
 
 
+@pytest.mark.wallclock
 def test_the_check_is_cheap_on_a_2048_plane(scene, project):
     """About 0.05 ms (cv2.norm over 3.1 MB); 2 ms leaves 40x headroom on a busy machine."""
     layer = _big_layer(scene, project)
@@ -893,6 +894,7 @@ def test_the_check_is_cheap_on_a_2048_plane(scene, project):
     assert _median_check_ms(layer) < 2.0
 
 
+@pytest.mark.wallclock
 @strict
 def test_the_check_is_within_0_25_ms_on_a_2048_plane(scene, project):
     assert _median_check_ms(_big_layer(scene, project), 200) <= 0.25

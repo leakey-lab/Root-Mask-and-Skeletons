@@ -62,6 +62,7 @@ def test_loading_the_defaults_sweeps_stale_temp_files_from_the_settings_folder(t
     assert os.path.exists(store.user_path)
 
 
+@pytest.mark.wallclock
 def test_the_sweep_runs_on_a_daemon_thread_and_load_never_waits_for_it(tmp_path, monkeypatch):
     folder = tmp_path / "SPROUTS"
     stale = _file(folder, f".{DEFAULTS_FILE_NAME}.1a2b3c4d.tmp", age_s=2 * HOUR)

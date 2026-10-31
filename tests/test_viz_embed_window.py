@@ -454,6 +454,7 @@ def test_browser_that_cannot_start_is_reported_without_background_work(qapp, tmp
 # --------------------------------------------------------------------------- #
 #  Shutdown
 # --------------------------------------------------------------------------- #
+@pytest.mark.wallclock
 def test_cleanup_stops_the_server_and_emits_server_closed_once(make_window):
     window = make_window()
     assert wait_until(lambda: window.web_view.loads)
@@ -471,6 +472,7 @@ def test_cleanup_stops_the_server_and_emits_server_closed_once(make_window):
     assert window.web_view.url().toString() == "about:blank"
 
 
+@pytest.mark.wallclock
 def test_cleanup_while_data_loads_neither_blocks_nor_starts_a_server(make_window):
     release = threading.Event()
 

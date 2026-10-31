@@ -69,6 +69,7 @@ def test_a_slot_queued_by_a_slow_finished_signal_is_delivered(qapp):
     assert receiver.seen == ["finished"]
 
 
+@pytest.mark.wallclock
 def test_wait_for_thread_fails_when_the_thread_outlives_the_timeout(qapp):
     thread = _Sleeper(1.0)
     thread.start()

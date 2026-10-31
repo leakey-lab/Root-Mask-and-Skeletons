@@ -265,6 +265,7 @@ def test_status_icon_renders_under_the_app_stylesheet(app):
     assert hits > 5
 
 
+@pytest.mark.wallclock
 def test_perf_smoke_46k(app):
     dates = ("2024.07.18", "2024.08.07", "2024.08.26")
     names = synth_names(n_tubes=170, dates=dates, depths=range(11, 102))

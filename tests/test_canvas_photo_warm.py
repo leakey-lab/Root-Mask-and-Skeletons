@@ -105,6 +105,7 @@ def test_the_warm_up_runs_by_itself_once_the_view_is_idle():
     scene.removeItem(item)
 
 
+@pytest.mark.wallclock
 def test_each_idle_slice_keeps_to_its_budget():
     item = photo(4000, 3000, tile=64)  # many small tiles to warm
     paint(item, 0.9, QRectF(0, 0, 4000, 3000))

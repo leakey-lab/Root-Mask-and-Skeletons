@@ -135,6 +135,7 @@ def test_a_stage_without_warmups_starts_no_dwell(made, stage):
     assert asked.calls == []
 
 
+@pytest.mark.wallclock
 def test_the_app_policy_and_dwell_are_the_defaults(made, monkeypatch):
     """Both are read when the intent is built (the window tests shorten the dwell so)."""
     monkeypatch.setattr(warmup, "STAGE_DWELL_MS", 60)

@@ -44,6 +44,9 @@ classifiers = [
 dependencies = [
     "PyQt6~=6.11",
     "PyQt6-WebEngine~=6.11",
+    "PyQt6-Qt6~=6.11",
+    "PyQt6-WebEngine-Qt6~=6.11",
+    "PyQt6-sip~=13.13",
     "numpy~=2.5",
     "scipy~=1.18",
     "scikit-image~=0.26",
@@ -86,9 +89,15 @@ resources = ["themes/**/*", "icons/**/*", "fonts/**/*", "app_icon.ico", "app_ico
 testpaths = ["tests"]
 # -p no:dash: Dash's pytest plugin (dash.testing, browser fixtures this suite does not use)
 # marks a hook the old way; pytest 9.2 warns it is removed in pytest 10, which would stop the
-# suite from starting. Not loading it changes no test.
-addopts = "-q -p no:dash"
+# suite from starting. Not loading it changes no test. --strict-markers: an unregistered
+# marker (a typo of wallclock) stops the run instead of only warning.
+addopts = "-q -p no:dash --strict-markers"
 filterwarnings = ["ignore::DeprecationWarning"]
+# A busy CPU fails a test that asserts a wall-clock time, so a parallel run (pytest-xdist)
+# leaves these out (-m "not wallclock") and a second, serial run takes them (-m wallclock).
+markers = [
+    "wallclock: asserts a wall-clock time (a speed budget or a duration); run it serially",
+]
 
 # Ruff is the single lint + import-sort ("I") + format tool (pre-commit and CI run it).
 # Do not add [tool.black] / [tool.isort] back: the formatters disagree on some lines.

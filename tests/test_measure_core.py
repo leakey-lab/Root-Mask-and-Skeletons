@@ -273,6 +273,7 @@ def test_run_metric_pool_stops_early_when_asked():
     assert len(rows) < len(images)
 
 
+@pytest.mark.wallclock
 def test_a_stop_is_heard_while_every_task_is_still_measuring():
     """``should_stop`` is asked while no task ends, not only when one does: a Cancel never
     waits for a whole run of images (up to 32 per task)."""
