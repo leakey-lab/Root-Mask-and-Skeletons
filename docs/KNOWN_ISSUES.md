@@ -1,12 +1,12 @@
 # SPROUTS — known issues and open decisions
 
-Status of 2026-10-31 on `feat/unified-correct-editor`, after wave 1 of the owner-answers
-build (2026-10-31, `0b4d352`..`2cb24f9`; handoff `.claude/handoff/owner-answers-2026-10-31/`,
+Status of 2026-10-31 on `feat/unified-correct-editor`, after waves 1 and 2 of the
+owner-answers build (2026-10-31, `0b4d352`..`a2ea0a5`; handoff `.claude/handoff/owner-answers-2026-10-31/`,
 git-ignored). On 2026-10-31 the owner answered the owner questions still open (the sheet
 and the answers: `.claude/handoff/open-items-2026-10-29/agents/A6-decision-sheet.md` and
 `A6-answers.md`). Table 4 gives each answer and its state: wave 1 built 21 answers (the
 third table of "Resolved history"; #1, #2 and #3 change scientific output, `CHANGELOG.md`),
-wave 2 is building 7, #37 is moot, 6 are closed with the owner's answer and 10 wait for
+wave 2 built the other 7 (`51a3a15`, `5d94c82`, `a2ea0a5`), #37 is moot, 6 are closed with the owner's answer and 10 wait for
 "later". Before it came the open-items pass of 2026-10-29 / 2026-10-30
 (`13af981`..`15e3c60`; handoff `.claude/handoff/open-items-2026-10-29/`, git-ignored).
 Every owner decision of the 2026-10-12 audit is built; O28 was closed unbuilt (D2,
@@ -143,17 +143,17 @@ decision sheet on 2026-10-29 (`.claude/handoff/open-items-2026-10-29/agents/A6-d
 | 15 | X2-07 | The raster halo on whole device pixels | yes, low | built, 6a66288 |
 | 16 | S09-03 | A Welcome row says "Folder not found" while it opens | later | open (owner 2026-10-31: later) |
 | 17 | S12-05 | With *Keep predictions*, Generate keeps the existing skeletons too | later | open (owner 2026-10-31: later) |
-| 18 | S11-10 | Generate refuses at once without the skeleton model | yes | open (owner 2026-10-31: yes, building (wave 2)) |
-| 19 | S11-09 | No second success toast ("Results loaded") after a skeleton run | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 18 | S11-10 | Generate refuses at once without the skeleton model | yes | built, 51a3a15 |
+| 19 | S11-09 | No second success toast ("Results loaded") after a skeleton run | yes | built, 51a3a15 |
 | 20 | C6-01 | An output folder that cannot be written stops Generate at once, with one message | yes | built, 68cbe40 |
-| 21 | C6-03 | *Load skeleton file…* (and *Export dataset…*) check the file before Save / Discard | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 21 | C6-03 | *Load skeleton file…* (and *Export dataset…*) check the file before Save / Discard | yes | built, 51a3a15 |
 | 22 | C6-05 | A failed save names the target, not the temp file | yes | built, 68cbe40 |
-| 23 | C6-06 | A warning toast when a dashboard export fails | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 23 | C6-06 | A warning toast when a dashboard export fails | yes | built, 5d94c82 |
 | 24 | C4-03 | A reopen keeps the undo history of the layers whose files did not change | later | open (owner 2026-10-31: later) |
 | 25 | L1b | A fully asynchronous Measure click | later | open (owner 2026-10-31: later) |
 | 26 (a) | S10-01 | The crash dialog attached to the main window | later | open (owner 2026-10-31: later) |
 | 26 (b) | S10-01 | The crash dialog's "Don't show error dialogs again" tick counts when the dialog closes with its parent | yes | built, 040c2af |
-| 27 | L2b | One failure order and log wording for mask and skeleton generation | yes, low | open (owner 2026-10-31: yes, building (wave 2)) |
+| 27 | L2b | One failure order and log wording for mask and skeleton generation | yes, low | built, 51a3a15 |
 | 28 | X1-01, X1-02 | The 49 ms drive wake-up in a save after a pause | (A) accept | closed (table 3) |
 | 29 | X1-03 | Flush the files of a multi-layer save together | later | open (owner 2026-10-31: later) |
 | 30 | X1-05 | A GT save on macOS lost in a power cut | (b) `F_BARRIERFSYNC`; correct the texts that promise a power-cut-safe save | built, 68cbe40 |
@@ -161,7 +161,7 @@ decision sheet on 2026-10-29 (`.claude/handoff/open-items-2026-10-29/agents/A6-d
 | 32 | P3-02 | uint8 batches on the GPU | later: needs a re-measure on torch 2.15 | open (owner 2026-10-31: later) |
 | 33 | P2-02 (b), S01-04 | Reuse the prediction as *Correct* opened it at save time, against O2 | no: keep O2 | closed (table 3) |
 | 34 | S15-07 tier 2 | Delete the length dashboard's compatibility layer | yes | built, f8820a5 |
-| 36 | T1-11 | pytest-xdist as a dev dependency, a `wallclock` marker, CI stays serial | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 36 | T1-11 | pytest-xdist as a dev dependency, a `wallclock` marker, CI stays serial | yes | built, a2ea0a5 |
 | 37 | C1-03 (part B) | A legacy project's Measure status line counts the folder Measure reads | yes, but moot: #38 retires the layout | closed: moot since #38, 2cb24f9 |
 | 38 | C1-03 | Keep or retire the older layout (`output/mask`, `[output/]skeletonizer/test_latest/images`) | retire: no project of that layout is left | built, 2cb24f9 |
 | 40 | | The skeleton's partial edge tiles aligned with the mask layer | yes, low | built, 6a66288 |
@@ -172,7 +172,7 @@ decision sheet on 2026-10-29 (`.claude/handoff/open-items-2026-10-29/agents/A6-d
 | 46 (iii) | | Ship the IBM Plex fonts as TTF files (OFL) | yes | built, 8b22663 |
 | 51 | | Keep plotly.js 3's dark bar labels, or take plotly.js 4's white ones | plotly.js 4's white labels (not the sheet's "keep") | built, f8820a5 |
 | 52 | U1 | Keep the Growth Over Time zoom workaround until plotly/dash#4093 is fixed | keep | closed: the re-check stays open as U1 (table 2) |
-| 53 | | Pin PyQt6-Qt6 and PyQt6-WebEngine-Qt6 6.11.2, PyQt6-sip 13.13.0 | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 53 | | Pin PyQt6-Qt6 and PyQt6-WebEngine-Qt6 6.11.2, PyQt6-sip 13.13.0 | yes | built, a2ea0a5 |
 | 59 | | Point the RQv2 benchmark at the old venv | no: it keeps `./venv` (not the sheet's "yes") | closed (table 3) |
 | STATUS cut | A4, P1-03 | How the metrics bar's STATUS words are cut | middle ellipsis, as built | closed (table 3) |
 
@@ -307,8 +307,8 @@ verdicts and harnesses are in `.claude/handoff/dedup-speed-2026-10-26/` (git-ign
 | X6-02 | | The strict Correct perf budgets (`SPROUTS_PERF_TESTS=1`) timed a synthetic 45-degree line that cost 17-25 ms of thinning, and two of them failed | A Pix2Pix prediction of `docs/examples` (an open at 640 px 33-35 -> 8 ms, against a 10 ms budget): T2a, 2f67663 |
 | X7-01 | E03, E04 | `app.handlers` imported `app.gui.image_manager` for `project_layout_of` | Moved to `app/project_layout.py`; `tests/test_layering_contract.py` pins that the handlers import no `app.gui` module: M1b, e3bdd79 |
 
-Wave 1 of the owner-answers build (2026-10-31, `0b4d352`..`2cb24f9`): the owner's "yes"
-answers of table 4 that wave 1 built. Each lane had its own files and was reviewed and
+Waves 1 and 2 of the owner-answers build (2026-10-31, `0b4d352`..`a2ea0a5`): the owner's
+"yes" answers of table 4. Each lane had its own files and was reviewed and
 committed on its own; `#` numbers are table 4's. `CHANGELOG.md` lists every change; the
 lane reports and reviews are in `.claude/handoff/owner-answers-2026-10-31/` (git-ignored).
 
@@ -323,6 +323,9 @@ lane reports and reviews are in `.claude/handoff/owner-answers-2026-10-31/` (git
 | S14-06, S14-05, S15-07 tier 2, #51 | owner questions #7, #8, #34, #51 | "Tube Tube 12" in the area Growth Over Time hover; "Image Not Available" in the Depth Profile hover for 7.5 % of the points; the length dashboard's compatibility layer; bar labels kept plotly.js 3's dark grey | The hover names the tube once; the hover checks the whole interval, as the side panel does; the layer is deleted; bar labels take plotly.js 4's colour (`tests/test_viz_theme_bar_label_contrast.py`): lane L6, f8820a5 |
 | S09-04, S10-01 (b) | owner questions #6, #26 (b) | An Enhance label stayed blank at the slider's minimum; the crash dialog lost its "Don't show error dialogs again" tick when it went with its parent | `set_settings` writes all four labels; the tick is kept as it changes: lane L7, 040c2af |
 | #45 | owner question #45 | The settings lived in the native store (the Windows registry, a macOS plist, `~/.config/LeakeyLab` on Linux) | One `settings.ini` in the user config folder on every OS, with a one-time import of the native values, which are only read (`app/settings.py`, `tests/test_settings_ini_import.py`): lane L8, 5cdfb5c |
+| S11-10, S11-09, C6-03, L2b | owner questions #18, #19, #21, #27 (wave 2) | Generate ran the whole mask pass before it found the skeleton model missing; a skeleton run showed a second "Results loaded" toast; *Load skeleton file…* and *Export dataset…* asked Save / Discard before they read the file; the two generation failures showed the box and refreshed in another order, with other log words | One model check before the mask pass, one done toast, one `_on_failed`, read before the prompt: lane L11, 51a3a15 |
+| C6-06 | owner question #23 (wave 2) | A failed dashboard export was only logged; a CSV table the server could not build answered HTTP 500 | Warning toast from `DashVizWindow.export_failed` and `DashboardShell.on_export_failed`: lane L12, 5d94c82 |
+| T1-11, #53 | owner questions #36, #53 (wave 2) | No parallel local test run; the Qt runtime wheels were not pinned | pytest-xdist, the `wallclock` marker and `--strict-markers`; PyQt6-Qt6 / PyQt6-WebEngine-Qt6 6.11.2 and PyQt6-sip 13.13.0 pinned: lane L10, a2ea0a5 |
 | #44, #46 (iii) | owner questions #44, #46 (iii) | A click on a button took the keyboard from the canvas (50 buttons); Qt could not load the IBM Plex `.woff2` files, so each OS drew its own font | `widgets.focus.TabOnlyButtonStyle` (installed by `main.main` and `tests/conftest.py`); IBM Plex TTFs in `resources/fonts/` (SIL OFL 1.1), registered before the stylesheet (`widgets/fonts.py`): lane L9, 8b22663. Limit: #44 (b) in table 2 |
 
 ## By design (scope limits)

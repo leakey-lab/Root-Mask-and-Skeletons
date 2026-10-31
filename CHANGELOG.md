@@ -13,13 +13,14 @@ produced before and after the change can be told apart.
 
 Eight passes, not yet released:
 
-- **Owner-answers build, wave 1** (branch `feat/unified-correct-editor`, 2026-10-31,
-  `0b4d352`..`2cb24f9`): the owner answered the 43 open questions of the 2026-10-29
-  decision sheet on 2026-10-31, and wave 1 built 21 of the "yes" answers in lanes with
+- **Owner-answers build, waves 1 and 2** (branch `feat/unified-correct-editor`,
+  2026-10-31, `0b4d352`..`a2ea0a5`): the owner answered the 43 open questions of the
+  2026-10-29 decision sheet on 2026-10-31, and two waves built all 28 "yes" answers in
+  lanes with
   disjoint files, each reviewed and committed on its own. Entries carry the sheet's item
   number (for example #20) and the audit ID; `docs/KNOWN_ISSUES.md` table 4 gives every
   answer and its state. Three answers change scientific output (#1, #2, #3: *Scientific
-  output changes*). Wave 2 builds the other "yes" answers.
+  output changes*).
 - **Python 3.14 and the newest dependencies** (branch `feat/unified-correct-editor`,
   2026-10-27; the owner's decision: "Use python 3.14 i accept gpu cudnn changes. Upgrade to
   most latest versions"): built and checked in an isolated worktree and venv. The GPU
@@ -165,6 +166,24 @@ Eight passes, not yet released:
   failure lists named SPROUTS's temp file (for example `.root_lengths.csv.8a0f8efd.tmp`, or
   `'<temp>' -> '<target>'` for a failed swap); they now name the target, here
   `root_lengths.csv`. The error keeps its type and codes, so every handler acts as before.
+- **Generate refuses at once when the skeleton model file is missing (S11-10, 2026-10-31,
+  owner decision #18).** Before, it ran the whole mask pass, and the skeleton pass then
+  failed in its worker. Now Generate checks both checkpoints before it starts. A missing
+  file gets one box that names it ("Skeleton model missing"; the mask model is named first
+  when both are missing). *Skeletons only* refuses the same way. A successful run writes
+  exactly what it wrote before.
+- ***Load skeleton file…* and *Export dataset…* read the file before they ask Save /
+  Discard (C6-03, 2026-10-31, owner decision #21).** Before, a Discard dropped the edits and
+  then the file turned out to be unreadable (or `gt/classes.json` invalid), so the edits
+  were lost for nothing. Now a bad file is refused with its message before any prompt, and
+  the edits stay. The file is read again after the prompt, because a Save there can rewrite
+  it.
+- **A failed dashboard export shows a warning toast (C6-06, 2026-10-31, owner decision
+  #23).** Before, only a successful export got a toast; a failure was only logged. Now a
+  plot or CSV download that does not complete shows "Could not save <name> in <folder>:
+  <reason>", and a CSV table the server cannot build shows "Could not export the <view>
+  view: …" (the server answered HTTP 500 before). The toast names the file (or the view)
+  and the reason.
 - **Correct, Classes layer: the brush ring now shows the active class's colour (2026-10-30,
   owner bug report).** The ring took the layer's purple once, at build, so picking Root tip,
   or a new class, left it looking the same as for Root; the paint itself was already in the
@@ -852,8 +871,9 @@ Eight passes, not yet released:
   button (`NoticeAction` in `app/feedback.py`, the optional `action=` of `notify`); it
   closes the toast. The done toast of mask and of skeleton generation has an "Open folder"
   button that shows the output folder in the file manager (none when inputs failed:
-  `open_folder_action` in `app/handlers/generation_base.py`). The newest toast is in front and the older ones tuck behind it until
-  the pointer is over the stack, which fans it out; a new toast slides up, the stack glides
+  `open_folder_action` in `app/handlers/generation_base.py`). The newest toast is in front
+  and the older ones tuck behind it until the pointer is over the stack, which fans it out;
+  a new toast slides up, the stack glides
   and a dismissed toast sinks as it fades (placed at once on the offscreen platform).
   Every countdown pauses while the pointer is over the stack and while SPROUTS is in the
   background. Success and info toasts last 4 s instead of 3.2 s; warnings at least 6 s and
@@ -909,6 +929,23 @@ Eight passes, not yet released:
   (SMB, FAT), the save falls back to `os.fsync`. Windows and Linux are unchanged. The texts
   that promised a power-cut-safe save on macOS are corrected (`app/io_utils.py`, the S16-09
   entry under *Fixed*). No CSV value or output pixel changes.
+- **Mask and skeleton generation end a failed run the same way (L2b, 2026-10-31, owner
+  decision #27).** Both refresh the window first, so the outputs written before the error
+  show behind the box, and then show the one error box. Both log "<Mask|Skeleton>
+  generation failed: …". Before, the skeleton log said "Skeleton generation error", and the
+  mask handler showed its box before the refresh.
+- **Qt's own wheels are pinned (2026-10-31, owner decision #53).** `requirements.txt` now
+  pins the wheels PyQt6 and PyQt6-WebEngine pull in: `PyQt6-Qt6` and `PyQt6-WebEngine-Qt6`
+  6.11.2 and `PyQt6-sip` 13.13.0, so a later install gets the Qt build the suite ran with.
+  `pyproject.toml` lists them with compatible ranges. `tests/test_fair_packaging.py` checks
+  that each Qt wheel matches its bindings' version and meets their requirements.
+- **A parallel local test run (T1-11, 2026-10-31, owner decision #36).**
+  `requirements-dev.txt` adds pytest-xdist. `pytest -n auto -m "not wallclock"` runs the
+  suite on every core (about 1 min on 16 cores), and `pytest -m wallclock` then runs the 37
+  wall-clock tests serially (24 always on, 13 opt-in). The new `wallclock` marker in
+  `pyproject.toml` tags every test that asserts a wall-clock time; under parallel load, a
+  15 ms undo test had failed in 4 of 6 audit runs. `--strict-markers` makes a mistyped
+  marker stop the run. CI stays serial.
 - **Python 3.14 and the newest dependencies (2026-10-27, owner decision).** Python 3.14
   (from 3.10: `requires-python >= 3.14`, CI on 3.14, ruff `py314`); PyTorch 2.14.1 and
   torchvision 0.29.1 from the CUDA 13.2 index (`cu132`, NVIDIA driver of the 580 series or
@@ -1379,6 +1416,8 @@ Eight passes, not yet released:
   `ThumbnailCache.data_url`, `jpeg_data_url`, and the `app.visualization.get_encoded_image`
   export). Nothing used them;
   the served page and its callbacks are unchanged (`tests/test_viz_dash_split_golden.py`).
+- **The second success toast after a skeleton run, "Results loaded" (S11-09, 2026-10-31,
+  owner decision #19).** One run, one message: "Skeletons saved to the … folder".
 - **Redundancy and speed pass (2026-10-26).** Code with no caller in the app, the scripts or
   the documents (the tests that only covered it went with it):
   - `app.inference.root_length_inference_handler` and `root_area_inference_handler`

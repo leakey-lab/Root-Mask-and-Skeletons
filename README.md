@@ -554,6 +554,11 @@ The suite pins the scientific calibration (length/area), skeleton vectorization,
 CSV schema, and imports of every app module. CI runs it on Windows, Linux and macOS, builds
 the Python wheel and validates `CITATION.cff`.
 
+A faster local run, with pytest-xdist from `requirements-dev.txt`: `pytest -n auto -m "not
+wallclock"` runs every test except the wall-clock ones on all cores (about 1 min on 16
+cores). Then run `pytest -m wallclock` serially; a busy CPU fails those tests. CI runs the
+whole suite serially.
+
 ## How to cite
 
 Use GitHub's **Cite this repository** button (generated from

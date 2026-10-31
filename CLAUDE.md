@@ -58,12 +58,20 @@ follow.
 # Tests (Qt needs an offscreen platform in headless/CI)
 $env:QT_QPA_PLATFORM = 'offscreen'; ./venv/Scripts/python.exe -m pytest
 
+# Faster local run (pytest-xdist, requirements-dev.txt): everything but the wall-clock
+# tests in parallel, then those serially (a busy CPU fails them). CI stays serial.
+$env:QT_QPA_PLATFORM = 'offscreen'; ./venv/Scripts/python.exe -m pytest -n auto -m "not wallclock"
+$env:QT_QPA_PLATFORM = 'offscreen'; ./venv/Scripts/python.exe -m pytest -m wallclock
+
 # Lint + import sort + format: ruff only (pyproject.toml — line-length 100, py314).
 # Same tools pre-commit runs; black/isort are not used (they fight ruff format).
 ./venv/Scripts/python.exe -m ruff check --fix .
 ./venv/Scripts/python.exe -m ruff format .
 ```
 
+- A test that asserts a wall-clock time (a speed budget, or "returns at once") gets
+  `@pytest.mark.wallclock` (registered in `pyproject.toml`; `--strict-markers` is on), so
+  the parallel run leaves it out.
 - Scripts that build a window or an editor page must delete it before the `QApplication`
   goes, or the process can end in an access violation (about 1 run in 30):
   `from tests.qt_teardown import delete_widgets`, then `delete_widgets([page])` as the last
