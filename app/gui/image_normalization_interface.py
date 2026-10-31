@@ -135,6 +135,9 @@ class NormalizationControls(QWidget):
             self.deblock_check.setChecked(settings.deblock)
         finally:
             self._updating = False
+        # A slider already at the value (say its minimum, where it starts) emits no
+        # valueChanged, so its label would stay blank: write all four here (S09-04).
+        self._show_values()
         self.on_method_changed(settings.method)
         if self._enabled or self._deblock_effective() != deblock_before:
             self._preview_timer.start()
@@ -348,8 +351,17 @@ class NormalizationControls(QWidget):
                 self.lower_slider.setValue(upper - 1)
             else:
                 self.upper_slider.setValue(lower + 1)
+        self._show_percentiles()
+
+    def _show_percentiles(self) -> None:
         self.lower_label.setText(f"Black point: {self.lower_slider.value()}%")
         self.upper_label.setText(f"White point: {self.upper_slider.value()}%")
+
+    def _show_values(self) -> None:
+        """Write every slider label from the slider's current value."""
+        self.on_clip_changed(self.clip_slider.value())
+        self.on_tile_changed(self.tile_slider.value())
+        self._show_percentiles()
 
     def _show_enhanced(self, *, tone: bool = True) -> None:
         """Leave "Show original" without a second re-render, and turn the enhancement on

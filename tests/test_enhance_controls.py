@@ -115,6 +115,34 @@ def test_reset_restores_the_saved_defaults_not_hardcoded_ones(app, tmp_path):
     assert controls.clip_label.text().endswith("1.2")
 
 
+def test_every_label_shows_its_value_when_saved_at_the_minimum(app, tmp_path):
+    """S09-04: a slider already at its minimum emits no valueChanged when set there, so the
+    label must not wait for one: all four show their number from the start."""
+    lo = {field: bounds[0] for field, bounds in EnhanceSettings.RANGES.items()}
+    store = _store(
+        tmp_path,
+        user={
+            "clahe_clip": lo["clip"],
+            "clahe_tile": lo["tile"],
+            "contrast_lower": lo["lower"],
+            "contrast_upper": lo["upper"],
+        },
+    )
+    controls = NormalizationControls(store=store)
+    assert (controls.clip_slider.value(), controls.tile_slider.value()) == (1, 2)
+    assert (controls.lower_slider.value(), controls.upper_slider.value()) == (0, 51)
+    assert controls.clip_label.text() == "Clip limit: 0.1"
+    assert controls.tile_label.text() == "Tile size: 2×2"
+    assert controls.lower_label.text() == "Black point: 0%"
+    assert controls.upper_label.text() == "White point: 51%"
+    # Moving away and back through set_settings keeps them right too.
+    controls.set_settings(EnhanceSettings(clip=20, tile=8, lower=2, upper=98))
+    assert controls.clip_label.text() == "Clip limit: 2.0"
+    controls.set_settings(EnhanceSettings(clip=1, tile=2, lower=0, upper=51))
+    assert controls.clip_label.text() == "Clip limit: 0.1"
+    assert controls.upper_label.text() == "White point: 51%"
+
+
 # --------------------------------------------------------------------------- layout (UI-07)
 def test_every_button_fits_inside_the_264px_popover_with_the_app_theme(app):
     previous = app.styleSheet()
