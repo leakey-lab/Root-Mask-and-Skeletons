@@ -175,6 +175,18 @@ Logs go to `app.log` in `%LOCALAPPDATA%\SPROUTS\Logs` (Windows),
 to `fault.log` next to it (the file also records handled Windows exceptions such as `0x8001010d`, so an entry alone is not a sign of a crash); an unexpected Python error is logged and shown in a dialog
 instead of closing the app.
 
+Settings (window size and position, recent projects, the Correct layers' opacity and
+visibility, the device-check switch) are kept in one file, `settings.ini`, in the user
+config folder: `%APPDATA%\SPROUTS` (Windows), `~/.config/sprouts` (Linux;
+`$XDG_CONFIG_HOME/sprouts` when set) or `~/Library/Application Support/SPROUTS` (macOS);
+`SPROUTS_CONFIG_DIR` moves it. The Enhance defaults are next to it, in
+`normalization_defaults.json`. Earlier versions kept the settings in the Windows registry or
+the system's own store. The first start copies those values into the file once, records
+the date under `[native_import]`, and leaves them in place, so an older version still finds
+them. Deleting `settings.ini` makes the next start copy the old values again, where an older
+version left them. To reset the settings, delete every line of the file except its
+`[native_import]` section.
+
 Set `ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT=0` to draw the canvases without OpenGL; About (row
 `Canvas`) and the device chip's tooltip say which path is active, and a warning appears at
 start-up when OpenGL is unavailable and you did not turn it off.
@@ -183,8 +195,8 @@ The status line names the GPU (or CPU) it will use without waiting for a first r
 check asks the NVIDIA driver directly, so it does not load PyTorch. The heavy libraries
 load when you head for the stage that needs them (entering Generate loads PyTorch;
 entering Measure or pointing at Visualize loads the dashboards). Set
-`SPROUTS_DEVICE_CHECK=0` (or the setting `device_check/at_startup` to `false`) to turn it
-off; the status line then reads "Device not detected yet" until the first run.
+`SPROUTS_DEVICE_CHECK=0` (or `at_startup=false` under `[device_check]` in `settings.ini`) to
+turn it off; the status line then reads "Device not detected yet" until the first run.
 
 ## Stages
 
@@ -556,8 +568,9 @@ SPROUTS is free software under the **GNU General Public License v3.0 or later**
 (`GPL-3.0-or-later`, see [`LICENSE`](LICENSE)); PyQt6, which it imports, is GPL-3.0 too.
 Copyright (c) 2026 the SPROUTS authors. Third-party code and assets keep their licences:
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and
-[`app/assets/THIRD_PARTY.md`](app/assets/THIRD_PARTY.md). The **model weights** are not
-part of the source and are licensed separately under **CC-BY-4.0**
+[`app/assets/THIRD_PARTY.md`](app/assets/THIRD_PARTY.md); the IBM Plex fonts the interface
+draws with ship in `resources/fonts/` under the SIL Open Font License 1.1. The **model
+weights** are not part of the source and are licensed separately under **CC-BY-4.0**
 ([`docs/MODELS.md`](docs/MODELS.md)). The three example images in `docs/examples/` are
 licensed CC-BY-4.0 too (see their README).
 

@@ -368,6 +368,35 @@ The Windows app (`dist/SPROUTS`) contains `_internal/build_info.json`: `name`, `
 and `packages` (torch, torchvision, PyQt6, PyInstaller versions; the torch version names
 its CUDA build, e.g. `2.8.0+cu128`).
 
+## Settings
+
+`settings.ini` (INI format, written by Qt's `QSettings`) in the per-user config folder
+(`app/user_paths.py`): `%APPDATA%\SPROUTS` on Windows, `~/.config/sprouts` on Linux
+(`$XDG_CONFIG_HOME/sprouts` when set), `~/Library/Application Support/SPROUTS` on macOS;
+`SPROUTS_CONFIG_DIR` moves it. `app/settings.py` `app_settings()` opens it.
+
+| Section, key | Value |
+|---|---|
+| `[window]` `geometry`, `body_splitter` | the main window's geometry and the library / canvas splitter state (`@ByteArray(...)`) |
+| `[window]` `last_folder` | the folder opened last (the Open dialog's start folder) |
+| `[General]` `recent_projects` | the recent projects: a JSON list of `{"name", "path", "count", "ts"}`, most recent first |
+| `[correct]` `<layer>\opacity`, `<layer>\visible` | each Correct layer's opacity (0 to 1) and visibility; `<layer>` = `mask`, `skeleton`, `classes` |
+| `[device_check]` `at_startup` | `false` turns off the start-up device check (`SPROUTS_DEVICE_CHECK` wins) |
+| `[native_import]` `date`, `source`, `keys` | when the one-time import of the older native settings ran, where they came from, and how many values it copied |
+
+Up to 2026-10-31 the settings lived in the OS's native store: the registry on Windows
+(`HKEY_CURRENT_USER\Software\LeakeyLab\SPROUTS`), a plist on macOS,
+`~/.config/LeakeyLab/SPROUTS.conf` on Linux. The first start whose file has no `date` under
+`[native_import]` copies the native values the file lacks (a value already in the file
+wins), records `[native_import]`, and does not run again. The native store is only read, so
+an older version still finds its values there; values it writes there later are not copied.
+If the native store cannot be read, nothing is recorded and the next start tries again.
+Deleting `settings.ini` makes the next start copy the old native values again, where an
+older version left them. To reset the settings, delete every line of the file except its
+`[native_import]` section. Headless runs (`QT_QPA_PLATFORM=offscreen`: tests, scripts) never
+read or write the file. The Enhance defaults are a separate file in the same folder,
+`normalization_defaults.json`.
+
 ## Logs
 
 `app.log` (UTF-8, rotating) in the per-user log folder (`app/user_paths.py`; on Windows

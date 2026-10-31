@@ -1,23 +1,31 @@
 # SPROUTS — known issues and open decisions
 
-Status of 2026-10-30 on `feat/unified-correct-editor`, after the open-items pass of
-2026-10-29 / 2026-10-30 (`13af981`..`15e3c60`; handoff `.claude/handoff/open-items-2026-10-29/`,
-git-ignored). Every owner decision of the 2026-10-12 audit is built; O28 was closed
-unbuilt (D2, table 3). Table 1 names the task and commit that built each (plan:
+Status of 2026-10-31 on `feat/unified-correct-editor`, after wave 1 of the owner-answers
+build (2026-10-31, `0b4d352`..`2cb24f9`; handoff `.claude/handoff/owner-answers-2026-10-31/`,
+git-ignored). On 2026-10-31 the owner answered the owner questions still open (the sheet
+and the answers: `.claude/handoff/open-items-2026-10-29/agents/A6-decision-sheet.md` and
+`A6-answers.md`). Table 4 gives each answer and its state: wave 1 built 21 answers (the
+third table of "Resolved history"; #1, #2 and #3 change scientific output, `CHANGELOG.md`),
+wave 2 is building 7, #37 is moot, 6 are closed with the owner's answer and 10 wait for
+"later". Before it came the open-items pass of 2026-10-29 / 2026-10-30
+(`13af981`..`15e3c60`; handoff `.claude/handoff/open-items-2026-10-29/`, git-ignored).
+Every owner decision of the 2026-10-12 audit is built; O28 was closed unbuilt (D2,
+table 3). Table 1 names the task and commit that built each (plan:
 `docs/superpowers/plans/2026-10-25-owner-decisions/00-master.md`). A final whole-branch
 review (2026-10-26: correctness, science, data safety, cross-platform) found one critical,
 three important and nine minor items; all are fixed (rows FR1 to FR7 of "Resolved
 history") except E11, accepted. The redundancy and speed pass (audit 2026-10-26, built
 2026-10-27 in `89965f5`..`5f0ca18`) changed no scientific output except one corner case
 (S01-06, `CHANGELOG.md`); the IDs its code cites are in the second table of "Resolved
-history", and its owner questions are under "Details and history" (their status of
-2026-10-29 is in that pass's handoff, `notes/owner-questions.md`). The open-items pass
+history", and its owner questions are under "Details and history" (answered 2026-10-31:
+table 4). The open-items pass
 resolved U2 (the app bundle on Python 3.14), U5, U7 (PyTorch 2.15.0, outputs unchanged),
 P3, the five guard-test offenders (K1b-01) and the dashboard blink on Linux X11 (D8), and
 closed P2, D2 and S15-01 as accepted; it found and fixed two arm64 (macOS) differences in
 Correct ("Scientific output changes" in `CHANGELOG.md`). Table 2 lists the engineering
 items still open: accepted limits, the dashboard blink on Wayland and macOS (D8), the Dash
-re-check (U1) and the first green macOS CI run (U3). Built items are in "Resolved history"
+re-check (U1), the first green macOS CI run (U3) and two limits that wave 1 of the
+owner-answers build found (#3 (b), #44 (b)). Built items are in "Resolved history"
 with their commits; table 3 lists what was closed as accepted. The text below the tables
 is the record: the entries keep their original wording and their "Open" / "Resolved"
 labels as of the pass that wrote them, so read the tables for the present state.
@@ -73,12 +81,14 @@ labels as of the pass that wrote them, so read the tables for the present state.
 | E8 | | After *Generate* writes a prediction for an image open in *Correct* with unsaved edits, **Load prediction** stays off until the image is opened again (mask and skeleton layers; the page reloads only images without edits) | known, accepted (WG-T3 review) |
 | E10 | | At 700 x 520 with the Enhance popover and the polyline prompt open, the side card gets 117 px and the Classes row is cut off; Pan and Enhance move down the rail while the class labels are edited (reserving the space breaks the 700 x 520 overlay rule) | known, accepted (WG-T5 review) |
 | E11 | final review R2-1 | On a case-sensitive disk, a GT file that another program creates for the image open in *Correct*, under a name that differs only in case from the one *Correct* found when it opened the image, is not seen by the save's "changed on disk" question: the save writes next to it. Nothing is overwritten or deleted; the mask layer behaves the same | known, accepted (FR-A review) |
-| M7 | | The dashboards' export finds `sprouts_project.json` by looking up to five folders above the CSV; with a sub-folder opened as the project inside another project, it can find the outer project's file and compare with that field of view while the metrics bar uses the default (the dashboards do not pass the project root yet) | known, accepted (W3-T2 review) |
+| M7 | | The dashboards' export finds `sprouts_project.json` by looking up to two folders above the CSV (five until #38 retired the older layout, 2cb24f9); with a sub-folder opened as the project inside another project, it can find the outer project's file and compare with that field of view while the metrics bar uses the default (the dashboards do not pass the project root yet) | known, accepted (W3-T2 review) |
 | M6 | | With no inputs record (its write failed, or the CSV was edited by hand), the Measure status line can miss a regenerated prediction under a GT file that was not used; the metrics bar flags it, and the next Measure run writes a fresh record | known, accepted (WG-T8 review) |
 | P2-01 | E11 class | On a case-sensitive disk, a file whose name differs only in case from the one a lookup asks for, created by another program, can stay unseen until its folder changes again where the folder's modification time does not move (some FUSE or object-store mounts, NFS or SMB attribute caches, a server clock more than 2 s behind, a backward clock step, tools that restore a folder's time such as `rsync -a`, `cp -a` or `touch -r`): the miss memo of `project_layout._find_without_case` answers from its last listing. Exact names, the only names the app writes, are always seen | known, accepted (redundancy and speed pass, review L3-r2) |
 | D8 | VG-FLICKER, owner question #42 | The dashboard blink. A dashboard's web view draws through a `QQuickWidget`, which needs a Direct3D 11 window surface on Windows, and Qt cannot change the surface of a window on screen: it recreates the main window, which is gone for 43-98 ms. With OpenGL canvases (the RTX machine's own screen) this happens at the first open and once at each reopen after the 5-minute release; with raster canvases on Windows (Remote Desktop, software OpenGL, `ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT=0`) once per app start, at the first dashboard (Linux and macOS were not checked). Fixed: the release itself recreates the window once, not twice, and logs no D3D11 warning (K1b-D, 5ab283c). The swap to raster viewports (D3, table 3) neither causes nor avoids the recreation. No value or saved pixel is involved | fixed on Windows (2026-10-29, route (b), after the owner's console test at the RTX screen passed): each dashboard is a native child window with its own Direct3D 11 surface (`viz_window.native_child_surface`), so no step recreates the main window and the OpenGL canvases stay on (`tests/test_visualization_manager_release_native.py`). Linux (checked 2026-10-29 in WSL Ubuntu 24.04: X11 under XWayland and Xvfb, Wayland under WSLg and headless Weston): with OpenGL canvases no step recreates the main window; with raster canvases (software OpenGL, `ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT=0`) the first dashboard recreated it once per app start, never at the release or a reopen. On X11 each dashboard is now a native child window with an OpenGL surface (`viz_window.native_child_surface`, `qt_environment.linux_quick_uses_opengl`), so no step recreates it there and OpenGL canvases keep their viewports (`tests/test_qt_environment_linux_quick.py`). Open: Wayland keeps plain child widgets and the raster swap (native children are subsurfaces, drawn right by Weston but shown as extra windows by WSLg), so raster sessions there still blink once per start; macOS is unchecked: `tests/test_dashboard_native_platform.py` runs in a non-blocking CI step on the macOS runner (and on Linux under xvfb) |
-| U1 | Python 3.14 upgrade | `app/assets/sprouts-uirevision.js` stops Dash 4.4.1's redraw after a zoom is synced into the figure, which dropped the Growth Over Time zoom on Select All / Clear All (plotly/dash#4093). Remove it and `tests/test_viz_dash_uirevision.py` once a Dash release fixes #4093; that test's pin on the sync markers in dcc's `async-graph.js` fails when a Dash upgrade changes them | open: re-check at every Dash release. Re-checked 2026-10-29 with Dash 4.5.0: #4093 still open and not in its changelog; dcc's relayout sync is unchanged (the marker pin holds) and every dashboard test passes on it. Not adopted: Dash stays at 4.4.1 with the guard |
+| U1 | Python 3.14 upgrade | `app/assets/sprouts-uirevision.js` stops Dash 4.4.1's redraw after a zoom is synced into the figure, which dropped the Growth Over Time zoom on Select All / Clear All (plotly/dash#4093). Remove it and `tests/test_viz_dash_uirevision.py` once a Dash release fixes #4093; that test's pin on the sync markers in dcc's `async-graph.js` fails when a Dash upgrade changes them | open: re-check at every Dash release. Re-checked 2026-10-29 with Dash 4.5.0: #4093 still open and not in its changelog; dcc's relayout sync is unchanged (the marker pin holds) and every dashboard test passes on it. Not adopted: Dash stays at 4.4.1 with the guard. Owner 2026-10-31 (#52, keep): the guard stays until #4093 is fixed |
 | U3 | Python 3.14 upgrade | CI (`.github/workflows/ci.yml`: Ubuntu, Windows, macOS) on Python 3.14. The first run (40968518305, 222b4bb) failed 7 tests of `tests/test_json_nesting_robustness.py` on Ubuntu: since Python 3.14 a `RecursionError` comes when the C stack runs low, and the runner's big main-thread stack parsed the 100,000-deep files; the tests parse on a 2 MB-stack thread since 63aef1e, and the Ubuntu and Windows suites pass (runs 40970589058, 40970595195). The macOS suite is advisory (`continue-on-error` in `ci.yml` until its first green run, WX-T6) and has not passed: 93 failures in 31 files on 63aef1e (92 on `main`, run 40979986978), among them the Correct golden tests, the read-ahead budgets (`/private/var` paths) and message-box titles | Diagnosed 2026-10-30 (open-items pass, lane A7; reproduced under QEMU aarch64 and by an emulation plugin on Windows): two were real arm64 differences in Correct, fixed in the app (the degree map's integer `filter2D` kernel, halved by OpenCV's arm64 HAL; the prediction's bilinear upscale in `thin_raster`, rounded differently there: "Scientific output changes" in `CHANGELOG.md`); the rest were test assumptions about macOS (message boxes show no title, path keys fold case on darwin, a case-insensitive disk), a Welcome list fitted before its rows took the Mac font, and one runner timing flake. Open: the 3 dashboard-abort tests of `tests/test_workers_thread_keeper.py` ("the page never loaded"; the next macOS run prints the child's stderr), then the first green macOS run, after which `continue-on-error` goes |
+| #3 (b) | C1-04, owner question #3 | After #3 (2cb24f9), on a case-sensitive disk: a row measured from a suffix variant (`b_fake.PNG` for image `B`) is not marked outdated in the metrics bar when `b_fake.png` appears later. Measure would switch to that file, and the status line counts 1 new and 1 removed. Generate writes `B_fake.png`, which the bar catches | known, accepted (owner-answers build, lane L2): a fix needs a folder listing on the GUI thread |
+| #44 (b) | owner question #44 | macOS: with Keyboard navigation off in System Settings (the default), Tab skips buttons, so "Tab reaches every button" (#44, 8b22663) needs that setting on. This is Qt's tab-focus behaviour, which PyQt6 6.11 cannot override; the Tab test of `tests/test_tab_only_buttons.py` skips on macOS | known, accepted (owner-answers build, lane L9) |
 
 ## Closed on 2026-10-25 (accepted, nothing to build)
 
@@ -104,6 +114,67 @@ labels as of the pass that wrote them, so read the tables for the present state.
 | D2 (O28) | No pre-Generate scan warm-up (owner question #35, S11-07; closed 2026-10-29 as recommended) | Since the redundancy pass the scan costs about 0.16 s at 46k photos, once per Generate click; a warm-up would add a thread and an invalidation rule to save less than that |
 | P2 (W6-T1) | Leave the first Correct image read on the GUI thread (closed 2026-10-29) | At 640 x 480 the reads of a cold first open take 4.4-4.8 ms (photo 0.8, mask 1.2-1.4, skeleton 2.3-2.5) of a 12-14 ms open with its first paint (3.6 ms when the Library's decode is handed over); `test_open_640_within_10_ms` pins the cold open. An asynchronous open would leave the page with an image and no documents (prompt, Save, PgDn, the chip, MainWindow's current image) to save under 5 ms. Larger photos pay it for an image not read ahead: 40-44 ms of 66-76 ms at 2048 x 1536, 0.42-0.59 s of 0.57-0.78 s at 6000 x 4000 |
 | U6 | Turing and newer only (owner, 2026-10-28) | The torch 2.14.1 CUDA 13 builds have kernels for Turing and newer only (sm_75 to sm_120; torch 2.7.1+cu128 had sm_50 to sm_120). The owner supports the RTX 20 series and newer only, so Generate gets no capability check and no CPU fallback; README "Requirements" and `requirements.txt` send an older GPU to the CPU build |
+| X1-01, X1-02 (#28) | Accept the drive's wake-up in a save (owner 2026-10-31: (A)) | A GT save after a pause waits about 49 ms for the D: drive to wake up. The High performance power plan (B) is a setting of the owner's machine, not code; a save in the background while PgDn moves on (C) is about 250 lines and reports a failed save after the page has moved |
+| P3-07 (#31) | Measure stays on threads (owner 2026-10-31: no, not now) | The 8-11 s saved per metric at 46k were measured before the faster thread pool of L1b (46k length 46 -> 26 s), so the gain is unknown; the cost is 1-3 s of start-up per click or 0.4 GB of RAM kept, and a change to how `main.py` starts |
+| P2-02 (b), S01-04 (#33) | Keep O2: read the prediction again at save time (owner 2026-10-31: no) | Reusing the prediction as *Correct* opened it saves about 2 ms per skeleton save, which nobody sees; O2 is the safer rule |
+| #59 | The RQv2 benchmark keeps `./venv` (owner 2026-10-31: no) | The owner's choice; the benchmark (`E:/RootQuantV2/benchmark_sprouts`) is outside this repository. Re-runs of the published numbers need the old venv, `D:/sprouts-venvs/venv-py310` (`CLAUDE.md`, "Environment") |
+| P1-03, STATUS cut (A4) | The metrics bar's STATUS words keep their middle ellipsis (owner 2026-10-31: as built) | Built 2026-10-29 (row K1b-01 of "Resolved history"): they elide only below the old window minimum, and the tooltip has the full text and the GT note |
+
+## Owner questions: asked on 2026-10-29, answered 2026-10-31
+
+The questions of the redundancy and speed pass that were still open, refreshed into one
+decision sheet on 2026-10-29 (`.claude/handoff/open-items-2026-10-29/agents/A6-decision-sheet.md`;
+`#` is the item's number there, where its evidence is) and answered by the owner on
+2026-10-31 (`A6-answers.md` in the same folder). Built rows are in the third table of
+"Resolved history"; closed rows are in table 3.
+
+| # | ID | Question | Owner's answer | State |
+|---|---|---|---|---|
+| 1 | S03-01 | A branch Delete or edit erases only that branch's pixels, not a 9 px band that cuts the other branches at a junction (science) | yes | built, 8efaf57 |
+| 2 | S03-02 | Enter, Finish line or a double-click leave a branch that was only picked as it is (science) | yes | built, 8efaf57 |
+| 3 | C1-04, O6 | Measure Length reads a skeleton whose `_fake.png` suffix is in another case, such as `B_fake.PNG` (science: rows) | yes, low priority; built for an image without a GT skeleton file, so no existing row changes (lead decision) | built, 2cb24f9 |
+| 5 | S03-06 | Select can pick a closed ring next to other branches | yes | built, 8efaf57 |
+| 6 | S09-04 | Enhance labels show the value at the slider's minimum | yes | built, 040c2af |
+| 7 | S14-06 | "Tube Tube 12" in the area Growth Over Time hover | yes | built, f8820a5 |
+| 8 | S14-05 | The Depth Profile hover checks the whole interval | yes | built, f8820a5 |
+| 10 | H1-01 | Fast paging always shows the opened row | yes | built, 0b4d352 |
+| 11 | X6-01 | Where PgDn / PgUp go after a click on a tube, date or field row | (A) on from the image on screen | built, 0b4d352 |
+| 12 | X3-01 | Ignore the macOS `._name` files | later: they keep counting as images for now | open (owner 2026-10-31: later) |
+| 15 | X2-07 | The raster halo on whole device pixels | yes, low | built, 6a66288 |
+| 16 | S09-03 | A Welcome row says "Folder not found" while it opens | later | open (owner 2026-10-31: later) |
+| 17 | S12-05 | With *Keep predictions*, Generate keeps the existing skeletons too | later | open (owner 2026-10-31: later) |
+| 18 | S11-10 | Generate refuses at once without the skeleton model | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 19 | S11-09 | No second success toast ("Results loaded") after a skeleton run | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 20 | C6-01 | An output folder that cannot be written stops Generate at once, with one message | yes | built, 68cbe40 |
+| 21 | C6-03 | *Load skeleton file…* (and *Export dataset…*) check the file before Save / Discard | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 22 | C6-05 | A failed save names the target, not the temp file | yes | built, 68cbe40 |
+| 23 | C6-06 | A warning toast when a dashboard export fails | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 24 | C4-03 | A reopen keeps the undo history of the layers whose files did not change | later | open (owner 2026-10-31: later) |
+| 25 | L1b | A fully asynchronous Measure click | later | open (owner 2026-10-31: later) |
+| 26 (a) | S10-01 | The crash dialog attached to the main window | later | open (owner 2026-10-31: later) |
+| 26 (b) | S10-01 | The crash dialog's "Don't show error dialogs again" tick counts when the dialog closes with its parent | yes | built, 040c2af |
+| 27 | L2b | One failure order and log wording for mask and skeleton generation | yes, low | open (owner 2026-10-31: yes, building (wave 2)) |
+| 28 | X1-01, X1-02 | The 49 ms drive wake-up in a save after a pause | (A) accept | closed (table 3) |
+| 29 | X1-03 | Flush the files of a multi-layer save together | later | open (owner 2026-10-31: later) |
+| 30 | X1-05 | A GT save on macOS lost in a power cut | (b) `F_BARRIERFSYNC`; correct the texts that promise a power-cut-safe save | built, 68cbe40 |
+| 31 | P3-07 | Measure in worker processes | no (not now) | closed (table 3) |
+| 32 | P3-02 | uint8 batches on the GPU | later: needs a re-measure on torch 2.15 | open (owner 2026-10-31: later) |
+| 33 | P2-02 (b), S01-04 | Reuse the prediction as *Correct* opened it at save time, against O2 | no: keep O2 | closed (table 3) |
+| 34 | S15-07 tier 2 | Delete the length dashboard's compatibility layer | yes | built, f8820a5 |
+| 36 | T1-11 | pytest-xdist as a dev dependency, a `wallclock` marker, CI stays serial | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 37 | C1-03 (part B) | A legacy project's Measure status line counts the folder Measure reads | yes, but moot: #38 retires the layout | closed: moot since #38, 2cb24f9 |
+| 38 | C1-03 | Keep or retire the older layout (`output/mask`, `[output/]skeletonizer/test_latest/images`) | retire: no project of that layout is left | built, 2cb24f9 |
+| 40 | | The skeleton's partial edge tiles aligned with the mask layer | yes, low | built, 6a66288 |
+| 41 | | The endpoint markers drawn directly at every zoom | later | open (owner 2026-10-31: later) |
+| 44 | | Buttons Tab-only app-wide | yes | built, 8b22663 (macOS limit: #44 (b), table 2) |
+| 45 | | Settings in the Windows registry, or one INI file in the user config folder on every OS | INI, with a one-time import of the registry values | built, 5cdfb5c |
+| 46 (i) | | The Fusion style on Windows too | later | open (owner 2026-10-31: later) |
+| 46 (iii) | | Ship the IBM Plex fonts as TTF files (OFL) | yes | built, 8b22663 |
+| 51 | | Keep plotly.js 3's dark bar labels, or take plotly.js 4's white ones | plotly.js 4's white labels (not the sheet's "keep") | built, f8820a5 |
+| 52 | U1 | Keep the Growth Over Time zoom workaround until plotly/dash#4093 is fixed | keep | closed: the re-check stays open as U1 (table 2) |
+| 53 | | Pin PyQt6-Qt6 and PyQt6-WebEngine-Qt6 6.11.2, PyQt6-sip 13.13.0 | yes | open (owner 2026-10-31: yes, building (wave 2)) |
+| 59 | | Point the RQv2 benchmark at the old venv | no: it keeps `./venv` (not the sheet's "yes") | closed (table 3) |
+| STATUS cut | A4, P1-03 | How the metrics bar's STATUS words are cut | middle ellipsis, as built | closed (table 3) |
 
 ## Resolved history
 
@@ -190,7 +261,7 @@ verdicts and harnesses are in `.claude/handoff/dedup-speed-2026-10-26/` (git-ign
 
 | ID | Also known as | Item | Resolved by |
 |---|---|---|---|
-| C1-04 | D02 (skeleton rule) | The Measure status line listed other files than Measure reads: hidden names such as `._a.png` were measured but not counted, and skeleton names were matched without the case of the `_fake.png` suffix | It counts with Measure's own name rules (`input_split.png_stem`, `project_layout.skeleton_stem`): L1a, 89965f5 (masks, GT files); M1b, e3bdd79 (skeletons). Measuring case variants of the suffix is an owner question |
+| C1-04 | D02 (skeleton rule) | The Measure status line listed other files than Measure reads: hidden names such as `._a.png` were measured but not counted, and skeleton names were matched without the case of the `_fake.png` suffix | It counts with Measure's own name rules (`input_split.png_stem`, `project_layout.skeleton_stem`): L1a, 89965f5 (masks, GT files); M1b, e3bdd79 (skeletons). Measuring case variants of the suffix was an owner question: built 2026-10-31 (#3, 2cb24f9) for an image without a GT skeleton file, and the status line counts what Measure reads |
 | C3-05 | | A finished generation thread was freed only by the cyclic garbage collector, and never once a `gc.freeze()` had caught it alive | Its outcome slots hold it weakly (`generation_base.thread_slot`), so it is freed when the next run starts: L2b, c8d01e9 |
 | C4-01 | | The 256-entry undo journal filled with entries the layers had already dropped, so a busy layer pushed another layer's live steps out of reach | `EditJournal(per_layer=100)`: each layer's newest 100 actions stay on the timeline: L5b, 5c6e8d9 |
 | C5-04 | X8-01 | A headless `MainWindow()` without settings wrote its recent projects into the user's QSettings (the audit's own scripts filled the owner's list) | `MemorySettings` for such windows: L12a and the lead, 4af5b15; every store made without a settings object gets one from `app.settings.app_settings()`, the only `QSettings` constructor, which is memory on the offscreen platform: K1a, 5ab283c. Removing the scratch rows from the owner's list is the owner's (X8-01) |
@@ -203,14 +274,14 @@ verdicts and harnesses are in `.claude/handoff/dedup-speed-2026-10-26/` (git-ign
 | K1b-D | VG-FLICKER (release) | With OpenGL canvases the 5-minute dashboard release recreated the main window twice and logged "... 'D3D11' is not compatible with QOpenGLWidget": Qt found the dying dashboards' browsers before the canvases and made the window a Direct3D one again | A released dashboard leaves the window before the canvases get OpenGL back: one recreation, ending on OpenGL (`tests/test_visualization_manager_release_native.py`): K1b, 5ab283c. The first open and each reopen: D8 in table 2 |
 | L1-r2 (a) | review of lane L1 | Once the Measure pool ran images in tasks (wave 1), Cancel waited for a task of up to 32 images | `run_metric_pool` asks `should_stop` every 20 ms while no task ends: M1b, e3bdd79 |
 | L3-r2 (b) | review of lane L3 | The "an eighth of the stems" remap rule was written twice | One `project_layout.few_keys`: M1b, e3bdd79 |
-| L4-r1 (c) | review of lane L4 | A Measure run end parsed its CSV twice when the slot's own parse also searched the legacy folders (wave 1) | The extra located search runs only when the slot's own parse does not search: M1b, e3bdd79 |
+| L4-r1 (c) | review of lane L4 | A Measure run end parsed its CSV twice when the slot's own parse also searched the legacy folders (wave 1) | The extra located search runs only when the slot's own parse does not search: M1b, e3bdd79 (moot since #38, 2cb24f9, 2026-10-31: the legacy folders are no longer searched) |
 | P2-01 | C3-06, S03-07, D22 | On case-sensitive disks every exact-name miss listed the whole folder, several times per Correct open, re-entry and read-ahead plan | A key set per settled folder in `project_layout._find_without_case`: one `os.stat` per repeated miss: L3a, 2b9b3bf. Its residual limit is in table 2 |
 | P3-01 | D10 | Idle Intel OpenMP workers spun on 10-20 cores during Generate | `main.py` sets `KMP_BLOCKTIME=0` before torch loads, unless the user set it: L2a, c8d01e9; `tests/conftest.py` too: T1a, 0285836; a value the user set is tested to win: T7a, 56a2a1f |
 | S01-06 | O7 leftover | A mask prediction found only by the case-folded lookup (its stem or extension in another case, on a case-sensitive disk) was shown but not stamped: a rewrite of it by another program was missed by the save rule (a save of a plane equal to the prediction removed the GT file), by Discard, by the same image opened again and by the read-ahead and hand-back | `read_mask` stamps the case variant it found before reading it, and `MaskDocument.file_stamps` includes it; the prediction is looked up once per read: M2a, f4f02fa (science entry in `CHANGELOG.md`) |
 | S01-07 | C2-03 | GT masks in Correct were decoded on the slow reference path | `app.masks.read_mask_file`: the exact fast path, as for predictions: L1c, 89965f5 |
 | S02-02 | | The metrics-badge test of `tests/test_correct_main_window.py` failed when the 60 ms read-ahead timer fired inside its wait (a slow save) | It waits for the read-ahead first: T2a, 2f67663 |
 | S03-05 | P2-02 (a) | Every skeleton save thinned the whole frame again, and the 0/255 thinning wrapper cost as much as scikit-image | A lean wrapper; `render_to_size` at the mask's own size copies the thinned plane: L5a, 5c6e8d9 |
-| S06-01 | D21, C1-03 | Any job end dropped a legacy-located `root_lengths.csv` from the metrics bar | A job end other than Generate runs the located search in the pool: L4a, 5dafa69; both fixed legacy CSVs stay candidates of the fast search: M1a, e3bdd79 |
+| S06-01 | D21, C1-03 | Any job end dropped a legacy-located `root_lengths.csv` from the metrics bar | A job end other than Generate runs the located search in the pool: L4a, 5dafa69; both fixed legacy CSVs stay candidates of the fast search: M1a, e3bdd79 (moot since #38, 2cb24f9, 2026-10-31) |
 | S06-05 | P1-02 (3), D01 | Each Measure entry started another freshness count (3.6 s at 46k), several ran at once, and the end of a Measure run on the Measure stage counted twice | One count at a time, the newest request kept: L1a, 89965f5; one count per Measure run end: M1b, e3bdd79 |
 | S06-07 | S07-02, P1-07 | `LibraryIndex.build` read back through Qt the 46k names and hidden flags it had just set | It takes the names it set: L3a, 2b9b3bf |
 | S06-08 | C1-08, P1-04 | The project scan built its winners map with nothing hidden, and five stem-key tables per scan and refresh | Built only when a stem collides or a remap needs one (with S16-01): L3a, 2b9b3bf |
@@ -218,12 +289,12 @@ verdicts and harnesses are in `.claude/handoff/dedup-speed-2026-10-26/` (git-ign
 | S08-01 | S16-03, S06-03, C3-03 | Visualize walked the project folders on the GUI thread until a `root_lengths.csv` existed (100-280 ms at 46k) | `MeasurementIndex` keeps the walk of its pool search, and the GUI lookups use it: M1a, e3bdd79 |
 | S09-01 | | *Smooth JPEG blocks* (deblock) was 2.4-2.9x slower than needed | Strided views and an OpenCV masked copy, bit-identical: L12a, 4af5b15 |
 | S09-02 | | The F1 sheet was built bottom-up and restyled at every reparent (48 ms to its first paint) | Built parent-first (18 ms): L12a, 4af5b15 |
-| S10-01 | | The crash dialog died with the dialog it was parented to, and the next error then muted every error dialog of the session | A box deleted with its parent counts as closed: L12a, 4af5b15. Its parent and its "Don't show error dialogs again this session" tick are owner questions |
+| S10-01 | | The crash dialog died with the dialog it was parented to, and the next error then muted every error dialog of the session | A box deleted with its parent counts as closed: L12a, 4af5b15. Its "Don't show error dialogs again this session" tick counts too, also when it goes with its parent: owner #26 (b), 040c2af. Its parent (the main window): owner #26 (a), "later" |
 | S11-08 (b) | D19 | Busy fallbacks for an older generation handler that only a test reached | `DashboardSpec.calculator_attr` (L4a, 5dafa69) and `SkeletonHandler._generation_busy` (M1b, e3bdd79) removed |
 | S12-01 | | GPU runs: the decode, prefetch and save threads each started a 16-thread OpenMP team, so the GPU waited | `run_batches(torch_threads=1)` while a CUDA run lasts (`RuntimeConfig.batch_torch_threads`): L2a, c8d01e9 |
 | S12-03 | D09 | `SkeletonModel` kept dead `run()`, DataParallel and InstanceNorm-patch paths and a second source of the checkpoint path | Removed; the checkpoint loads from `runtime.skeleton_weights_path()` without a random init: L2a, c8d01e9 |
 | S16-01 | | `key_to_stems` rebuilt the 46k stem-key table on every call (five per load and per refresh) | It returns at once when the stems already are the keys: L3a, 2b9b3bf |
-| S16-02 | C1-03 (part D) | Measure Length on a legacy `test_latest` layout found by the folder walk wrote a CSV that no reader found | The walked folder's `images/` CSV, where Measure writes, ranks before the older `test_latest/` CSV: M1a, e3bdd79 |
+| S16-02 | C1-03 (part D) | Measure Length on a legacy `test_latest` layout found by the folder walk wrote a CSV that no reader found | The walked folder's `images/` CSV, where Measure writes, ranks before the older `test_latest/` CSV: M1a, e3bdd79 (moot since #38, 2cb24f9, 2026-10-31) |
 | S16-05 | D06 | `MaskStore.write` and `MaskStore.remove` had no caller and would write or delete predictions in `mask/` | Removed: L1c, 89965f5; the `mask_path` docstring corrected: M1b, e3bdd79 |
 | S17-04 | | `read_tracing` let Pillow's refusals escape: class labels with a header over 2 x `MAX_IMAGE_PIXELS` (`DecompressionBombError`) or a broken chunk (`SyntaxError`) made *Correct* raise in the middle of the open, leaving the previous image's photo and labels on screen under the unexpected-error dialog, and a broken chunk ended the whole dataset export | Both are a `GtFileError`: *Correct* opens such labels empty with the *Saved class labels could not be read* notice, and the export lists them in `errors.txt`: L8a, a9a7717 |
 | T1-01, T1-05 to T1-09 | | The tests repeat their app fixture, guards, windows, Correct helpers, waits and generation drains (with fixed sleeps) module by module | The shared fixtures and helpers: T1a, 0285836 (`tests/conftest.py`, `tests/guards.py`, `tests/qt_wait.py`, `tests/window_support.py`, `tests/correct_support.py`, `tests/generation_support.py`); the test modules use them since wave 3b: T2a to T7a, 2f67663..56a2a1f (the generation handler tests wait for their thread without fixed sleeps, 12.3 -> 1.8 s: T6a, bdfb77c) |
@@ -235,6 +306,24 @@ verdicts and harnesses are in `.claude/handoff/dedup-speed-2026-10-26/` (git-ign
 | X2-06 | | On raster canvases the translucent skeleton's joints changed brightness between full and partial repaints (under the brush or eraser ring) | A partial repaint strokes the full frame's line list: T8a, 9ad0d96 |
 | X6-02 | | The strict Correct perf budgets (`SPROUTS_PERF_TESTS=1`) timed a synthetic 45-degree line that cost 17-25 ms of thinning, and two of them failed | A Pix2Pix prediction of `docs/examples` (an open at 640 px 33-35 -> 8 ms, against a 10 ms budget): T2a, 2f67663 |
 | X7-01 | E03, E04 | `app.handlers` imported `app.gui.image_manager` for `project_layout_of` | Moved to `app/project_layout.py`; `tests/test_layering_contract.py` pins that the handlers import no `app.gui` module: M1b, e3bdd79 |
+
+Wave 1 of the owner-answers build (2026-10-31, `0b4d352`..`2cb24f9`): the owner's "yes"
+answers of table 4 that wave 1 built. Each lane had its own files and was reviewed and
+committed on its own; `#` numbers are table 4's. `CHANGELOG.md` lists every change; the
+lane reports and reviews are in `.claude/handoff/owner-answers-2026-10-31/` (git-ignored).
+
+| ID | Also known as | Item | Resolved by |
+|---|---|---|---|
+| S03-01, S03-02, S03-06 | owner questions #1, #2, #5 | A branch Delete or edit erased a 9 px band that cut the other branches at a junction; Enter, Finish line or a double-click redrew a branch that was only picked (a Select double-click also drew a chord); a ring with no tip or junction next to other branches could not be picked | The pick keeps the branch's own pixels, and Delete or a commit erases only those (`SkeletonTopology.own`, `SkeletonCorrectionModel.erase_pixels`); an unchanged pick changes nothing, except Enter or Finish line with Smooth on a branch of 3+ points; rings are traced after the other branches: lane L1, 8efaf57 (science entries for #1 and #2 in `CHANGELOG.md`) |
+| C1-04 (suffix case) | owner question #3, O6 | Measure Length gave no row to a skeleton whose `_fake.png` suffix is in another case (`B_fake.PNG`), which Correct and the Library show on Windows | Measured for an image without a GT skeleton file (`project_layout.skip_gt_variants`, `group_skeletons`); the exact suffix wins; the status line, the Library badge and Correct follow Measure: lane L2, 2cb24f9 (science entry in `CHANGELOG.md`). Limit: #3 (b) in table 2 |
+| C1-03 | owner questions #38, #37 | The older layout (`output/mask`, `[output/]skeletonizer/test_latest/images`, a `test_latest` folder found by a folder walk) and the CSV searches for it | Retired: Measure, the metrics bar, the Measure status line and Visualize use only `mask/`, `skeletons/` (or the project folder for `root_lengths.csv`) and `gt/`; the export looks up two folders for `sprouts_project.json`; #37 is moot: lane L2, 2cb24f9 |
+| H1-01, X6-01 | owner questions #10, #11 (A) | Fast paging across collapsed groups left the opened row hidden, and the next arrow key jumped to the top; PgDn after a click on a group row opened the first image of the library, and PgUp did nothing | `navigator.reveal_row` opens the closed groups above the row, innermost first; from a group row PgDn / PgUp step from the image on screen: lane L3, 0b4d352 |
+| X2-07, #40 | owner questions #15, #40 | The raster halo sat up to half a device pixel off at 125-175 % display scaling; the skeleton's partial edge tiles sat up to 1 device pixel off the mask layer's at device scales between 1 and 2 | The halo is laid out on device pixels and blitted unscaled (`skeleton.py` `_halo_layer`, `tests/test_skeleton_halo_device_pixels.py`); partial edge tiles are padded to 256 px as the mask layer's are (`_tile_image`, `_paint_tiles`, `tests/test_skeleton_edge_tiles.py`): lane L4, 6a66288 |
+| C6-01, C6-05, X1-05 | owner questions #20, #22, #30 (b) | Generate ran every image into a folder it could not write and then listed each as failed; a failed save named the hidden temp file; on macOS a durable save could be lost or broken by a power cut | `io_utils.FolderNotWritableError` stops the run at the next batch with one message (a user condition of `app.workers.is_user_condition`, no traceback); the error names the target; macOS syncs with `F_BARRIERFSYNC`, and the power-cut texts are corrected: lane L5, 68cbe40 |
+| S14-06, S14-05, S15-07 tier 2, #51 | owner questions #7, #8, #34, #51 | "Tube Tube 12" in the area Growth Over Time hover; "Image Not Available" in the Depth Profile hover for 7.5 % of the points; the length dashboard's compatibility layer; bar labels kept plotly.js 3's dark grey | The hover names the tube once; the hover checks the whole interval, as the side panel does; the layer is deleted; bar labels take plotly.js 4's colour (`tests/test_viz_theme_bar_label_contrast.py`): lane L6, f8820a5 |
+| S09-04, S10-01 (b) | owner questions #6, #26 (b) | An Enhance label stayed blank at the slider's minimum; the crash dialog lost its "Don't show error dialogs again" tick when it went with its parent | `set_settings` writes all four labels; the tick is kept as it changes: lane L7, 040c2af |
+| #45 | owner question #45 | The settings lived in the native store (the Windows registry, a macOS plist, `~/.config/LeakeyLab` on Linux) | One `settings.ini` in the user config folder on every OS, with a one-time import of the native values, which are only read (`app/settings.py`, `tests/test_settings_ini_import.py`): lane L8, 5cdfb5c |
+| #44, #46 (iii) | owner questions #44, #46 (iii) | A click on a button took the keyboard from the canvas (50 buttons); Qt could not load the IBM Plex `.woff2` files, so each OS drew its own font | `widgets.focus.TabOnlyButtonStyle` (installed by `main.main` and `tests/conftest.py`); IBM Plex TTFs in `resources/fonts/` (SIL OFL 1.1), registered before the stylesheet (`widgets/fonts.py`): lane L9, 8b22663. Limit: #44 (b) in table 2 |
 
 ## By design (scope limits)
 
@@ -277,8 +366,10 @@ cites, and table 2 the limits accepted and the open owner questions (row D8; K1b
 The reports, verdicts and harnesses are in
 `.claude/handoff/dedup-speed-2026-10-26/` (git-ignored).
 
-Owner questions (none built; each needs a visible change, a science change or a decision;
-the full texts with recommendations are that folder's `notes/owner-questions.md`):
+Owner questions (none built in this pass; each needs a visible change, a science change or a
+decision; the full texts with recommendations are that folder's `notes/owner-questions.md`).
+The list keeps its original wording; the owner answered the questions still open on
+2026-10-31, and table 4 gives each answer and its state:
 
 - Science (a yes adds a *Scientific output changes* entry): Delete and edits of a branch cut
   the other branches at a junction (S03-01); Enter, Finish or a double-click on a branch
