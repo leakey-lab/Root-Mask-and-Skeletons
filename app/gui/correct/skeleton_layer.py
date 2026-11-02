@@ -140,8 +140,8 @@ class SkeletonLayer:
 
     def refresh_draft(self, cursor: QPoint | None = None) -> None:
         """Redraw the polyline preview and its handles (ToolHost)."""
-        points = self.draft.points  # none: empty paths, as clear_polyline() gives
-        self.decorations.show_polyline(points, cursor if points else None, smooth=self.draft.smooth)
+        # none: empty paths, as clear_polyline() gives
+        self.decorations.show_polyline(*self.draft.preview(cursor), smooth=self.draft.smooth)
         self._changed()
 
     def switch_tool(self, tool_id: str, *, keep_draft: bool = False) -> None:
@@ -268,7 +268,7 @@ class SkeletonLayer:
         """Mid-polyline undo: drop the draft's last point (True when there was one)."""
         if self.current_tool != POLYLINE or not self.draft.points:
             return False
-        self.draft.points.pop()
+        self.draft.take_back()  # a click that turned a pick goes with its turn
         if not self.draft.points:
             self.draft.reset()
         self.refresh_draft(self.draft.points[-1] if self.draft.points else None)

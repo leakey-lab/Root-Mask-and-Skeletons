@@ -68,6 +68,25 @@ Eight passes, not yet released:
   a 161-finding audit implemented by per-area packages, then integrated and reviewed.
 
 ### Fixed
+- **Correct, skeleton layer: a picked branch goes on from its end nearest the pointer
+  (2026-11-02, owner bug report).** "The spline starts from a random node and not the node
+  closest to where my cursor/mouse pointer is." Select handed the picked branch to Polyline
+  in the order the topology traced it: from whichever of its two nodes a Python set gave
+  first, which has nothing to do with the pointer. The preview's rubber band and the next
+  click always went on from the branch's last traced point, often its far end, so a click
+  beyond one end drew a line (with Smooth, a curve) from the other end, across the branch.
+  Now a click on a picked branch adds its point at the end nearer the click, by
+  straight-line distance; at equal distance, the end with the lower y, then x. Clicks can
+  extend both ends. A closed pick opens at its vertex nearest the click: a ring, or a loop
+  whose ends are the same pixel or two pixels of the junction cluster it hangs from. The
+  rubber band runs from the same point; a closed pick is previewed as Enter draws it, so
+  moving the pointer does not move the seam of its smoothed curve. Undoing the click (Ctrl+Z
+  during the polyline, or a double-click that takes its own point back) undoes the turn too:
+  the pick is exactly as picked again, its point order included, so pick, click, Ctrl+Z, S,
+  Enter saves the same pixels as pick, S, Enter. Dragging an end handle no longer shows a
+  line from the other end. A new line keeps its points in the order they were placed; the
+  Connect tool already started at the endpoint nearest the press. See *Scientific output
+  changes*.
 - **Correct, Classes layer: the class tick is the active class (2026-11-01, owner bug
   report; owner decision "Tick = active class").** Each row of the class panel had a
   highlight, the class the brush paints with, and a box that meant "fully annotated on this
@@ -1513,6 +1532,18 @@ Eight passes, not yet released:
   as pre-commit already ran it.
 
 ### Scientific output changes
+- **Correct: a point clicked onto a picked skeleton branch joins the branch's end nearest
+  the click (2026-11-02, owner bug report).** The GT skeletons saved after one kind of
+  gesture change: a branch picked with Select, then a Polyline click or double-click that
+  adds a point to it, then Enter, Finish line, a double-click or Save. Before, the point was
+  joined to the branch's last traced end, which a Python set's order chose, often the far
+  end, and the saved skeleton had a chord across from that end to the point. Now the point
+  joins the end nearer the click. On a ring or loop, it joins the vertex nearest the click,
+  not the arbitrary pixel where the ring was traced from. A click undone with Ctrl+Z during
+  the polyline leaves the pick exactly as picked, so what is saved after it is unchanged.
+  New polylines, pick + Delete, pick + drag + Enter, pick + S + Enter, Connect and the
+  Eraser save the same pixels as before. Existing GT files, Measure and the goldens
+  (`tests/data/correct_goldens*.json`) are unchanged; only edits made from now on differ.
 - **Class labels: no `reviewed` list, and Export dataset exports every image with a GT file
   (2026-11-01, owner decision "Tick = active class").** Class labels are never measured:
   no value in `root_lengths.csv` / `root_areas.csv` and no mask or skeleton pixel changes.

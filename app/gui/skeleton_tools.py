@@ -72,6 +72,15 @@ def _xy(p: QPoint) -> tuple[int, int]:
     return (p.x(), p.y())
 
 
+def _closes(points: list[QPoint]) -> bool:
+    """Whether a line of 3+ points closes on itself: its ends at most a pixel apart (a ring,
+    or a loop whose ends are two pixels of the junction cluster it hangs from)."""
+    if len(points) < 3:
+        return False
+    a, b = points[0], points[-1]
+    return max(abs(a.x() - b.x()), abs(a.y() - b.y())) <= 1
+
+
 def reach(host: ToolHost, screen_px: float) -> float:
     """Image px that ``screen_px`` screen px cover at the canvas zoom (S4).
 
@@ -99,7 +108,9 @@ class PolylineDraft:
     ``edit_original`` holds the picked branch's points as picked (what :meth:`pending`
     compares), ``edit_pixels`` its own pixels: erased when the edit is committed or the
     branch deleted, so the other branches at its junctions keep theirs (S03-01).
-    ``smooth`` mirrors the Smooth toggle and survives :meth:`reset`.
+    ``smooth`` mirrors the Smooth toggle and survives :meth:`reset`. ``turns`` keeps, per
+    point a click added to a pick, the draft right after the click and its points and
+    original before it (:meth:`add`), so :meth:`take_back` undoes the turn with the point.
     """
 
     points: list[QPoint] = field(default_factory=list)
@@ -111,6 +122,9 @@ class PolylineDraft:
     edit_original: list[tuple[int, int]] | None = None
     edit_pixels: list[tuple[int, int]] | None = None
     smooth_on_pick: bool = False  # Smooth was already on when the branch was picked
+    turns: list[tuple[list[tuple[int, int]], list[QPoint], list[tuple[int, int]] | None]] = field(
+        default_factory=list
+    )
     SMOOTH_DROPPED_NOTICE: ClassVar[str] = (
         "Smoothed branch not applied · pick it and press Enter to apply"
     )
@@ -120,6 +134,7 @@ class PolylineDraft:
         self.points = []
         self.edit_original = self.edit_pixels = None
         self.smooth_on_pick = False
+        self.turns = []
         self.end_drag()
 
     def end_drag(self) -> None:
@@ -168,6 +183,75 @@ class PolylineDraft:
         if self.bends():
             return sample_catmull_rom(self.xy(), step_px=SMOOTH_STEP_PX, bounds=bounds)
         return self.xy()
+
+    def facing(self, pos: QPoint | None) -> list[QPoint]:
+        """The points in the order a click at ``pos`` goes on from: its point last.
+
+        A picked branch comes in the order the topology traced it, which says nothing of
+        the pointer, so it goes on from its point nearest ``pos`` (owner bug report
+        2026-11-02): an open branch from its nearer end (at equal distance the end with
+        the lower ``(y, x)``), a closed one (a ring, a loop: :func:`_closes`) opened at its
+        nearest point. A new line keeps the order its user placed. Only reads the draft.
+        """
+        pts = self.points
+        if pos is None or self.edit_original is None or len(pts) < 2:
+            return pts
+        px, py = pos.x(), pos.y()
+
+        def rank(p: QPoint) -> tuple[int, int, int]:
+            return ((p.x() - px) ** 2 + (p.y() - py) ** 2, p.y(), p.x())
+
+        if not _closes(pts):
+            return pts[::-1] if rank(pts[0]) < rank(pts[-1]) else pts
+        ring = pts[:-1] if pts[0] == pts[-1] else pts  # a loop's ends: two cluster pixels
+        i = min(range(len(ring)), key=lambda j: rank(ring[j]))
+        if ring is pts and i in (0, len(pts) - 1):  # such an end is nearest: as a branch
+            return pts[::-1] if i == 0 else pts
+        return pts if i == 0 else ring[i:] + ring[:i] + [QPoint(ring[i])]
+
+    def face(self, pos: QPoint) -> None:
+        """Reorder the points as :meth:`facing` gives them; a pick left as it was turns
+        what :meth:`pending` compares with too, so it still reads as unchanged."""
+        points = self.facing(pos)
+        if points is not self.points:
+            if self.plain_pick():
+                self.edit_original = [_xy(p) for p in points]
+            self.points = points
+
+    def add(self, point: QPoint) -> None:
+        """Add a clicked point: after a new line's last point, at a pick's point nearest the
+        click (:meth:`face`), not at its traced end; the turn is kept for :meth:`take_back`."""
+        if self.edit_original is None:
+            self.points.append(point)
+            return
+        before = (list(self.points), self.edit_original)
+        self.face(point)
+        self.points.append(point)
+        self.turns.append((self.xy(), *before))
+
+    def take_back(self) -> None:
+        """Drop the last point (a mid-polyline undo, a double-click's own point). A click on
+        a pick goes with its turn: the draft is as before the click, its order and original
+        included (also when the clicked point was dragged: it goes anyway), unless another
+        point moved or one was added since; then only the last point goes."""
+        turn = self.turns.pop() if self.turns else None
+        made = turn[0] if turn is not None else None
+        if made is not None and len(self.points) == len(made) and self.xy()[:-1] == made[:-1]:
+            self.points, self.edit_original = list(turn[1]), turn[2]
+        elif self.points:
+            self.points.pop()
+
+    def preview(self, cursor: QPoint | None) -> tuple[list[QPoint], QPoint | None, QPoint | None]:
+        """``(points, cursor, start)`` for ``SkeletonDecorations.show_polyline``: the line as
+        a click at ``cursor`` goes on from it (:meth:`facing`), its rubber band from its last
+        point. A closed pick is shown as Enter draws it, its rubber band apart from its point
+        nearest the cursor (``start``), so the pointer does not move its smoothed seam."""
+        points = self.points
+        if not points or cursor is None:
+            return points, None, None
+        if self.edit_original is not None and _closes(points):
+            return points, cursor, self.facing(cursor)[-1]
+        return self.facing(cursor), cursor, None
 
 
 class ToolHost(Protocol):
@@ -340,7 +424,7 @@ class PolylineTool(SkeletonTool):
                 draft.orig_points = [QPoint(p) for p in draft.points]
                 return
         point = QPoint(pos)
-        draft.points.append(point)
+        draft.add(point)  # a pick goes on from its point nearest the click
         if draft.edit_original is not None:
             self._pick_click = point
         host.refresh_draft(pos)
@@ -376,8 +460,8 @@ class PolylineTool(SkeletonTool):
             # Commit only if the branch changed; a plain pick stays open.
             click, self._pick_click = self._pick_click, None
             if click is not None and draft.points[-1] is click:
-                if self._chord(click):
-                    draft.points.pop()
+                if self._chord(click):  # as before the press, in its order too
+                    draft.take_back()
                     self.host.refresh_draft()
                 elif pos != click:
                     draft.points.append(QPoint(pos))
