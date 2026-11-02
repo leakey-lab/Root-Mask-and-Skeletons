@@ -145,12 +145,25 @@ def test_time_export_without_field_average_lists_only_tubes(length_app):
     assert set(_read(download["content"]).Series) == {"Tube 1"}
 
 
-def test_lines_export_lists_depth_intervals_of_the_plotted_tube(length_app):
-    download = _export(length_app.app, {"view-selector.value": "lines", "tube-selector.value": 1})
+LINES_EXPORT = [
+    (build_length_app, "root_length", "root_lengths.csv",
+     ["Mean Length (mm)", "Min Length (mm)", "Max Length (mm)", "SD (mm)"]),
+    (build_area_app, "root_area", "root_areas.csv",
+     ["Mean Area (mm²)", "Min Area (mm²)", "Max Area (mm²)", "SD (mm²)"]),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("builder, slug, source, stats", LINES_EXPORT, ids=["length", "area"])
+def test_lines_export_lists_depth_intervals_of_the_plotted_tube(
+    tmp_path, builder, slug, source, stats
+):
+    download = _export(
+        builder(tmp_path).app, {"view-selector.value": "lines", "tube-selector.value": 1}
+    )
+    assert download["filename"].startswith(f"{slug}_lines_")
     table = _read(download["content"])
     assert list(table.columns) == [
-        "Tube", "Date", "Interval start", "Interval end", "Mean Length (mm)",
-        "Min Length (mm)", "Max Length (mm)", "SD (mm)", "Count",
+        "Tube", "Date", "Interval start", "Interval end", *stats, "Count"
     ]  # fmt: skip
     got = {(r.Date, r[3]): (r[4], r.Count) for r in table.itertuples(index=False)}
     assert got == {
@@ -159,6 +172,7 @@ def test_lines_export_lists_depth_intervals_of_the_plotted_tube(length_app):
         ("2024-08-07", 10): (pytest.approx(4.0), 1),
     }
     assert set(table.Tube) == {1}
+    assert _header(download["content"])["source_sha256"] == _sha256(tmp_path / source)
 
 
 def test_faceted_export_pairs_tube_and_field_means(length_app):
@@ -192,16 +206,6 @@ def test_faceted_export_without_tubes_is_not_offered(length_app):
         changed=["viz-export-btn.n_clicks"],
     )  # fmt: skip
     assert status == 204
-
-
-def test_area_profile_export_lists_position_means(area_app, tmp_path):
-    download = _export(area_app.app, {"view-selector.value": "profile", "tube-selector.value": 2})
-    assert download["filename"].startswith("root_area_profile_")
-    table = _read(download["content"])
-    assert list(table.columns) == ["Tube", "Date", "Position", "Mean Area (mm²)"]
-    got = {(r.Date, r.Position): r[3] for r in table.itertuples(index=False)}
-    assert got == {("2024-07-18", 5): pytest.approx(3.0), ("2024-08-07", 12): pytest.approx(5.25)}
-    assert _header(download["content"])["source_sha256"] == _sha256(tmp_path / "root_areas.csv")
 
 
 def test_area_stacked_export_uses_the_area_column(area_app):
@@ -246,8 +250,8 @@ def test_missing_source_is_recorded_not_fatal(tmp_path):
 
 def test_export_filename_is_descriptive_and_sortable():
     when = datetime(2026, 9, 28, 17, 45, 12)
-    assert dash_export.export_filename("root_area", "profile", when) == (
-        "root_area_profile_20260928_174512.csv"
+    assert dash_export.export_filename("root_area", "lines", when) == (
+        "root_area_lines_20260928_174512.csv"
     )
 
 

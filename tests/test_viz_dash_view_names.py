@@ -44,13 +44,8 @@ def test_both_dashboards_label_their_views_with_the_same_words():
         "lines": "Depth Profile",
         "faceted": "Depth Profile Grid",
     }
-    assert area == {
-        "stacked": "Totals by Tube",
-        "time": "Growth Over Time",
-        "profile": "Depth Profile",
-    }
-    assert length["stacked"] == area["stacked"]
-    assert length[LENGTH_SHELL.tube_view] == area[AREA_SHELL.tube_view]
+    assert area == length
+    assert AREA_SHELL.tube_view == LENGTH_SHELL.tube_view
 
 
 def test_chart_titles_use_one_scheme(length, area):
@@ -60,23 +55,19 @@ def test_chart_titles_use_one_scheme(length, area):
     assert time.layout.title.text == "Root Length Growth Over Time"
     assert area.show_growth_over_time().layout.title.text == "Root Area Growth Over Time"
     assert length.show_growth_lines(1).layout.title.text == "Root Length Depth Profile - Tube 1"
-    assert area.show_area_profile(1).layout.title.text == "Root Area Depth Profile - Tube 1"
-    faceted = length.create_faceted_depth_profile([1, 2])
-    assert faceted.layout.title.text == (
-        "Depth Profile Grid - Field Average (Left) vs Tube (Right)"
-    )
+    assert area.show_growth_lines(1).layout.title.text == "Root Area Depth Profile - Tube 1"
+    for dashboard in (length, area):
+        faceted = dashboard.create_faceted_depth_profile([1, 2])
+        assert faceted.layout.title.text == (
+            "Depth Profile Grid - Field Average (Left) vs Tube (Right)"
+        )
 
 
 def test_legend_title_and_depth_axes_agree(length, area):
-    for fig in (
-        length.create_stacked_bar_chart(),
-        length.show_growth_lines(1),
-        area.create_stacked_bar_chart(),
-        area.show_area_profile(1),
-    ):
-        assert fig.layout.legend.title.text == "Measurement date"
-    assert length.show_growth_lines(1).layout.yaxis.title.text == "Position (L)"
-    assert area.show_area_profile(1).layout.xaxis.title.text == "Position (L)"
+    for dashboard in (length, area):
+        for fig in (dashboard.create_stacked_bar_chart(), dashboard.show_growth_lines(1)):
+            assert fig.layout.legend.title.text == "Measurement date"
+        assert dashboard.show_growth_lines(1).layout.yaxis.title.text == "Position (L)"
 
 
 def test_hover_dates_are_iso(length):
@@ -107,16 +98,13 @@ def test_a_date_has_one_colour_in_every_view_and_every_tube(tmp_path):
         names = [d.strftime("%Y-%m-%d") for d in cache.dates]
         stacked = {t.name: t.marker.color for t in dashboard.create_stacked_bar_chart().data}
         assert stacked == dict(zip(names, ramp, strict=True))
-    ramp = theme.date_colors(len(length.data_cache.dates))
-    names = [d.strftime("%Y-%m-%d") for d in length.data_cache.dates]
-    lines = {t.name: t.line.color for t in length.show_growth_lines(1).data}
-    assert lines == dict(zip(names, ramp, strict=True))
-    profile = {
-        tube: {t.name: t.marker.color for t in area.show_area_profile(tube).data} for tube in (1, 2)
-    }
-    assert set(profile[2]) == {"2024-08-07"}  # tube 2 has no row on the first and last date
-    assert profile[1] == dict(zip(names, ramp, strict=True))
-    assert profile[2]["2024-08-07"] == profile[1]["2024-08-07"] == ramp[1]
+        lines = {
+            tube: {t.name: t.line.color for t in dashboard.show_growth_lines(tube).data}
+            for tube in (1, 2)
+        }
+        assert lines[1] == dict(zip(names, ramp, strict=True))
+        assert set(lines[2]) == {"2024-08-07"}  # tube 2 has no row on the first and last date
+        assert lines[2]["2024-08-07"] == lines[1]["2024-08-07"] == ramp[1]
 
 
 def test_more_than_13_dates_stay_on_the_ramp(tmp_path):
