@@ -2,21 +2,27 @@
 
 A vertical floating panel, pinned to the right edge of the host canvas and
 vertically centred, showing one row per active class in registry order:
-a number-key hint, a colour swatch, the class name and (for every class but
-Ignore) a "reviewed" checkbox. Clicking a row selects it as the active paint
-class; the gear button opens the class editor dialog.
+a number-key hint, a colour swatch, the class name and a box. The box is ticked on
+the active paint class only, Ignore included (owner decision 2026-11-01: the tick is
+the class you paint with; until then it meant "fully annotated on this image" and
+could disagree with the highlight). The highlight and the tick come from one state,
+the active key (:meth:`ClassPanel.set_active`), so they never disagree. Clicking a
+row or its box asks for that class (``active_changed``); a box never changes
+itself, so a click on the ticked box keeps it ticked. Neither does a toggle (what a
+screen reader's Toggle action calls): it is put back, and a toggle on asks for the
+class like a click. The gear button opens the class editor dialog.
 
-A click never takes keyboard focus: a click on a row, checkbox or the gear
-leaves focus on the canvas, so Space still pans and can never toggle a
-"checked" box (spec §3.4: a flipped review flag silently changes the dataset).
-Tab does reach the gear and then each "checked" box, in class order (also after
-the classes change); the focused box draws the theme's focus ring and Space
-ticks it (walkthrough W18: the boxes could be ticked only with the mouse).
+A click never takes keyboard focus: a click on a row, box or the gear leaves
+focus on the canvas, so Space still pans. Tab does reach the gear and then each
+box, in class order (also after the classes change); the focused box draws the
+theme's focus ring and Space picks its class (walkthrough W18: the boxes could be
+reached only with the mouse). :meth:`ClassPanel.picked_by_key` tells the two apart
+while ``active_changed`` is handled, so the page hands the keys back to the canvas
+after a click only.
 
 Long class names are elided at the right (the full name is the name's tooltip), so
-the panel keeps a bounded width and the "checked" boxes never scroll out of sight;
-the rows scroll vertically only. Only the annotator ticks a box, one class at a time:
-pixels never tick or lock one.
+the panel keeps a bounded width and the boxes never scroll out of sight; the rows
+scroll vertically only.
 
 This module never touches ``app/gui/widgets/*`` — it only consumes the
 existing ``_FloatingPanel``/``IconButton``/``keep_canvas_focus``/``ElidedLabel`` primitives.
@@ -44,7 +50,7 @@ from app.gui.widgets.text_fit import ElidedLabel, label_advance
 
 _MARGIN = 14
 _MAX_HEIGHT_FRACTION = 0.6
-_REVIEWED_TOOLTIP = "Tick when this class is fully annotated on this image"
+_BOX_TOOLTIP = "Paint with this class"
 # A class name shows at most this wide (longer names are elided), and can shrink to
 # the minimum when the rows scroll and the scroll bar takes its share.
 _NAME_MAX_PX = 140
@@ -82,16 +88,57 @@ class _NameLabel(ElidedLabel):
         self.setToolTip(self.text() if self.is_elided() else "")
 
 
+class _ActiveBox(QCheckBox):
+    """A row's box: ticked while its class is the active one (:meth:`show_active`), and
+    never changed by the user. A click or Space emits ``clicked`` and leaves the box as it
+    is, so the ticked box stays ticked when clicked again. ``toggle()`` / ``setChecked()``
+    from elsewhere (Qt's accessible Toggle action, used by Narrator and NVDA) is put back at
+    once; a toggle on emits ``toggle_requested``, which asks for the class like a click."""
+
+    toggle_requested = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._on = False  # what the box shows: its class is the active one
+        self.by_key = False  # True while Space on the focused box clicks it
+        self.toggled.connect(self._put_back)
+
+    def show_active(self, on: bool) -> None:
+        """Tick the box (its class is the active one) or untick it; nothing else does."""
+        self._on = on
+        self.setChecked(on)  # never emits clicked; toggled only when the state changes
+
+    def nextCheckState(self) -> None:  # noqa: N802 - Qt override
+        """No toggle of its own on a click: the panel ticks the active class's box."""
+
+    def keyReleaseEvent(self, event) -> None:  # noqa: N802 - Qt override
+        """Space clicks the box on its release: that click comes from the keyboard."""
+        self.by_key = True
+        try:
+            super().keyReleaseEvent(event)
+        finally:
+            self.by_key = False
+
+    def _put_back(self, checked: bool) -> None:
+        """A change that :meth:`show_active` did not make is undone; a toggle on asks for
+        the box's class (which then ticks it)."""
+        if checked == self._on:
+            return
+        self.setChecked(self._on)  # toggled again with the shown state: returns above
+        if checked:
+            self.toggle_requested.emit()
+
+
 class _ClassRow(QFrame):
     """One row of the class panel.
 
-    Clicking anywhere in the row except the checkbox emits ``activated``.
-    The checkbox emits ``reviewed_toggled`` only for user-driven toggles
-    (``set_reviewed`` updates it silently).
+    A left click anywhere in the row, a click (or Space) on its box, or a toggle on of the
+    box emits ``activated`` with ``by_key``: True for Space on the box and for a toggle (an
+    assistive technology's action, where the keys are), False for a mouse click. The box
+    shows ``set_active``'s state and nothing else.
     """
 
-    activated = pyqtSignal()
-    reviewed_toggled = pyqtSignal(bool)
+    activated = pyqtSignal(bool)
 
     def __init__(self, class_def: ClassDef, number: int | None, parent=None):
         super().__init__(parent)
@@ -122,20 +169,17 @@ class _ClassRow(QFrame):
         )
         row.addWidget(self._name_label, 1)
 
-        self.checkbox: QCheckBox | None = None
-        if not class_def.is_ignore:
-            self.checkbox = QCheckBox()
-            self.checkbox.setToolTip(_REVIEWED_TOOLTIP)
-            self.checkbox.toggled.connect(self._on_checkbox_toggled)
-            row.addWidget(self.checkbox)
+        self.checkbox = _ActiveBox()
+        self.checkbox.setToolTip(_BOX_TOOLTIP + (f" (key {hint})" if hint else ""))
+        self.checkbox.clicked.connect(lambda: self.activated.emit(self.checkbox.by_key))
+        self.checkbox.toggle_requested.connect(lambda: self.activated.emit(True))
+        row.addWidget(self.checkbox)
         # A click falls through to the nearest focusable ancestor, so the row
         # itself (not only the checkbox) must refuse focus.
         keep_canvas_focus(self, tab_reachable=False)
-        if self.checkbox is not None:
-            # Tab reaches the box (Space ticks it); a click still leaves the focus alone.
-            self.checkbox.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        # Tab reaches the box (Space picks its class); a click still leaves the focus alone.
+        self.checkbox.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
-        self._suppress_toggle = False
         self._active = False
         self.update_class(class_def)
         self._apply_style()
@@ -147,17 +191,12 @@ class _ClassRow(QFrame):
         )
 
     def set_active(self, active: bool) -> None:
+        """Highlight the row and tick its box (or neither): one state, never one alone."""
         if self._active == active:
             return
+        self.checkbox.show_active(active)
         self._active = active
         self._apply_style()
-
-    def set_reviewed(self, checked: bool) -> None:
-        if self.checkbox is None:
-            return
-        self._suppress_toggle = True
-        self.checkbox.setChecked(checked)
-        self._suppress_toggle = False
 
     def _apply_style(self) -> None:
         if self._active:
@@ -171,14 +210,9 @@ class _ClassRow(QFrame):
                 "border-left: 2px solid transparent; border-radius: 4px; }"
             )
 
-    def _on_checkbox_toggled(self, checked: bool) -> None:
-        if self._suppress_toggle:
-            return
-        self.reviewed_toggled.emit(checked)
-
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt override
         if event.button() == Qt.MouseButton.LeftButton:
-            self.activated.emit()
+            self.activated.emit(False)
         super().mousePressEvent(event)
 
 
@@ -186,7 +220,6 @@ class ClassPanel(_FloatingPanel):
     """Floating class panel, right edge of the host, vertically centred."""
 
     active_changed = pyqtSignal(str)
-    reviewed_changed = pyqtSignal(str, bool)
     edit_requested = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -212,7 +245,7 @@ class ClassPanel(_FloatingPanel):
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
-        # Names elide instead: a sideways scroll would hide the "checked" boxes.
+        # Names elide instead: a sideways scroll would hide the boxes.
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setStyleSheet("background: transparent; border: none;")
         self.add_widget(self._scroll)
@@ -233,6 +266,7 @@ class ClassPanel(_FloatingPanel):
         self._registry: Registry | None = None
         self._rows: dict[str, _ClassRow] = {}
         self._active_key: str | None = None
+        self._by_key = False  # the pick being handled came from the keyboard
 
     # ------------------------------------------------------------------ #
     def set_registry(self, registry: Registry) -> None:
@@ -257,9 +291,8 @@ class ClassPanel(_FloatingPanel):
         for class_def in active_classes:
             number = number_for_key.get(class_def.key)
             row = _ClassRow(class_def, number)
-            row.activated.connect(lambda k=class_def.key: self._handle_row_activated(k))
-            row.reviewed_toggled.connect(
-                lambda checked, k=class_def.key: self.reviewed_changed.emit(k, checked)
+            row.activated.connect(
+                lambda by_key, k=class_def.key: self._handle_row_activated(k, by_key)
             )
             self._rows_layout.insertWidget(self._rows_layout.count() - 1, row)
             self._rows[class_def.key] = row
@@ -268,19 +301,18 @@ class ClassPanel(_FloatingPanel):
         # window's focus chain: they came after the whole window once the classes changed.
         previous = self._gear
         for row in self._rows.values():
-            if row.checkbox is not None:
-                QWidget.setTabOrder(previous, row.checkbox)
-                previous = row.checkbox
+            QWidget.setTabOrder(previous, row.checkbox)
+            previous = row.checkbox
 
         if self._active_key is not None and self._active_key in self._rows:
             self._rows[self._active_key].set_active(True)
 
     def set_active(self, key: str) -> None:
-        """Highlight ``key``'s row. Never emits ``active_changed``."""
-        if self._active_key == key:
-            return
-        if self._active_key is not None and self._active_key in self._rows:
-            self._rows[self._active_key].set_active(False)
+        """Highlight ``key``'s row and tick its box, and only its box (nothing changes when
+        it is already shown). Never emits ``active_changed``."""
+        previous = self._active_key
+        if previous is not None and previous != key and previous in self._rows:
+            self._rows[previous].set_active(False)
         self._active_key = key
         if key in self._rows:
             self._rows[key].set_active(True)
@@ -288,17 +320,14 @@ class ClassPanel(_FloatingPanel):
     def active_key(self) -> str:
         return self._active_key
 
-    def set_reviewed(self, reviewed: set[str]) -> None:
-        """Checkbox checked for the keys in ``reviewed`` (the hand ticks), silently."""
-        for key, row in self._rows.items():
-            row.set_reviewed(key in reviewed)
+    def picked_by_key(self) -> bool:
+        """True while ``active_changed`` is handled for a pick from the keyboard (Space on a
+        focused box, or a toggle), False for a mouse click or outside a pick."""
+        return self._by_key
 
-    def focused_key(self) -> str | None:
-        """The class whose "checked" box has the keyboard focus (reached by Tab), or None."""
-        for key, row in self._rows.items():
-            if row.checkbox is not None and row.checkbox.hasFocus():
-                return key
-        return None
+    def ticked_keys(self) -> list[str]:
+        """The classes whose box is ticked: the active class alone (none before one is set)."""
+        return [key for key, row in self._rows.items() if row.checkbox.isChecked()]
 
     def key_for_shortcut(self, n: int) -> str | None:
         """``n=1..9`` -> n-th labelled class key; ``0`` -> ``"ignore"``."""
@@ -378,6 +407,12 @@ class ClassPanel(_FloatingPanel):
         # (e.g. after retiring classes), not just when it grows.
         return self._rows_container.sizeHint().height()
 
-    def _handle_row_activated(self, key: str) -> None:
+    def _handle_row_activated(self, key: str, by_key: bool) -> None:
+        """A row or its box was picked: tick and highlight it, then ask for its class
+        (:meth:`picked_by_key` says how it was picked meanwhile)."""
         self.set_active(key)
-        self.active_changed.emit(key)
+        self._by_key = by_key
+        try:
+            self.active_changed.emit(key)
+        finally:
+            self._by_key = False

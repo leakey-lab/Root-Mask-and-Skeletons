@@ -1,7 +1,7 @@
 """Tests for the GT class panel and class editor widgets (Task 3).
 
-Covers ``app.gui.class_panel.ClassPanel`` (row rendering, active selection,
-reviewed checkboxes, keyboard-shortcut lookup, scrolling/height cap) and
+Covers ``app.gui.class_panel.ClassPanel`` (row rendering, active selection, the one box
+ticked on the active class, keyboard-shortcut lookup, scrolling/height cap) and
 ``app.gui.class_editor_dialog.ClassEditorDialog`` (add/rename/recolour/retire
 against the real ``Registry`` API, inline validation errors, accept/cancel).
 
@@ -68,9 +68,14 @@ def test_panel_shows_one_row_per_active_class_in_order(app):
     panel.set_registry(default_registry())
 
     assert list(panel._rows.keys()) == ["root", "nodule", "root_tip", "ignore"]
-    assert panel._rows["ignore"].checkbox is None
-    for key in ("root", "nodule", "root_tip"):
-        assert panel._rows[key].checkbox is not None
+    # Every row has a box, Ignore too (it can be the active class: key 0).
+    tips = {key: row.checkbox.toolTip() for key, row in panel._rows.items()}
+    assert tips == {
+        "root": "Paint with this class (key 1)",
+        "nodule": "Paint with this class (key 2)",
+        "root_tip": "Paint with this class (key 3)",
+        "ignore": "Paint with this class (key 0)",
+    }
 
 
 def test_clicking_a_row_emits_active_changed_and_highlights(app):
@@ -95,21 +100,157 @@ def test_clicking_a_row_emits_active_changed_and_highlights(app):
     assert panel._rows["nodule"]._active is False
 
 
-def test_reviewed_checkbox_toggle_emits_and_set_reviewed_is_silent(app):
+def _highlighted(panel) -> list[str]:
+    return [key for key, row in panel._rows.items() if row._active]
+
+
+def test_the_tick_and_the_highlight_are_the_active_class_alone(app):
+    """Owner bug 2026-11-01: Root nodule was ticked while Tip was highlighted (and painted).
+    The tick and the highlight now come from the active key alone."""
     host = _host()
     panel = ClassPanel(host)
     panel.set_registry(default_registry())
+    assert panel.ticked_keys() == [] == _highlighted(panel)  # no class set yet
+
+    panel.set_active("nodule")
+    assert panel.ticked_keys() == ["nodule"] == _highlighted(panel)
 
     got = []
-    panel.reviewed_changed.connect(lambda k, v: got.append((k, v)))
-    panel._rows["nodule"].checkbox.setChecked(True)
-    assert got == [("nodule", True)]
+    panel.active_changed.connect(got.append)
+    QTest.mouseClick(panel._rows["root_tip"], Qt.MouseButton.LeftButton)  # Tip's row
 
-    got.clear()
-    panel.set_reviewed({"root"})
+    assert got == ["root_tip"] and panel.active_key() == "root_tip"
+    assert panel.ticked_keys() == ["root_tip"] == _highlighted(panel)
+
+
+def test_a_click_on_a_box_picks_its_class_and_is_the_only_tick(app):
+    host = _host()
+    panel = ClassPanel(host)
+    panel.set_registry(default_registry())
+    panel.set_active("root")
+    got = []
+    panel.active_changed.connect(got.append)
+
+    QTest.mouseClick(panel._rows["nodule"].checkbox, Qt.MouseButton.LeftButton)
+
+    assert got == ["nodule"] and panel.active_key() == "nodule"
+    assert panel.ticked_keys() == ["nodule"] == _highlighted(panel)
+    assert panel._rows["nodule"].checkbox.isEnabled() is True  # a box is never locked
+
+
+def test_a_click_on_the_ticked_box_keeps_it_ticked(app):
+    host = _host()
+    panel = ClassPanel(host)
+    panel.set_registry(default_registry())
+    panel.set_active("nodule")
+    got = []
+    panel.active_changed.connect(got.append)
+
+    for _ in range(2):  # not an off switch: a second click changes nothing either
+        QTest.mouseClick(panel._rows["nodule"].checkbox, Qt.MouseButton.LeftButton)
+        assert panel.ticked_keys() == ["nodule"] == _highlighted(panel)
+    assert got == ["nodule", "nodule"]
+
+
+def test_the_ignore_box_can_be_the_tick(app):
+    host = _host()
+    panel = ClassPanel(host)
+    panel.set_registry(default_registry())
+    panel.set_active("root")
+
+    QTest.mouseClick(panel._rows["ignore"].checkbox, Qt.MouseButton.LeftButton)
+
+    assert panel.active_key() == "ignore"
+    assert panel.ticked_keys() == ["ignore"] == _highlighted(panel)
+
+
+def test_set_active_moves_the_one_tick_silently(app):
+    host = _host()
+    panel = ClassPanel(host)
+    panel.set_registry(default_registry())
+    got = []
+    panel.active_changed.connect(got.append)
+
+    for key in ("root", "ignore", "root_tip", "root_tip"):
+        panel.set_active(key)
+        assert panel.ticked_keys() == [key] == _highlighted(panel)
     assert got == []
-    assert panel._rows["root"].checkbox.isChecked() is True
-    assert panel._rows["root"].checkbox.isEnabled() is True  # a box is never locked
+
+
+def test_set_active_of_the_shown_class_changes_nothing(app):
+    """Every stroke and undo puts the active class on the panel again: the box it shows
+    must not untick and tick again (two toggles, two restyles each time)."""
+    host = _host()
+    panel = ClassPanel(host)
+    panel.set_registry(default_registry())
+    panel.set_active("nodule")
+    toggles = []
+    for row in panel._rows.values():
+        row.checkbox.toggled.connect(lambda on, k=row.key: toggles.append((k, on)))
+
+    panel.set_active("nodule")
+    assert toggles == []
+
+    panel.set_active("root")
+    assert sorted(toggles) == [("nodule", False), ("root", True)]
+
+
+def test_a_toggle_never_changes_a_box_and_a_toggle_on_picks_its_class(app):
+    """Qt's accessible Toggle action (Narrator, NVDA) calls toggle(), which skips the
+    click path: the active box stays ticked, and another box picks its class."""
+    host = _host()
+    panel = ClassPanel(host)
+    panel.set_registry(default_registry())
+    panel.set_active("root")
+    got = []
+    panel.active_changed.connect(lambda k: got.append((k, panel.picked_by_key())))
+
+    panel._rows["root"].checkbox.toggle()  # off: put back, nothing asked
+    assert panel.ticked_keys() == ["root"] == _highlighted(panel) and got == []
+    panel._rows["root"].checkbox.setChecked(False)
+    assert panel.ticked_keys() == ["root"] and got == []
+
+    panel._rows["nodule"].checkbox.toggle()  # on: asks for the class, which ticks it alone
+
+    assert got == [("nodule", True)] and panel.active_key() == "nodule"
+    assert panel.ticked_keys() == ["nodule"] == _highlighted(panel)
+    assert panel.picked_by_key() is False  # only while the pick is handled
+
+
+def test_picked_by_key_tells_space_from_a_click(app):
+    host = _host()
+    panel = ClassPanel(host)
+    panel.set_registry(default_registry())
+    panel.set_active("root")
+    got = []
+    panel.active_changed.connect(lambda k: got.append((k, panel.picked_by_key())))
+    nodule, root_tip = panel._rows["nodule"].checkbox, panel._rows["root_tip"].checkbox
+
+    QTest.mouseClick(nodule, Qt.MouseButton.LeftButton)
+    QTest.keyClick(root_tip, Qt.Key.Key_Space)
+    QTest.mouseClick(panel._rows["root"], Qt.MouseButton.LeftButton)
+
+    assert got == [("nodule", False), ("root_tip", True), ("root", False)]
+    assert panel.ticked_keys() == ["root"]
+
+
+def test_one_tick_after_the_classes_change(app):
+    """A rebuild keeps the active class ticked; a retired active class leaves no stale tick
+    (the page then sets the class it falls back to)."""
+    host = _host()
+    panel = ClassPanel(host)
+    registry = default_registry()
+    panel.set_registry(registry)
+    panel.set_active("nodule")
+
+    registry = registry.add(key="hypha", name="Hypha", color="#3fa7ff")
+    panel.set_registry(registry)
+    assert panel.ticked_keys() == ["nodule"] == _highlighted(panel)
+
+    panel.set_registry(registry.retire("nodule"))
+    assert panel.ticked_keys() == [] == _highlighted(panel)
+    panel.set_active("root")
+    assert panel.ticked_keys() == ["root"] == _highlighted(panel)
 
 
 def test_key_for_shortcut_defaults(app):

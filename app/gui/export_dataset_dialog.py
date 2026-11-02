@@ -2,12 +2,11 @@
 "Export dataset…" dialog (spec §4 / Track X).
 
 Collects the export options (output folder, validation share, tube grouping,
-completeness filter, seed), runs ``app.gt.export.export_dataset`` on a
-``QThread`` with progress, and shows a summary (exported / train / val /
-skipped / errors, with the first failed images and why; the full list is in
-``<out>/errors.txt``) when it finishes. Constructed by ``MainWindow``'s
-"Export dataset…" action bar button (Track E / Task 4); the constructor
-signature is frozen so that caller can rely on it.
+seed), runs ``app.gt.export.export_dataset`` on a ``QThread`` with progress,
+and shows a summary (exported / train / val / errors, with the first failed
+images and why; the full list is in ``<out>/errors.txt``) when it finishes.
+Constructed by ``MainWindow``'s "Export dataset…" action bar button (Track E /
+Task 4); the constructor signature is frozen so that caller can rely on it.
 
 It says up front how many images have class labels (none: why Export stays off).
 Enter starts the export (Export is the default button; Browse… and Cancel never
@@ -192,14 +191,6 @@ class ExportDatasetDialog(QDialog):
         )
         layout.addWidget(self.group_by_tube_check)
 
-        self.only_complete_check = QCheckBox("Only fully checked images")
-        self.only_complete_check.setChecked(True)
-        self.only_complete_check.setToolTip(
-            "Skip images on which some class was never checked in the class panel of "
-            "Correct (a class with pixels counts as checked)."
-        )
-        layout.addWidget(self.only_complete_check)
-
         # --- Seed ---
         self.seed_spin = QSpinBox()
         self.seed_spin.setRange(0, 1_000_000)
@@ -305,7 +296,6 @@ class ExportDatasetDialog(QDialog):
             out_dir=out_dir,
             val_fraction=self.val_spin.value() / 100.0,
             group_by_tube=self.group_by_tube_check.isChecked(),
-            only_complete=self.only_complete_check.isChecked(),
             seed=self.seed_spin.value(),
         )
 
@@ -328,7 +318,6 @@ class ExportDatasetDialog(QDialog):
             self.browse_button,
             self.val_spin,
             self.group_by_tube_check,
-            self.only_complete_check,
             self.seed_spin,
             self.cancel_button,
             self.export_button,
@@ -348,8 +337,6 @@ class ExportDatasetDialog(QDialog):
         self.result_summary = result
         self.progress_bar.setValue(100)
         parts = [f"Exported {result.exported} image(s) ({result.train} train / {result.val} val)"]
-        if result.skipped_incomplete:
-            parts.append(f"{result.skipped_incomplete} skipped (incomplete)")
         if result.errors:
             parts.append(f"{len(result.errors)} error(s)")
         text = " — ".join(parts)

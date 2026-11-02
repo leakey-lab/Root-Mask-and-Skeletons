@@ -366,15 +366,14 @@ are kept across restarts.
   Measure reads the GT skeleton first where it is valid.
 - **Classes** (purple; the class labels): Brush, Eraser and Fill in the colour of the
   active class, picked in the class panel that shows under the Layers panel while the
-  class labels are edited (or with `1`–`9`, `0` = Ignore). Each class keeps its own
-  brush size; Fill reads the active class's outlines only; the panel's boxes, ticked by
-  hand one class at a time, mark the classes fully annotated on the image (the dataset
-  export filters on them). It opens and saves only `gt/<stem>.png`
+  class labels are edited (or with `1`–`9`, `0` = Ignore). The panel's one tick is always
+  on the active class: a click on a row or its box, or a number key, moves the tick and
+  the highlight together. Each class keeps its own brush size; Fill reads the active
+  class's outlines only. It opens and saves only `gt/<stem>.png`
   (`gt/classes.json` is written first when missing) and never reads or writes `mask/`,
-  `skeletons/` or the GT mask and skeleton. Saving an untouched image writes nothing:
-  tick the boxes to record that you looked and found nothing. While `gt/classes.json` is
-  invalid only the class labels are read-only: the row reads *Read-only*, and the first
-  edit you try on an image says why.
+  `skeletons/` or the GT mask and skeleton. Saving an untouched image writes nothing.
+  While `gt/classes.json` is invalid only the class labels are read-only: the row reads
+  *Read-only*, and the first edit you try on an image says why.
 - **Enhance** (the contrast button on the tool rail) changes how the photo is shown, for
   every image while it is on; it never changes a mask, a skeleton or a measurement. For
   `.jpg` / `.jpeg` photos, **Smooth JPEG blocks** (off by default) softens the 8 x 8
@@ -473,8 +472,8 @@ never read or write `mask/` or `skeletons/`. They label classes; they do not mea
 
 - `gt/<stem>.png` — the class labels of an image: an 8-bit palette PNG where each pixel is one
   class id (`0` background, `1`–`254` classes, `255` Ignore). Any image viewer
-  shows it in the class colours. A text chunk records the class list and which
-  classes were checked (fully annotated) on that image.
+  shows it in the class colours. A text chunk records the class list the file was saved
+  with (the key of each class id).
 - `gt/classes.json` — the project's classes (id, key, name, colour). Defaults:
   Root, Nodule, Root tip, Ignore. Edit them with **Classes…**; a deleted class is
   retired (its id is never reused); a retired class is listed under "Retired" in the
@@ -482,14 +481,19 @@ never read or write `mask/` or `skeletons/`. They label classes; they do not mea
   is edited by hand and a field has the wrong type, the app names the class and field
   and turns GT saving off until it is fixed.
 
-A saved file means the image was annotated, even when nothing is painted: tick each class
-you finished and save ("checked, nothing present" is a valid negative example).
+A saved file means the image was annotated: Export dataset exports every image that has
+one, also a file with nothing painted (all background, a valid negative example). Correct
+writes no file for an image you did not edit, so a fresh image cannot get an empty file
+directly: save painted labels, Clear them, and save again.
 
 **Painting:** the class labels use Correct's Brush, Eraser and Fill, with the class panel
 under the Layers panel while they are edited. The brush paints the active class and replaces whatever was
-under it (one class per pixel). Each class has a ✓ box that only you tick, when that
-class is fully annotated on the image (also "none present"); painting never ticks it
-(with the mouse, or reach the boxes with Tab and press Space).
+under it (one class per pixel). The tick shows the active class: every row, Ignore
+included, has a ✓ box, and only the box of the class you paint with is ticked. Click a row
+or its box, or press the class's number key, to paint with that class; a click on the
+ticked box keeps it ticked. A click never takes the keyboard from the canvas. With the
+keyboard, Tab reaches the gear and then each box in class order, and Space makes the
+focused box's class active.
 
 | Key | Action |
 |---|---|
@@ -511,9 +515,9 @@ manifest.csv                   stem, source image, split, tube, position, date, 
 manifest.csv.provenance.json   how it was made: options (split seed), counts, class registry, app version
 ```
 
-By default only images where every class is checked are exported, and all images
-of one tube stay in the same split (so the same root on different dates cannot
-leak between train and validation). The split is reproducible from the seed recorded
+Every image with a GT file is exported. By default all images of one tube stay in the
+same split (so the same root on different dates cannot leak between train and
+validation). The split is reproducible from the seed recorded
 in `manifest.csv.provenance.json`. Images that fail to export (for example a label file
 whose size no longer matches its image) are listed in the dialog and in `errors.txt`; the
 rest still export. A relative output folder is created next to the images.

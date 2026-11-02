@@ -780,7 +780,7 @@ def test_the_mask_row_stays_on_top_and_keeps_its_key_whatever_the_order_given(st
         (LayerStatus("none", "No mask"), "No mask", tokens.TEXT_FAINT),
         (LayerStatus("none", "Prediction", "Not corrected yet"), "Prediction", tokens.TEXT_FAINT),
         (LayerStatus("error", "Not saved", "Disk full"), "Not saved", tokens.DANGER),
-        (LayerStatus("clean", "Saved · 2/3 checked"), "Saved · 2/3 checked", tokens.OK),
+        (LayerStatus("clean", "GT"), "GT", tokens.OK),
     ],
     ids=["clean", "dirty", "error", "none-label", "tooltip", "error-reason", "label-wins"],
 )

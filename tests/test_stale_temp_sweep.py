@@ -306,7 +306,8 @@ def _hex_to_rgb(color):
 
 
 def _pre_r8_write_tracing(path, tracing, registry):
-    """``app.gt.store.write_tracing`` before R8, verbatim: the golden for the saved bytes."""
+    """``app.gt.store.write_tracing`` before R8, verbatim but for the ``reviewed`` list it
+    wrote (gone since 2026-11-01): the golden for the saved bytes."""
     ids = np.ascontiguousarray(tracing.ids, dtype=np.uint8)
     palette = [0, 0, 0] * 256
     unknown = _hex_to_rgb(GT_UNKNOWN_COLOR)
@@ -320,7 +321,6 @@ def _pre_r8_write_tracing(path, tracing, registry):
     meta = {
         "v": 1,
         "classes": {str(c.id): c.key for c in registry.classes},
-        "reviewed": sorted(tracing.reviewed),
     }
     info = PngImagePlugin.PngInfo()
     info.add_text(GT_META_CHUNK, json.dumps(meta))
@@ -346,9 +346,9 @@ def _tracings():
     unknown = np.zeros((12, 9), np.uint8)
     unknown[2:5, 3:7] = 7  # an id no class owns: GT_UNKNOWN_COLOR
     return {
-        "classes": Tracing(cycle, frozenset({"root", "nodule"})),
+        "classes": Tracing(cycle),
         "empty": empty_tracing(6, 7),
-        "unknown_id": Tracing(unknown, frozenset({"root_tip"})),
+        "unknown_id": Tracing(unknown),
     }
 
 

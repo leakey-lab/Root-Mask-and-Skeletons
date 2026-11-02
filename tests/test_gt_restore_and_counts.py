@@ -49,12 +49,11 @@ def _ids() -> np.ndarray:
 def gt_project_with_nodules(tmp_path):
     """Two traced 640 x 480 photos; the second is a JPEG stored with EXIF Orientation = 6.
 
-    Returns ``(project_dir, images)`` with every class reviewed on both photos.
+    Returns ``(project_dir, images)``; both photos have class labels.
     """
     project = tmp_path / "project"
     project.mkdir()
     registry = default_registry()
-    reviewed = frozenset(c.key for c in registry.labelled())
     images: dict[str, str] = {}
     first = project / f"{_STEMS[0]}.png"
     Image.new("RGB", (W, H), (10, 20, 30)).save(first)
@@ -64,7 +63,7 @@ def gt_project_with_nodules(tmp_path):
     Image.new("RGB", (W, H), (10, 20, 30)).save(second, exif=exif.tobytes())
     for stem, path in zip(_STEMS, (first, second), strict=True):
         images[stem] = str(path)
-        write_tracing(gt_path(str(path)), Tracing(_ids(), reviewed), registry)
+        write_tracing(gt_path(str(path)), Tracing(_ids()), registry)
     return str(project), images
 
 

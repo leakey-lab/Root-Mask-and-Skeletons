@@ -204,7 +204,7 @@ def test_the_export_and_its_count_find_the_case_variant_labels(project, monkeypa
     assert traced == 1
 
     out = str(tmp_path / "dataset")
-    options = ExportOptions(out, only_complete=False)
+    options = ExportOptions(out)
     result = export_dataset(folder, images, default_registry(), options)
     assert (result.exported, result.errors) == (1, [])
     assert os.listdir(os.path.join(out, "masks")) == ["IMG.png"]
@@ -229,7 +229,7 @@ def test_the_export_refuses_a_protected_folder_in_any_case(protected, monkeypatc
             folder,
             layout.scan_images(),
             default_registry(),
-            ExportOptions(out, only_complete=False),
+            ExportOptions(out),
         )
 
     assert not os.path.exists(out)

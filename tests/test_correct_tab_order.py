@@ -7,7 +7,7 @@ from the canvas to the polyline prompt when it is shown (top centre, about the l
 drawn), the rail top to bottom (the Enhance popover right after the button that opens it),
 the dock left to right, the zoom cluster (bottom right), then the side card (right edge):
 the Layers panel's rows and eyes, then, while the class labels are edited, the class panel's
-gear and "checked" boxes (WG-T5; rewritten from ``test_gt_tab_order.py``). Shift+Tab walks
+gear and boxes, Ignore's last (WG-T5; rewritten from ``test_gt_tab_order.py``). Shift+Tab walks
 back. A size slider made later takes its place in the dock. Clicks still never take the
 focus from the canvas (``keep_canvas_focus``), whose keys keep working.
 """
@@ -82,8 +82,8 @@ def layers(editor) -> list[QWidget]:
     return [part for row in editor.layer_panel.rows.values() for part in (row, row.eye_button)]
 
 
-def classes(editor, keys=("root", "nodule", "root_tip")) -> list[QWidget]:
-    """The class panel's gear, then each class's "checked" box."""
+def classes(editor, keys=("root", "nodule", "root_tip", "ignore")) -> list[QWidget]:
+    """The class panel's gear, then each class's box (ticked: the active class)."""
     panel = editor.class_panel
     return [panel._gear, *(panel._rows[key].checkbox for key in keys)]
 
@@ -224,6 +224,6 @@ def test_new_classes_keep_their_place_after_the_layers(page):
         *dock(page, only_size_slider(page)),
         *zoom(page),
         *layers(page),
-        *classes(page, ("root", "nodule", "root_tip", "hypha")),
+        *classes(page, ("root", "nodule", "root_tip", "hypha", "ignore")),
     ]
     assert walk(page) == expected

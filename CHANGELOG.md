@@ -68,6 +68,26 @@ Eight passes, not yet released:
   a 161-finding audit implemented by per-area packages, then integrated and reviewed.
 
 ### Fixed
+- **Correct, Classes layer: the class tick is the active class (2026-11-01, owner bug
+  report; owner decision "Tick = active class").** Each row of the class panel had a
+  highlight, the class the brush paints with, and a box that meant "fully annotated on this
+  image". The two could disagree: with Nodule ticked and Root tip picked with the mouse, the
+  brush painted in Root tip's colour. Now the panel has one tick, always on the class you
+  paint with. A click on a row or on its box, or `1`-`9` / `0`, moves the tick and the
+  highlight together: they come from one source and cannot disagree. A click on the box that
+  is already ticked keeps it ticked, and so does a screen reader's Toggle action (a toggle
+  of another box picks that class). The Ignore row (key `0`) has a box too. A click never
+  takes the keyboard from the canvas, also a click on the box that holds the keys; Tab still
+  reaches the gear and then each box in class order, and Space on a box makes its class
+  active and keeps the keys there. A class key pressed during a stroke ends the stroke first,
+  in the class it began with. The box's tooltip reads "Paint with this class (key N)". The
+  "reviewed" state is gone: the status chip of saved class labels reads "GT", as the mask and
+  skeleton layers do, with the file's path as its tooltip (it read "GT · n/m checked"), and
+  Export dataset no longer has its "Only fully checked images" option. Since a tick is no
+  longer an edit, an image you did not paint on can no longer get an empty `gt/<stem>.png`
+  (a negative example): Save writes only edited layers (O2), so the only way to get one is to
+  save painted labels, Clear them, and save again. This replaces the hand ticks of
+  2026-10-30 (below). See *Scientific output changes*.
 - **Correct, skeleton layer: Delete and branch edits erase only the picked branch's own
   pixels (S03-01, 2026-10-31, owner decision #1).** Select kept only the branch's
   simplified line, and Delete or an edit (drag a point, then Enter) erased a 9 px band along
@@ -200,7 +220,8 @@ Eight passes, not yet released:
   every painted class was checked at once. A box now ticks only when the annotator ticks
   it, and can be unticked while the class has pixels: "checked" means the class is fully
   annotated on the image. The locked-box tooltip and fill are gone. See *Scientific output
-  changes*.
+  changes*. (Superseded 2026-11-01: the box now marks the active class, and there is no
+  "checked" state; see the first entry of *Fixed*.)
 - **Windows bundle: Generate failed in the app built on Python 3.14 (U2, 2026-10-29).**
   torchvision 0.29 renamed its operator libraries to `_C_stable.pyd` / `image_stable.pyd`,
   which PyInstaller's hook does not collect, so a frozen `import torchvision` raised
@@ -1160,15 +1181,16 @@ Eight passes, not yet released:
   - Correct, class labels (WG-T5, O23, O14, O24): the class labels are the third layer of
     Correct (row "Classes", purple), painted with Brush, Eraser and Fill in the active
     class's colour; the class panel (the classes, their "checked" boxes and the gear of the
-    class editor) and the layer's three rail tools show while they are edited. Keys:
+    class editor; since 2026-11-01 the box marks the active class, see *Fixed*) and the
+    layer's three rail tools show while they are edited. Keys:
     **M** / **L** / **G** edit the mask / the skeleton / the class labels (they were `1` /
     `2`), **X** goes back to the previous layer, `1`-`9` and `0` pick a class (class labels
     only); `B` and `F` stay on the class labels (from the skeleton they take the mask's), and
     `H` / `Shift+H` show or hide every layer / the other layers. A class-label save writes
     only `gt/<stem>.png` (`gt/classes.json` first when missing) and marks the Library row;
-    an untouched image is not saved (O2: tick the boxes to record "looked, nothing found";
-    Trace GT wrote an empty labels file). `PgDn` saves them without asking unless unknown
-    classes were mapped to Ignore (then it asks). While `gt/classes.json` is invalid only
+    an untouched image is not saved (O2: tick the boxes to record "looked, nothing found",
+    until 2026-11-01; Trace GT wrote an empty labels file). `PgDn` saves them without asking
+    unless unknown classes were mapped to Ignore (then it asks). While `gt/classes.json` is invalid only
     the class labels are read-only, with one danger notice per image (on the first refused
     edit). The top bar's Correct page holds **Classes…**, **Export dataset…** (it saves
     Correct's edits first) and the new **Remove GT…**, which, after asking, deletes the
@@ -1491,6 +1513,29 @@ Eight passes, not yet released:
   as pre-commit already ran it.
 
 ### Scientific output changes
+- **Class labels: no `reviewed` list, and Export dataset exports every image with a GT file
+  (2026-11-01, owner decision "Tick = active class").** Class labels are never measured:
+  no value in `root_lengths.csv` / `root_areas.csv` and no mask or skeleton pixel changes.
+  Two ground-truth outputs change:
+  - A class-labels save no longer writes a `reviewed` list. The `sprouts_gt` text chunk of
+    `gt/<stem>.png` is now `{"v": 1, "classes": {"<id>": "<key>", ...}}`; its version stays
+    1 (`app/gt/store.py`). The `reviewed` list of a file saved before is read past and
+    ignored: the file opens as before and does not show as unsaved, and it keeps the list
+    until it is saved again. Class-id pixels and the palette do not change. Older app
+    versions still read the new files: they take the missing list as empty, so their
+    Export dataset skips such a file while "Only fully checked images" is on.
+  - Export dataset exports every image with a GT file (`app/gt/export.py`). Images it
+    skipped before as not fully checked (some active class not ticked; the option was on by
+    default) are now in the dataset: in `images/`, `masks/`, `manifest.csv` and the splits.
+    With more images, the same seed can give a different train / val split. The provenance
+    record `manifest.csv.provenance.json` no longer has `only_complete` (in `parameters`)
+    or `skipped_incomplete` (in `outputs`), and the export summary no longer says "N
+    skipped (incomplete)".
+
+  `tests/data/gt_goldens.json` was re-recorded with every class-id hash equal (94 planes
+  and 6 saved files: ids, counts, palette and id map unchanged). Only the `reviewed` lists,
+  the saved files' bytes (their chunk) and the unsaved flag after two box clicks changed (a
+  box click is no edit now). The mask and skeleton goldens are unchanged.
 - **Correct: Delete and edits of a picked skeleton branch erase only that branch's pixels
   (S03-01, 2026-10-31, owner decision #1).** The GT skeletons these tools save change.
   Before, a 9 px band along the branch also erased the first pixels of every other branch at
@@ -1540,7 +1585,9 @@ Eight passes, not yet released:
   saved from now on is exported only once every class is ticked by hand. Files saved before
   keep their lists (painted classes included) until saved again. Class-id pixels are
   unchanged; `tests/data/gt_goldens.json` was re-recorded with every class-id hash equal
-  (only the `reviewed` lists and the palette hash of the Root colour change).
+  (only the `reviewed` lists and the palette hash of the Root colour change). (Superseded
+  2026-11-01: no `reviewed` list is written and the export has no complete-only filter;
+  see the first entry of this section.)
 - **macOS and Linux on ARM (arm64): Correct opens and edits a skeleton as on x86
   (2026-10-30).** OpenCV's arm64 wheels (carotene / KleidiCV HAL) rounded the bilinear
   upscale of a prediction differently (`thin_raster`: 2-44 skeleton pixels of the three

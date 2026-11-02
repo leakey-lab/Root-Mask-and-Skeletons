@@ -46,13 +46,12 @@ def _build_project(tmp_path):
     project_dir.mkdir()
     registry = default_registry()
     images = {}
-    reviewed = frozenset({"root", "nodule", "root_tip"})
     for stem in _STEMS:
         image_path = project_dir / f"{stem}.png"
         Image.new("RGB", (20, 20), color=(5, 5, 5)).save(image_path, format="PNG")
         images[stem] = str(image_path)
         ids = _make_ids((20, 20), [0, 1, 2, 3])
-        write_tracing(gt_path(str(image_path)), Tracing(ids=ids, reviewed=reviewed), registry)
+        write_tracing(gt_path(str(image_path)), Tracing(ids=ids), registry)
     return str(project_dir), images, registry
 
 
@@ -385,9 +384,7 @@ def test_summary_lists_failed_images(app, tmp_path, monkeypatch):
     errors = [(f"img_{i:02d}", f"reason {i}") for i in range(12)]
 
     def _fake(project_dir, images, registry, options, progress_cb=None):
-        return ExportResult(
-            out_dir=options.out_dir, exported=3, train=2, val=1, skipped_incomplete=1, errors=errors
-        )
+        return ExportResult(out_dir=options.out_dir, exported=3, train=2, val=1, errors=errors)
 
     monkeypatch.setattr(mod, "export_dataset", _fake)
     project_dir, images, registry = _build_project(tmp_path)
@@ -397,7 +394,7 @@ def test_summary_lists_failed_images(app, tmp_path, monkeypatch):
     _wait_for_thread(dialog)
 
     text = dialog.status_label.text()
-    assert "12 error(s)" in text
+    assert text.startswith("Exported 3 image(s) (2 train / 1 val) — 12 error(s)")
     for stem, reason in errors[:10]:
         assert f"{stem}: {reason}" in text
     for stem, _reason in errors[10:]:

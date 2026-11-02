@@ -24,7 +24,7 @@ Modules (consumers import the submodules; this package imports nothing):
   tools, input, gestures, history replay, ring, view state and the document members of
   ``EditLayer`` (open, save, read-ahead ...).
 - ``classes_document``: ``ClassesDocument``, the class-label plane (``gt/<stem>.png``), its
-  ticks, history, saved state and the registry (the shared half:
+  active class, history, saved state and the registry (the shared half:
   ``app.editing.planes.PlaneDocument``). Qt-free.
 - ``classes_files``: ``read_classes``, the class-label files of one image read and aligned on any
   thread (``ClassesRead``). Qt-free.

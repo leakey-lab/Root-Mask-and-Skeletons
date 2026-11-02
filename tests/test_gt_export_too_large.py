@@ -35,7 +35,7 @@ def project(tmp_path):
 def _export(project, tmp_path):
     project_dir, images, _write_registry, registry = project
     out_dir = tmp_path / "out"
-    options = ExportOptions(out_dir=str(out_dir), only_complete=False)
+    options = ExportOptions(out_dir=str(out_dir))
     return out_dir, export_dataset(project_dir, images, registry, options)
 
 
@@ -71,7 +71,7 @@ def test_a_tracing_pillow_refuses_is_that_images_error(project, tmp_path, monkey
     width, height = _BIG
     Image.new("RGB", _BIG, color=(10, 20, 30)).save(images[big])
     ids = np.zeros((height, width), np.uint8)
-    write_tracing(gt_path(images[big]), Tracing(ids=ids, reviewed=frozenset()), write_registry)
+    write_tracing(gt_path(images[big]), Tracing(ids=ids), write_registry)
     monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", _LIMIT)
 
     out_dir, result = _export(project, tmp_path)

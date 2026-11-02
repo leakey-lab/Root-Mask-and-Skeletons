@@ -21,7 +21,7 @@ LABELS = (
     (SKELETON, "error", "Skeleton not shown"),
     (SKELETON, "none", "Prediction"),
     (CLASSES, "dirty", "Unsaved · remapped"),
-    (CLASSES, "clean", "GT · 12/15 checked"),
+    (CLASSES, "clean", "GT"),
     (CLASSES, "none", "No class labels"),
 )
 
