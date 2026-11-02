@@ -1569,6 +1569,14 @@ Eight passes, not yet released:
   as pre-commit already ran it.
 
 ### Scientific output changes
+- **The area dashboard's charts and Export CSV tables are the length dashboard's
+  (2026-11-02; see *Changed*).** No value in `root_lengths.csv` / `root_areas.csv` and no
+  pixel changes; only what the area dashboard shows and exports differs. Growth Over Time
+  draws the selected tubes and the field average (dates within 3 days merged, ±1 SD)
+  instead of every tube, and `root_area_time_*.csv` holds those rows. The Depth Profile is
+  one line per date over 10-position depth intervals: `root_area_profile_*.csv` (mean area
+  per position) is gone, and `root_area_lines_*.csv` holds the interval statistics. The
+  Depth Profile Grid (`root_area_faceted_*.csv`) is new. Totals by Tube is unchanged.
 - **Correct: a point clicked onto a picked skeleton branch joins the branch's end nearest
   the click (2026-11-02, owner bug report).** The GT skeletons saved after one kind of
   gesture change: a branch picked with Select, then a Polyline click or double-click that

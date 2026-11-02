@@ -48,10 +48,9 @@ LOADING_DELAY_MS = 250
 
 #: The Growth Over Time legend of either dashboard: the store holds None (automatic: the
 #: dashboard decides from the number of tubes) or the user's choice, which the toggle
-#: button flips and which is kept across views. The ids are those of the page both
+#: button flips and which is kept across views. The id is that of the page both
 #: dashboards share (:mod:`.dash_metric_layout`).
 LEGEND_STORE_ID = "legend-visible-store"
-LEGEND_TOGGLE_ID = "toggle-legend-btn"
 
 # The strip, its caret and its visibility change in the browser, in the click's own
 # frame. As server callbacks their responses raced the new figure's: the chart was
