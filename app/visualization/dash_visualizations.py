@@ -1,7 +1,7 @@
 """
 Figure builders for the Dash root-metric dashboards.
 
-``DashVisualizations`` holds every chart of the length dashboard. It is
+``DashVisualizations`` holds the charts of the metric dashboards (length and area). It is
 metric-agnostic (AR-15): the metric label and unit come from the processor, and
 every aggregate comes from the DataCache, so the same builders can chart root
 area. Figures are memoized per instance because the data is immutable while a
@@ -140,7 +140,7 @@ def stacked_bar_figure(cache, label: str, unit: str) -> go.Figure:
 
 class DashVisualizations:
     """
-    Mixin class providing visualization methods for DashApp.
+    Mixin class providing visualization methods for MetricDashApp.
     Should be used as a mixin with a class that has:
     - self.data_cache: DataCache instance
     - self.data_processor: MetricDataProcessor instance (its ``metric_label`` and
@@ -441,7 +441,8 @@ class DashVisualizations:
     ) -> go.Figure:
         """
         Create a faceted depth profile visualization showing horizontal bar charts
-        of root length by depth for each date-tube combination with 10-position binning.
+        of the root metric (length or area) by depth for each date-tube combination
+        with 10-position binning.
 
         Args:
             selected_tubes: List of tube numbers to display (up to 6)

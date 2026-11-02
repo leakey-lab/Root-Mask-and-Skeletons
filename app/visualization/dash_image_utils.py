@@ -1,5 +1,5 @@
 """
-Image utilities for the Growth-Lines hover panel of the length dashboard.
+Image utilities for the Growth-Lines hover panel of the metric dashboards (length and area).
 
 * :class:`ImageIndex` maps ``(tube, position, "YYYY.MM.DD")`` to an image path. It
   snapshots the image manager's names when the dashboard opens but parses them
@@ -147,7 +147,7 @@ class ImageIndex(Mapping[ImageKey, str]):
     def parse_in_background(self) -> threading.Thread:
         """Parse the names on a daemon thread now instead of on first use.
 
-        The length dashboard calls this once its first chart has been sent: the
+        A metric dashboard calls this once its first chart has been sent: the
         names are parsed while the browser draws it, and the first Depth Profile
         view no longer waits for them (~140 ms for 46k names). A lookup meanwhile
         waits for the same parse (one lock), never runs a second one.

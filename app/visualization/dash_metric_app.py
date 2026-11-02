@@ -1,5 +1,5 @@
 """
-Metric dashboards (length and area) (Dash): one app over one metric CSV.
+Metric dashboards (Dash, length and area): one app over one metric CSV.
 
 :class:`MetricDashApp` builds the app and holds what its parts share: the data
 (:class:`.dash_data_cache.DataCache`), the figures (the
