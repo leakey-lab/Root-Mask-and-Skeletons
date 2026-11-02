@@ -88,7 +88,7 @@ def _takes_click_focus(widget: QWidget) -> bool:
 
 def _attr_name(window, widget: QWidget) -> str:
     """The window attribute naming ``widget``, else its class, object name and text."""
-    for attr in ("gt_classes_button", "gt_export_button", "gt_remove_button"):
+    for attr in ("gt_classes_button", "gt_export_button", "gt_empty_button", "gt_remove_button"):
         if getattr(window, attr, None) is widget:
             return attr
     text = getattr(widget, "text", lambda: "")()
@@ -145,6 +145,7 @@ def test_no_new_correct_top_bar_control_takes_the_keyboard_on_a_click(window):
     offenders = _topbar_click_focus(window)
     assert set(offenders) - set(KNOWN_CLICK_FOCUS) == set()
     assert "gt_remove_button" not in offenders  # Remove GT… leaves the keys on the canvas
+    assert "gt_empty_button" not in offenders  # and so does Mark empty
 
 
 def test_classes_and_export_dataset_leave_the_keyboard_on_the_canvas(window):

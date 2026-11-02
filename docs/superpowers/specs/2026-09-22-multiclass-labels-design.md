@@ -5,6 +5,9 @@ written spec pending user review.
 **Amended 2026-11-01:** the per-class "checked" (`reviewed`) state and the complete-only
 export filter are superseded (owner decision "Tick = active class"); see the dated notes in
 §1.2, §1.3, §3.2-§3.4, §4, §5.3, §5.4 and §6.
+**Amended 2026-11-02:** **Mark empty** on the Correct page saves an empty labels file for an
+image with none of the classes (owner decision "yes empty label file is necessary"); see the
+notes in §1.3 and §3.4.
 **Branch:** `feat/multiclass-labels`, rebased on `1fb1b13` (tracing-editor overhaul, skeleton dock fix, opaque canvas background).
 **Worktree:** `D:\Root-Mask-and-Skeletons-gt`.
 
@@ -71,6 +74,14 @@ convention as `mask/`).
 > **Note 2026-11-01:** there is no "checked" state any more (see §3.4). A saved file with
 > nothing painted is still a negative example, and Export dataset exports every image with a
 > GT file.
+
+> **Note 2026-11-02 (owner decision "yes empty label file is necessary"):** since 2026-11-01
+> an image nobody painted on has nothing unsaved, so Save wrote no file for it. **Mark empty**
+> (the Correct page's top bar, next to Remove GT…) saves `gt/<stem>.png` with every pixel
+> background (id 0): "checked, none of the classes". It saves only the class labels, through
+> the normal save, and it is on only while the class labels are untouched, `gt/classes.json`
+> is valid and no labels file is saved or kept for the image, so it never replaces saved labels.
+> Remove GT… deletes the file again.
 - Read/write with **Pillow** (mode `P`, text chunk via `PngInfo`) through Python file handles
   (non-ASCII Windows paths work). Writes are atomic: `<path>.tmp` then `os.replace`.
 - Verified in the venv: a palette PNG round-trips exact class ids and the text chunk.
@@ -199,6 +210,9 @@ number key hint, colour swatch, name, **checked ✓** checkbox. Active row highl
 > list is ignored), the status chip shows no "n/m checked", and Export dataset has no
 > complete-only filter (§4). (From 2026-10-30 to 2026-11-01 the box was ticked by hand
 > only: painting did not tick it.)
+>
+> **Note 2026-11-02:** "checked, none present" is now an action of its own: **Mark empty**
+> saves an empty labels file (see the note in §1.3).
 
 ### 3.5 Keys
 

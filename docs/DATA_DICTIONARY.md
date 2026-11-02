@@ -237,9 +237,11 @@ chunk `sprouts_gt` holds JSON: `{"v": 1, "classes": {"<id>": "<key>", ...}}`, th
 id-to-key map the file was written with. Files saved before 2026-11-01 also hold a
 `"reviewed": ["<key>", ...]` list (the classes once ticked as fully annotated); the app no
 longer writes it and ignores it when it reads such a file. A saved file with nothing
-painted is a valid negative example. Since 2026-11-01 Correct writes no file for an image
-that was not edited, so a fresh image cannot get an empty file directly (save painted
-labels, Clear them, and save again).
+painted (every pixel `0`) means "checked, none of the classes": a valid negative example,
+exported like any other labels file. Save writes no file for an image that was not edited
+(since 2026-11-01); **Mark empty** on the Correct page (since 2026-11-02) writes this empty
+file for an image without one, with `gt/classes.json` when it is missing, and never
+replaces an existing labels file.
 
 ### `gt/classes.json`
 

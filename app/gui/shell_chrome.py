@@ -9,7 +9,7 @@ bottom (:class:`StatusLine`, 28 px)::
 Topbar
     Five stages: Library, then the measurement pipeline: Generate, Correct (the
     mask, the skeleton and the class labels of an image on one canvas; its page
-    holds the GT actions Classes…, Export dataset… and Remove GT…), Measure,
+    holds the GT actions Classes…, Export dataset…, Mark empty and Remove GT…), Measure,
     Visualize.
     Each stage button forwards to its MainWindow handler and shows its per-stage
     actions on the right (a stack sized to the CURRENT page only).
@@ -367,15 +367,20 @@ class ShellTopbar(QFrame):
         # Remove GT…: the Correct page owns it (on while an image is open and nothing is
         # unsaved) and asks before it deletes the image's GT files.
         mw.gt_remove_button = mw.correct_editor.actions.remove_button
+        # Mark empty: the Correct page owns it too (on while the image's class labels are
+        # untouched and no labels file is saved or kept for it).
+        mw.gt_empty_button = mw.correct_editor.actions.empty_button
 
         pages = {
             "Library": (mw.action_bar_view_seg,),
             "Generate": (mw.generate_all_button, mw.generate_button),
-            # The GT actions (the class editor, the dataset export, Remove GT…); image
-            # actions live in the dock (Save, the one Clear, O18).
+            # The GT actions (the class editor, the dataset export, then the open image's
+            # Mark empty and Remove GT…); image actions live in the dock (Save, the one
+            # Clear, O18).
             "Correct": (
                 mw.gt_classes_button,
                 mw.gt_export_button,
+                mw.gt_empty_button,
                 mw.gt_remove_button,
             ),
             "Measure": (mw.calculate_length_button, mw.calculate_area_button),

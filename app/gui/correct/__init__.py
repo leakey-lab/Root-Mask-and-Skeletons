@@ -41,7 +41,7 @@ Modules (consumers import the submodules; this package imports nothing):
 - ``side_panels``: ``SidePanels``, the side card: the Layers panel above the class panel
   (shown while the class labels are edited), and the class panel kept in step with them.
 - ``actions``: ``PageActions``, the page's file actions (Load skeleton file, Load
-  prediction, Classes…, Remove GT…) and its save reports and notices.
+  prediction, Classes…, Remove GT…, Mark empty) and its save reports and notices.
 - ``chip``: what the status chip shows (file name, worst layer state, library position,
   hint).
 - ``read_ahead``: ``ReadAhead``, the next images read on a worker thread. Qt-free.

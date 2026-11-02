@@ -105,8 +105,9 @@ Eight passes, not yet released:
   Export dataset no longer has its "Only fully checked images" option. Since a tick is no
   longer an edit, an image you did not paint on can no longer get an empty `gt/<stem>.png`
   (a negative example): Save writes only edited layers (O2), so the only way to get one is to
-  save painted labels, Clear them, and save again. This replaces the hand ticks of
-  2026-10-30 (below). See *Scientific output changes*.
+  save painted labels, Clear them, and save again (since 2026-11-02, **Mark empty** saves
+  one: see *Added*). This replaces the hand ticks of 2026-10-30 (below). See *Scientific
+  output changes*.
 - **Correct, skeleton layer: Delete and branch edits erase only the picked branch's own
   pixels (S03-01, 2026-10-31, owner decision #1).** Select kept only the branch's
   simplified line, and Delete or an edit (drag a point, then Enter) erased a 9 px band along
@@ -831,6 +832,24 @@ Eight passes, not yet released:
   3-7x faster; first GPU run no longer spends 40-70 s in cuDNN autotuning.
 
 ### Added
+- **Correct, Classes layer: Mark empty saves empty class labels (2026-11-02, owner decision
+  "yes empty label file is necessary").** Since the class tick became the active class
+  (2026-11-01, *Fixed*), an image nobody painted on had nothing unsaved, so it got no labels
+  file and Export dataset left it out: a negative example ("checked, none of the classes")
+  took painting, Clear and a second save. **Mark empty**, on the Correct page of the top bar
+  between Export dataset… and Remove GT…, saves `gt/<stem>.png` with every pixel background
+  (id 0), and `gt/classes.json` first when it is missing, through the normal save: the
+  toast, the "GT" state and the Library's labels mark follow. It saves only the class labels:
+  unsaved mask or skeleton edits stay unsaved and do not turn it off. It is on only while an
+  image is open, its class labels are untouched (nothing painted that Save would write),
+  `gt/classes.json` is valid and no labels file is saved or kept for the image (also none
+  that could not be read or has another size), so it never replaces saved labels; its tooltip
+  says why when it is off. No shortcut and no question: Remove GT… deletes the file again.
+  The label is short and has no icon so that the top bar keeps the window within its 900 px
+  minimum-width budget (879 px with it; "Save empty labels" with an icon needed 937 px). No
+  CSV value, mask or skeleton pixel or existing GT file changes: the files it writes are
+  ordinary empty labels files, exported like any other, so this is not listed under
+  *Scientific output changes*.
 - `scripts/build.ps1 -DistPath / -WorkPath` and, for both build scripts,
   `SPROUTS_BUILD_DISTPATH` / `SPROUTS_BUILD_WORKPATH`: build outside the checkout
   (2026-10-29).

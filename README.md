@@ -237,6 +237,7 @@ the two are independent.
 | Fix the model's mask of an image | Mask layer (area) | `gt/mask/<stem>.png` |
 | Fix the model's skeleton of an image | Skeleton layer (length) | `gt/skeletons/<stem>.png` |
 | Make labels to train a model | Classes layer | `gt/<stem>.png` (with `gt/classes.json`) |
+| Label an image that shows none of the classes | **Mark empty** (top bar) | `gt/<stem>.png`, all background |
 | Get the prediction back | **Load prediction** in the layer, or **Remove GT…** for the whole image | removes or replaces the GT file; `mask/` and `skeletons/` never change |
 
 Measure reads GT first and falls back to the prediction (last CSV column `Source`). The
@@ -455,10 +456,11 @@ at 100 %, whichever is smaller.
 **GT actions** (the Correct page of the top bar): **Classes…** adds, renames, recolours or
 retires the project's classes (`gt/classes.json`; the gear of the class panel opens it
 too). **Export dataset…** saves the open image's edits first, then exports the images and
-their class-id label images (`masks/`). **Remove GT…** (on while an image is open and nothing is unsaved)
-asks, then deletes the image's `gt/mask/<stem>.png`, `gt/skeletons/<stem>.png` and
-`gt/<stem>.png` and reopens it from its predictions; the predictions in `mask/` and
-`skeletons/` and `gt/classes.json` are kept. This cannot be undone.
+their class-id label images (`masks/`). **Mark empty** saves the open image's class labels
+with nothing labelled (see *Class labels* below). **Remove GT…** (on while an image is open
+and nothing is unsaved) asks, then deletes the image's `gt/mask/<stem>.png`,
+`gt/skeletons/<stem>.png` and `gt/<stem>.png` and reopens it from its predictions; the
+predictions in `mask/` and `skeletons/` and `gt/classes.json` are kept. This cannot be undone.
 
 ### Class labels (GT for training)
 
@@ -466,7 +468,7 @@ The **class labels** are the third layer of *Correct* (key `G`, row "Classes"): 
 ground truth that you paint for training segmentation models (for example, roots vs nodules).
 They are independent of every model in the app: they never start from the ResNet mask and
 never read or write `mask/` or `skeletons/`. They label classes; they do not measure them.
-**Classes…**, **Export dataset…** and **Remove GT…** are on the Correct page.
+**Classes…**, **Export dataset…**, **Mark empty** and **Remove GT…** are on the Correct page.
 
 **Files** (next to the images, in the loaded folder):
 
@@ -482,9 +484,14 @@ never read or write `mask/` or `skeletons/`. They label classes; they do not mea
   and turns GT saving off until it is fixed.
 
 A saved file means the image was annotated: Export dataset exports every image that has
-one, also a file with nothing painted (all background, a valid negative example). Correct
-writes no file for an image you did not edit, so a fresh image cannot get an empty file
-directly: save painted labels, Clear them, and save again.
+one, also a file with nothing painted. A file that is all background means "checked, none
+of the classes": a valid negative example for training. Save writes no file for an image
+you did not paint on, so for an image that shows none of the classes, click **Mark empty**
+(Correct page, top bar): it saves `gt/<stem>.png` with nothing labelled (and
+`gt/classes.json` when it is missing). It saves only the class labels: unsaved mask or
+skeleton edits stay unsaved. It is on only while the image's class labels are untouched,
+`gt/classes.json` is valid and the image has no labels file yet, so it never replaces saved
+labels; its tooltip says why when it is off. **Remove GT…** deletes the file again.
 
 **Painting:** the class labels use Correct's Brush, Eraser and Fill, with the class panel
 under the Layers panel while they are edited. The brush paints the active class and replaces whatever was

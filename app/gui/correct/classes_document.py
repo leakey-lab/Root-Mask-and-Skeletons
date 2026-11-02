@@ -14,7 +14,9 @@ saved). Save always writes
 the file, ``gt/classes.json`` first when missing (its failure keeps the file). An invalid
 registry makes it read-only (its status says so; the open sends no notice: the layer's first
 refused edit does, once per image); a file that cannot be read or has another size opens empty, is
-not shown and is kept unless a save replaces it. The owner changes the plane only through
+not shown and is kept unless a save replaces it. The page's Mark empty saves an empty file
+("checked, none of the classes"), offered only while :meth:`empty_save_refusal` is ""
+(2026-11-02). The owner changes the plane only through
 ``history``, then calls ``count_patch`` and ``touch``. The revision, the baseline, the save
 error and Discard are :class:`app.editing.planes.PlaneDocument`'s.
 """
@@ -45,6 +47,7 @@ __all__ = ["DEFAULT_BRUSH_SIZE", "ClassesDocument", "ClassesRead", "ClassesSaveR
 
 DEFAULT_BRUSH_SIZE = 8  # a class's brush until it is sized (the raster layers' default)
 REGISTRY_LABEL = f"{GT_DIRNAME}/{GT_CLASSES_FILENAME}"
+EMPTY_CLOSED = "Open an image to mark it empty"  # why no empty save: nothing open
 _KEPT = "they are not shown and are kept unless you save over them"
 _NOT_SHOWN = {  # ClassesRead.error -> the open notice and the status tooltip
     "size": f"Saved class labels do not match the image size: {_KEPT}",
@@ -108,6 +111,22 @@ class ClassesDocument(PlaneDocument):
     def lossy_remap(self) -> bool:
         """True from an open that sent unknown classes to Ignore until a save writes it."""
         return bool(self.warnings)
+
+    def empty_save_refusal(self) -> str:
+        """Why a save now would not write an empty file where there is none ("" when it would:
+        the registry is valid, no file is saved or kept for the image and nothing is unsaved,
+        so the plane is all background). The page's Mark empty asks it."""
+        if not self.is_open():
+            return EMPTY_CLOSED
+        if self.registry_error:
+            return f"{REGISTRY_LABEL} is invalid: fix the file, then reopen the image"
+        if self._not_loaded:
+            return "Saved class labels could not be shown: an empty save would replace them"
+        if self.has_saved_file:
+            return "This image already has class labels"
+        if self.is_dirty() or self._counts[GT_BACKGROUND_ID] != self.history.plane.size:
+            return "Save or discard your painted class labels first"
+        return ""
 
     def status(self) -> LayerStatus:
         """Read-only > not saved (to the next edit) > unsaved > not shown > GT > none."""

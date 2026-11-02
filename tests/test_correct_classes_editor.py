@@ -1102,9 +1102,11 @@ def test_the_correct_page_holds_the_gt_actions(window_with_project):
         # O18: no Clear here, the page's one Clear is in the dock
         "Classes…",
         "Export dataset…",
+        "Mark empty",
         "Remove GT…",
     ]
     assert window.gt_remove_button is window.correct_editor.actions.remove_button
+    assert window.gt_empty_button is window.correct_editor.actions.empty_button
     assert "Trace GT" not in topbar._pages  # the stage and its page are gone (WG-T11)
 
 

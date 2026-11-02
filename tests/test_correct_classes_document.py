@@ -395,6 +395,45 @@ def test_an_empty_save_writes_a_file(gt_project):
     assert doc.status() == LayerStatus("clean", "GT", LABELS)  # as the mask and the skeleton
 
 
+def test_an_empty_save_is_offered_only_for_untouched_labels_without_a_file(gt_project):
+    """Mark empty (2026-11-02): a reason while it would write anything but an empty
+    file over no file, "" otherwise (the plane is all background then)."""
+    doc = ClassesDocument()
+    assert doc.empty_save_refusal().startswith("Open an image")
+    doc.open(gt_project.image, (W, H))
+
+    assert doc.empty_save_refusal() == "" and not doc.history.plane.any()
+    commit(doc, (10, 10, 5, 5), 1)
+    assert doc.empty_save_refusal() == "Save or discard your painted class labels first"
+    undo(doc)
+    assert doc.empty_save_refusal() == ""
+    commit(doc, (10, 10, 5, 5), 0)  # background over background: nothing to save
+    assert doc.empty_save_refusal() == ""
+
+    assert doc.save().ok
+    assert doc.empty_save_refusal() == "This image already has class labels"
+
+
+def test_an_empty_save_is_refused_while_the_registry_is_invalid(gt_project_bad_registry):
+    doc = opened(gt_project_bad_registry)
+
+    assert doc.empty_save_refusal().startswith("gt/classes.json is invalid")
+
+
+@pytest.mark.parametrize("kind", ["unreadable", "size"])
+def test_an_empty_save_is_refused_over_a_kept_file(gt_project, kind):
+    os.makedirs(os.path.dirname(gt_project.labels))
+    if kind == "unreadable":
+        with open(gt_project.labels, "wb") as fh:
+            fh.write(b"not a png")
+    else:
+        write_tracing(gt_project.labels, Tracing(np.ones((10, 10), np.uint8)), default_registry())
+
+    doc = opened(gt_project)
+
+    assert "could not be shown" in doc.empty_save_refusal()
+
+
 def test_save_writes_no_reviewed_list(gt_project):
     doc = opened(gt_project)
     commit(doc, (100, 100, 20, 20), 1)  # root pixels
