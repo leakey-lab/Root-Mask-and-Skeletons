@@ -67,7 +67,7 @@ def test_the_dashboards_bars_leave_the_label_colour_to_plotly_js(tmp_path):
     # Five dates: the second one is #4f97d1, whose labels plotly.js 4 draws white.
     cache = DataCache(DataProcessor(_five_date_csv(tmp_path, LENGTH_CSV_HEADERS)))
     area = DashAppArea(DataProcessorArea(_five_date_csv(tmp_path, AREA_CSV_HEADERS)), "")
-    for figure in (stacked_bar_figure(cache, "Length", "mm"), area.show_area_profile(1)):
+    for figure in (stacked_bar_figure(cache, "Length", "mm"), area.create_stacked_bar_chart()):
         traces = figure.to_plotly_json()["data"]
         assert traces[1]["marker"]["color"] == "#4f97d1"
         for trace in traces:

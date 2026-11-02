@@ -19,46 +19,6 @@ from tests.viz_dash_helpers import (
 )
 
 
-def _displayed_categories(figure) -> list:
-    """The x categories in the order Plotly draws them.
-
-    Plotly's default ("trace") order is the order of first appearance across the
-    traces; an "array" order puts ``categoryarray`` first.
-    """
-    seen: list = []
-    for trace in figure.data:
-        for x in trace.x:
-            if x not in seen:
-                seen.append(x)
-    order = figure.layout.xaxis.categoryorder
-    if order == "array":
-        head = list(figure.layout.xaxis.categoryarray)
-        return head + [x for x in seen if x not in head]
-    assert order in (None, "trace"), f"unexpected categoryorder {order!r}"
-    return seen
-
-
-def test_area_profile_reads_shallow_to_deep_when_a_later_date_starts_higher(tmp_path):
-    # Tube 1 was imaged from L10 on the first date and from L5 on the second. In
-    # first-appearance order the axis read L10, L20, L5: the shallowest position
-    # was drawn at the deep end.
-    from app.data_processing.data_processor_area import DataProcessorArea
-    from app.visualization.dash_app_area import DashAppArea
-
-    rows = (
-        ("T001_L010_2024.07.18", 1, 10, "2024.07.18", 1.0),
-        ("T001_L020_2024.07.18", 1, 20, "2024.07.18", 2.0),
-        ("T001_L005_2024.08.07", 1, 5, "2024.08.07", 3.0),
-        ("T001_L010_2024.08.07", 1, 10, "2024.08.07", 4.0),
-    )
-    csv = write_metric_csv(os.path.join(tmp_path, "root_areas.csv"), AREA_COLUMN, rows)
-    dashboard = DashAppArea(DataProcessorArea(csv), str(tmp_path))
-
-    figure = dashboard.show_area_profile(1)
-
-    assert _displayed_categories(figure) == ["L5", "L10", "L20"]
-
-
 def test_removing_the_last_multiselect_tube_clears_the_selection(tmp_path):
     # Multi-Select replaces the selection with the dropdown's tubes; removing the
     # last one used to leave it plotted (and listed) under an empty dropdown.

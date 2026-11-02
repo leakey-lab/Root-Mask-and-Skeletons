@@ -1,4 +1,4 @@
-"""viz-data: the Growth Over Time figures (R-VIZ X3, X4).
+"""viz-data: the Growth Over Time figures (R-VIZ X3, X4), length and area.
 
 X4: the time views are assembled as plain dicts and handed to ``go.Figure`` without
 validation. Building one ``go.Scatter`` per tube and validating everything again in
@@ -157,30 +157,6 @@ def _reference_length(charts, tubes, show_field_average, show_field_variance, sh
     return fig
 
 
-def _reference_area(area):
-    fig = go.Figure()
-    for tube in area.data_cache.tubes:
-        totals = area.data_cache.get_tube_totals(tube)
-        fig.add_trace(
-            go.Scatter(
-                x=totals.index,
-                y=totals.to_numpy(),
-                mode="lines+markers",
-                name=f"Tube {int(tube)}",
-                hovertemplate=theme.hover(
-                    "%{fullData.name}",
-                    [("Date", "%{x|%Y-%m-%d}"), ("Total Area", "%{y:.2f} mm²")],
-                ),
-            )
-        )
-    fig.update_layout(
-        title_text="Root Area Growth Over Time",
-        xaxis_title_text="Date",
-        yaxis_title_text="Total Area (mm²)",
-    )
-    return fig
-
-
 # ---- X4: same figure, built once ---------------------------------------------------
 
 
@@ -201,25 +177,22 @@ def test_the_length_time_figure_is_unchanged(charts, tubes, field, variance, leg
     assert _json(built) == _json(_reference_length(charts, tubes, field, variance, legend))
 
 
-def test_the_area_time_figure_is_unchanged(area):
-    assert _json(area._growth_over_time_figure()) == _json(_reference_area(area))
+@pytest.mark.parametrize(
+    "tubes, field, variance, legend",
+    [
+        ((1, 2, 3), True, True, True),
+        ((), True, True, True),
+        ((4, 5), False, False, True),
+        (tuple(range(1, 41)), True, True, False),
+    ],
+)
+def test_the_area_time_figure_is_unchanged(area, tubes, field, variance, legend):
+    # The area dashboard draws the length builder with the area metric: the same
+    # reference, with the area label and unit.
+    built = area._growth_over_time_figure(tubes, field, variance, legend)
 
-
-def _hover_title(trace) -> str:
-    """The hover box's first line as plotly.js shows it for ``trace`` (only the trace
-    name reference is filled in; the time hovers carry no other one in their title)."""
-    title = trace["hovertemplate"].split("<br>")[0]
-    return title.replace("%{fullData.name}", trace["name"])
-
-
-def test_the_area_time_hover_names_the_tube_once(area):
-    # S14-06: the traces are named "Tube 12", and the title was "Tube %{fullData.name}",
-    # which plotly.js showed as "Tube Tube 12".
-    figure = area._growth_over_time_figure().to_plotly_json()
-
-    assert [_hover_title(t) for t in figure["data"]] == [
-        f"<b>Tube {int(tube)}</b>" for tube in area.data_cache.tubes
-    ]
+    assert _json(built) == _json(_reference_length(area, tubes, field, variance, legend))
+    assert built.layout.title.text == "Root Area Growth Over Time"
 
 
 def test_the_time_figures_are_plotly_figures_the_memo_and_callers_can_use(charts, area):
@@ -301,3 +274,28 @@ def test_the_page_draws_the_time_view_with_the_automatic_legend(tmp_path):
         changed=["view-selector.value"],
     )  # fmt: skip
     assert out["main-graph"]["figure"]["layout"]["showlegend"] is True
+
+
+# ---- the area dashboard shares the legend rule and the toggle ----------------------
+
+
+def test_the_area_legend_follows_the_same_automatic_rule(area):
+    # The area app is the length dashboard with the area metric: the same 30-tube rule
+    # and the same explicit choices (these cases stood in the deleted area-only legend test).
+    few = list(range(1, AUTO_LEGEND_MAX_TUBES + 1))
+    many = list(range(1, AUTO_LEGEND_MAX_TUBES + 2))
+
+    assert area.show_growth_over_time(few, show_legend=None).layout.showlegend is True
+    hidden = area.show_growth_over_time(many, show_legend=None).layout
+    assert hidden.showlegend is False
+    assert hidden.margin.r == theme.MARGIN_RIGHT_NO_LEGEND
+    assert area.show_growth_over_time(many, show_legend=True).layout.showlegend is True
+    assert area.show_growth_over_time(few, show_legend=False).layout.showlegend is False
+
+
+def test_the_area_toggle_button_flips_the_stored_legend_choice(area):
+    toggle = "toggle-legend-btn.n_clicks"
+    store = "legend-visible-store.data"
+    for clicks, choice, expected in ((1, None, False), (2, False, True)):
+        _, out = call_callback(area.app, store, {toggle: clicks, store: choice}, [toggle])
+        assert out["legend-visible-store"]["data"] is expected  # no tube selected: shown at first
