@@ -922,6 +922,24 @@ Eight passes, not yet released:
   app version, commit, model SHA-256, calibration and runtime precision.
 
 ### Changed
+- **The area dashboard has the length dashboard's views and controls (2026-11-02).** One
+  class, `MetricDashApp` (`app/visualization/dash_metric_app.py`), now builds both
+  dashboards; `DashApp` and `DashAppArea` only set their page title, shell and file-name
+  slug. The area dashboard keeps *Totals by Tube* and gains the length views: *Growth Over
+  Time* with the Multi-Select, Range and Manual Entry tube tabs, Clear All / Select All,
+  Show Field Average, Show Field Variance Shading and Toggle Legend; *Depth Profile* with
+  one line per date over 10-position depth intervals and the photo on hover (the area
+  window now gets the image manager); and *Depth Profile Grid* (date rows by up to six tube
+  columns, the tube against the field average). The area view of grouped bars of mean area
+  per position, its all-tubes time view and its floating *Toggle Legend* button are gone.
+  *Export CSV* of the area dashboard now writes the length dashboard's tables for each view
+  (`root_area_<view>_<timestamp>.csv`): field average and per-tube totals for Growth Over
+  Time, depth-interval statistics for Depth Profile, tube and field interval means for the
+  grid. The modules `dash_length_layout.py`, `dash_length_views.py` and
+  `dash_length_callbacks.py` are now `dash_metric_layout.py`, `dash_metric_views.py` and
+  `dash_metric_callbacks.py`; `dash_export.position_means`,
+  `DashboardShell.register_legend_toggle` and `DashboardSpec.needs_image_manager` are
+  deleted. No value in `root_lengths.csv` / `root_areas.csv` and no pixel changes.
 - **Toasts are capsules (2026-10-31, owner choice from mockups that combined Sonner and the
   Coloplast design system).** A toast is a pill instead of a card with a coloured stripe on
   its left: a ring in the kind's colour around its glyph counts the lifetime down, a save's
