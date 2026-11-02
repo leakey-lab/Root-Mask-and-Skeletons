@@ -6,9 +6,13 @@ REM Usage:   scripts\build.bat [/allow-missing-models]
 REM Works from any folder: paths are derived from this file's location. Uses
 REM %SPROUTS_BUILD_PYTHON% when set, else venv\Scripts\python.exe. Exits with a
 REM non-zero code on any failure. Set SPROUTS_BUILD_NO_PAUSE=1 to skip the final pause.
+REM Output goes to %SPROUTS_BUILD_DISTPATH% and %SPROUTS_BUILD_WORKPATH% when set,
+REM else to dist\ and build\ in the repository.
 
 for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 if defined SPROUTS_BUILD_PYTHON (set "PY=%SPROUTS_BUILD_PYTHON%") else (set "PY=%ROOT%\venv\Scripts\python.exe")
+if defined SPROUTS_BUILD_DISTPATH (set "DISTPATH=%SPROUTS_BUILD_DISTPATH%") else (set "DISTPATH=%ROOT%\dist")
+if defined SPROUTS_BUILD_WORKPATH (set "WORKPATH=%SPROUTS_BUILD_WORKPATH%") else (set "WORKPATH=%ROOT%\build")
 set "ALLOW_MISSING="
 if /i "%~1"=="/allow-missing-models" set "ALLOW_MISSING=1"
 
@@ -40,15 +44,15 @@ if errorlevel 1 (
 )
 
 echo Building ^(5-15 minutes on the first run^)...
-call "%PY%" -m PyInstaller --noconfirm --clean --distpath "%ROOT%\dist" --workpath "%ROOT%\build" "%ROOT%\scripts\build_executable.spec"
+call "%PY%" -m PyInstaller --noconfirm --clean --distpath "%DISTPATH%" --workpath "%WORKPATH%" "%ROOT%\scripts\build_executable.spec"
 if errorlevel 1 (
     echo Build failed: PyInstaller reported an error ^(see the messages above^).
     goto :fail
 )
 
 echo.
-echo Build completed successfully: %ROOT%\dist\SPROUTS\SPROUTS.exe
-echo To distribute, zip the whole dist\SPROUTS folder.
+echo Build completed successfully: %DISTPATH%\SPROUTS\SPROUTS.exe
+echo To distribute, zip the whole %DISTPATH%\SPROUTS folder.
 call :pause_if_interactive
 exit /b 0
 

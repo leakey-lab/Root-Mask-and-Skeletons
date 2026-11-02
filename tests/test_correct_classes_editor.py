@@ -28,7 +28,7 @@ import cv2
 import numpy as np
 import pytest
 from PyQt6.QtCore import QEvent, QSettings, Qt
-from PyQt6.QtGui import QImage, QKeySequence
+from PyQt6.QtGui import QColor, QImage, QKeySequence
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (
     QApplication,
@@ -59,6 +59,7 @@ from app.gui.editor_prompts import CANCEL, DISCARD, SAVE
 from app.gui.export_dataset_dialog import ExportDatasetDialog
 from app.gui.paint_canvas import pixmap_to_argb_array
 from app.project_layout import ProjectLayout
+from tests.box_titles import record_titles, title_of
 from tests.correct_support import (
     NO_MODS,
     H,
@@ -71,6 +72,7 @@ from tests.correct_support import (
     record,
     settle,
 )
+from tests.gt_goldens_support import write_legacy_tracing
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import wait_until as _spin_until
 from tests.window_support import build_window, open_folder, quiet_window
@@ -127,12 +129,27 @@ def ids(editor) -> np.ndarray:
     return editor.layers[CLASSES].document.history.plane
 
 
-def ticked(editor) -> frozenset[str]:
-    return editor.layers[CLASSES].document.ticked()
+def ticked(editor) -> list[str]:
+    """The ticked boxes of the page's class panel."""
+    return editor.class_panel.ticked_keys()
+
+
+def highlighted(editor) -> list[str]:
+    """The highlighted rows of the page's class panel."""
+    return [key for key, row in editor.class_panel._rows.items() if row._active]
+
+
+def assert_one_tick(editor, key: str) -> None:
+    """Owner decision 2026-11-01: exactly one box is ticked, on the highlighted row, and it is
+    the class the brush paints (the ring's colour too)."""
+    layer = editor.layers[CLASSES]
+    assert ticked(editor) == [key] == highlighted(editor), (ticked(editor), highlighted(editor))
+    assert layer.active_class() == key
+    assert layer.brush_color == QColor(layer.registry().by_key(key).color)
 
 
 def box(editor, key: str) -> QCheckBox:
-    """The "checked" box of class ``key`` on the page's class panel."""
+    """The box of class ``key`` on the page's class panel (ticked: the active class)."""
     widget = editor.class_panel._rows[key].checkbox
     assert isinstance(widget, QCheckBox)
     return widget
@@ -172,7 +189,7 @@ def write_unknown_class(image: str) -> bytes:
     plane[5:15, 5:15] = 4
     plane[30:40, 30:40] = 1
     path = ProjectLayout.for_image(image).gt_path("a")
-    write_tracing(path, Tracing(plane, frozenset({"root"})), other)
+    write_tracing(path, Tracing(plane), other)
     with open(path, "rb") as fh:
         return fh.read()
 
@@ -484,7 +501,7 @@ def test_the_brush_paints_in_the_active_class_colour(page):
     press(page, "2")  # nodule
     assert page.layers[CLASSES].brush_color.name() == "#ff7eb6"
     press(page, "1")
-    assert page.layers[CLASSES].brush_color.name() == "#5fd6a0"
+    assert page.layers[CLASSES].brush_color.name() == "#56b4e9"
 
 
 def test_b_tap_requests_the_brush_of_the_active_raster_layer(make_editor, project):
@@ -614,7 +631,9 @@ def test_the_classes_row_says_what_is_saved(page):
     paint(page, (20, 100), (80, 110))
     assert row_text(page, CLASSES) == "Unsaved"
     assert page.save()
-    assert row_text(page, CLASSES) == "GT · 1/3 checked"
+    assert row_text(page, CLASSES) == "GT"  # as the mask and the skeleton
+    box(page, "nodule").click()  # picks a class: nothing new to save
+    assert row_text(page, CLASSES) == "GT" and not page.has_unsaved_changes()
 
 
 # ============================================================================== saving
@@ -679,13 +698,14 @@ def test_an_untouched_image_writes_no_class_labels(make_editor, project, layout,
     assert not os.path.exists(layout.gt_path("a")) and ("Nothing unsaved", "info") in notices
 
 
-def test_a_tick_alone_is_saved(page, layout):
-    page.class_panel.reviewed_changed.emit("nodule", True)
-    assert page.has_unsaved_changes()
+def test_a_box_click_alone_is_no_edit(page, layout):
+    """The box was a "checked" tick, an edit saved into the file, until 2026-11-01: now it
+    picks the class, and Save has nothing to write."""
+    box(page, "nodule").click()
+    assert_one_tick(page, "nodule")
+    assert not page.has_unsaved_changes()
 
-    assert page.save()
-    tracing = read_tracing(layout.gt_path("a"))
-    assert tracing.reviewed == frozenset({"nodule"}) and not tracing.ids.any()
+    assert page.save() is False and not os.path.exists(layout.gt_path("a"))
 
 
 # =============================================================================== PgDn
@@ -731,9 +751,7 @@ def test_pgdn_saves_a_lossless_remap_silently(make_editor, project, layout, noti
     swapped["classes"][0]["id"], swapped["classes"][1]["id"] = 2, 1  # root = 2, nodule = 1
     plane = np.zeros((H, W), np.uint8)
     plane[5:15, 5:15] = 2  # root in the other project's ids
-    write_tracing(
-        layout.gt_path("a"), Tracing(plane, frozenset({"root"})), Registry.from_dict(swapped)
-    )
+    write_tracing(layout.gt_path("a"), Tracing(plane), Registry.from_dict(swapped))
     editor = make_editor(project.a, project.folder)
     moves = record(editor.navigate_requested)
     assert editor.layers[CLASSES].is_dirty() and not [n for n in notices if n[1] == "warn"]
@@ -756,12 +774,12 @@ def test_an_invalid_registry_locks_only_the_classes_layer(
     paint(editor, (20, 100), (80, 110))
     paint(editor, (20, 120), (80, 120))
     editor.clear_active_layer()
-    editor.class_panel.reviewed_changed.emit("nodule", True)
+    box(editor, "nodule").click()  # picks the class: no edit, so not refused
     editor.edit_classes()  # refused too, without a dialog (the guard fails on one)
 
     classes = editor.layers[CLASSES]
     assert classes.status().label == "Read-only" and not classes.is_dirty()
-    assert not ids(editor).any() and not box(editor, "nodule").isChecked()
+    assert not ids(editor).any() and ticked(editor) == ["nodule"]
     refusals = [n for n in notices if n[0].startswith("Editing is off: gt/classes.json is invalid")]
     assert len(refusals) == 1 and refusals[0][1] == "danger"
     # One danger notice per image: the open's read-only notice is not shown as well.
@@ -1084,9 +1102,11 @@ def test_the_correct_page_holds_the_gt_actions(window_with_project):
         # O18: no Clear here, the page's one Clear is in the dock
         "Classes…",
         "Export dataset…",
+        "Mark empty",
         "Remove GT…",
     ]
     assert window.gt_remove_button is window.correct_editor.actions.remove_button
+    assert window.gt_empty_button is window.correct_editor.actions.empty_button
     assert "Trace GT" not in topbar._pages  # the stage and its page are gone (WG-T11)
 
 
@@ -1119,6 +1139,43 @@ def test_export_gt_dataset_saves_the_correct_editor_first(window_with_project, m
     monkeypatch.setattr(editor_prompts, "ask_unsaved", lambda *args: CANCEL)
     window.export_gt_dataset()
     assert len(opened) == 1  # Cancel: no export without the edits
+
+
+def test_export_gt_dataset_refuses_an_invalid_registry_before_the_prompt(
+    window_with_project, monkeypatch
+):
+    # C6-03: gt/classes.json is read before Save / Discard is asked, so a bad file costs no
+    # edits; it is read again after the prompt, as a Save there can write it.
+    import app.gui.export_dataset_dialog as edd
+
+    window, editor = window_with_project.window, window_with_project.editor
+    folder = ProjectLayout.for_image(window_with_project.project.a).root
+    opened, asked, toasts = [], [], []
+    monkeypatch.setattr(
+        edd.ExportDatasetDialog, "exec", lambda dialog: opened.append(dialog.registry) or 0
+    )
+    monkeypatch.setattr(window, "notify", lambda message, kind="success", **_k: toasts.append(kind))
+    editor.set_active_layer(CLASSES)
+    paint(editor, (20, 100), (80, 110))
+    Path(registry_path(folder)).parent.mkdir(parents=True, exist_ok=True)
+    Path(registry_path(folder)).write_text("{", encoding="utf-8")
+    monkeypatch.setattr(editor_prompts, "ask_unsaved", lambda *args: asked.append(args) or DISCARD)
+
+    window.export_gt_dataset()
+
+    assert asked == [] and opened == [] and toasts == ["danger"]
+    assert editor.has_unsaved_changes()  # the edits stay
+
+    custom = default_registry().add(key="dead_root", name="Dead root", color="#7f5af0")
+    save_registry(folder, default_registry())
+
+    def rewrite_at_the_prompt(*args):
+        save_registry(folder, custom)  # as a Save at the prompt can
+        return DISCARD
+
+    monkeypatch.setattr(editor_prompts, "ask_unsaved", rewrite_at_the_prompt)
+    window.export_gt_dataset()
+    assert opened == [custom]
 
 
 def test_the_window_handlers_follow_the_gt_files(window_with_project, monkeypatch):
@@ -1182,7 +1239,7 @@ def test_a_class_label_save_shows_one_toast_the_pages_summary(window_with_projec
 # ==================================================================== the class panel
 def test_tab_reaches_the_gear_then_each_box_in_class_order(page):
     panel = page.class_panel
-    wanted = [panel._gear, *(box(page, key) for key in KEYS)]
+    wanted = [panel._gear, *(box(page, key) for key in (*KEYS, "ignore"))]  # Ignore's too
 
     chain = walk(page)
 
@@ -1196,25 +1253,26 @@ def test_a_click_on_the_class_panel_never_takes_the_focus(page):
     for widget in (panel, *panel.findChildren(QWidget)):
         assert not widget.focusPolicy() & Focus.ClickFocus, widget
     assert panel._gear.focusPolicy() == Focus.TabFocus
-    for key in KEYS:
+    for key in (*KEYS, "ignore"):
         assert box(page, key).focusPolicy() == Focus.TabFocus
         assert panel._rows[key].focusPolicy() == Focus.NoFocus
 
 
-def test_space_ticks_the_focused_box_and_the_focus_stays_for_the_next_one(page):
+def test_space_on_a_focused_box_picks_its_class_and_the_focus_stays_for_the_next_one(page):
     nodule, root_tip = box(page, "nodule"), box(page, "root_tip")
     nodule.setFocus(Qt.FocusReason.TabFocusReason)
 
     QTest.keyClick(nodule, Qt.Key.Key_Space)
 
-    assert nodule.isChecked() and ticked(page) == {"nodule"}
-    assert page.has_unsaved_changes() and nodule.hasFocus()
+    assert_one_tick(page, "nodule")
+    assert not page.has_unsaved_changes() and nodule.hasFocus()
     QTest.keyClick(nodule, Qt.Key.Key_Tab)
     assert root_tip.hasFocus()
     QTest.keyClick(root_tip, Qt.Key.Key_Space)
-    assert ticked(page) == {"nodule", "root_tip"}
-    QTest.keyClick(root_tip, Qt.Key.Key_Space)
-    assert ticked(page) == {"nodule"} and not root_tip.isChecked()
+    assert_one_tick(page, "root_tip")
+    QTest.keyClick(root_tip, Qt.Key.Key_Space)  # the ticked box again: it stays ticked
+    assert_one_tick(page, "root_tip")
+    assert root_tip.hasFocus()
 
 
 def test_a_click_on_a_box_hands_the_keys_back_to_the_canvas(page):
@@ -1224,16 +1282,51 @@ def test_a_click_on_a_box_hands_the_keys_back_to_the_canvas(page):
 
     QTest.mouseClick(nodule, Qt.MouseButton.LeftButton)
 
-    assert nodule.isChecked() and ticked(page) == {"nodule"}
+    assert_one_tick(page, "nodule")
     assert QApplication.focusWidget() is view
-    QTest.keyPress(view, Qt.Key.Key_Space)  # Space pans; it never ticks a box
+    QTest.keyPress(view, Qt.Key.Key_Space)  # Space pans; it never presses a box
     assert view.space_pan
     QTest.keyRelease(view, Qt.Key.Key_Space)
-    assert ticked(page) == {"nodule"} and not box(page, "root_tip").isChecked()
+    assert_one_tick(page, "nodule")
+
+
+def test_a_mouse_click_on_the_focused_box_hands_the_keys_back_to_the_canvas(page):
+    """A click is a click even on the box that holds the keys: the next Space pans."""
+    view = page.graphics_view
+    nodule = box(page, "nodule")
+    nodule.setFocus(Qt.FocusReason.TabFocusReason)
+
+    QTest.mouseClick(nodule, Qt.MouseButton.LeftButton)
+
+    assert_one_tick(page, "nodule")
+    assert QApplication.focusWidget() is view
+    QTest.keyPress(view, Qt.Key.Key_Space)
+    assert view.space_pan
+    QTest.keyRelease(view, Qt.Key.Key_Space)
+    root_tip = box(page, "root_tip")
+    root_tip.setFocus(Qt.FocusReason.TabFocusReason)
+    QTest.mouseClick(page.class_panel._rows["root_tip"], Qt.MouseButton.LeftButton)  # its row
+    assert_one_tick(page, "root_tip")
+    assert QApplication.focusWidget() is view
+
+
+def test_a_toggle_of_a_box_picks_its_class_and_leaves_the_keys(page):
+    """A screen reader's Toggle action (``toggle()``): the class is picked as by Space, the
+    keys stay where the reader has them, and the active box is never unticked."""
+    nodule = box(page, "nodule")
+    nodule.setFocus(Qt.FocusReason.TabFocusReason)
+
+    nodule.toggle()
+
+    assert_one_tick(page, "nodule")
+    assert QApplication.focusWidget() is nodule
+    nodule.toggle()  # the active box: put back
+    assert_one_tick(page, "nodule")
+    assert not page.has_unsaved_changes()
 
 
 def test_panel_clicks_keep_the_canvas_focus_for_space(page):
-    """Space after ticking a class must pan, never toggle the box (spec 3.4 safety)."""
+    """Space after picking a class must pan, never press a box."""
     panel = page.class_panel
     nodule = box(page, "nodule")
     QTest.mouseClick(nodule, Qt.MouseButton.LeftButton)
@@ -1245,7 +1338,66 @@ def test_panel_clicks_keep_the_canvas_focus_for_space(page):
     QTest.keyPress(focus, Qt.Key.Key_Space)
     assert page.graphics_view.space_pan
     QTest.keyRelease(focus, Qt.Key.Key_Space)
-    assert nodule.isChecked() and ticked(page) == {"nodule"}
+    assert_one_tick(page, "root_tip")
+    assert not nodule.isChecked()
+
+
+def test_a_row_click_moves_the_tick_and_the_brush_together(page):
+    """Owner bug 2026-11-01: Root nodule was ticked, Tip's row was clicked, and the brush
+    painted Tip while the tick stayed on Root nodule. One state drives both now."""
+    panel = page.class_panel
+    QTest.mouseClick(box(page, "nodule"), Qt.MouseButton.LeftButton)
+    assert_one_tick(page, "nodule")
+
+    QTest.mouseClick(panel._rows["root_tip"], Qt.MouseButton.LeftButton)
+
+    assert_one_tick(page, "root_tip")
+    paint(page, (20, 40), (120, 40))
+    assert set(np.unique(ids(page)).tolist()) == {0, default_registry().by_key("root_tip").id}
+
+
+def test_a_click_on_a_box_paints_with_its_class(page):
+    assert_one_tick(page, "root")  # the first class, as the page opens
+
+    QTest.mouseClick(box(page, "nodule"), Qt.MouseButton.LeftButton)
+
+    assert_one_tick(page, "nodule")
+    paint(page, (20, 40), (120, 40))
+    assert set(np.unique(ids(page)).tolist()) == {0, default_registry().by_key("nodule").id}
+
+
+def test_a_click_on_the_ticked_box_keeps_it_ticked(page):
+    root = box(page, "root")
+    assert_one_tick(page, "root")
+
+    for _ in range(2):  # not an off switch
+        QTest.mouseClick(root, Qt.MouseButton.LeftButton)
+        assert_one_tick(page, "root")
+    assert not page.has_unsaved_changes()
+
+
+def test_the_class_keys_move_the_tick(page):
+    for key, class_key in (("2", "nodule"), ("3", "root_tip"), ("0", "ignore"), ("1", "root")):
+        press(page, key)
+        assert_one_tick(page, class_key)  # key 0: the Ignore row's box
+
+
+def test_one_box_stays_ticked_when_the_classes_change(page, monkeypatch):
+    press(page, "2")
+    bigger = page.layers[CLASSES].registry().add(key="hypha", name="Hypha", color="#3fa7ff")
+    fake_class_editor(monkeypatch, bigger)
+    page.edit_classes()
+    QApplication.processEvents()
+    assert_one_tick(page, "nodule")  # a new class: the active one keeps its tick
+
+    fake_class_editor(monkeypatch, bigger.retire("nodule"))
+    page.edit_classes()
+    QApplication.processEvents()
+    assert_one_tick(page, "root")  # the active class retired: the first class takes the tick
+    assert "nodule" not in page.class_panel._rows
+
+    press(page, "3")  # root, root_tip, hypha
+    assert_one_tick(page, "hypha")
 
 
 @pytest.mark.parametrize("checked", [False, True], ids=["unchecked", "checked"])
@@ -1264,18 +1416,17 @@ def test_the_focused_box_draws_a_focus_ring(themed, page, checked):
     assert (before != after).any(axis=2).mean() > 0.1
 
 
-def test_a_box_that_locks_while_it_has_the_focus_hands_the_keys_to_the_canvas(page):
-    drag(page, (20, 20))  # a root dab
-    root = box(page, "root")
-    assert not root.isEnabled() and root.isChecked()  # the class has pixels: locked
-    page.undo()
-    assert root.isEnabled() and not root.isChecked()
-    root.setFocus(Qt.FocusReason.TabFocusReason)
+def test_a_focused_box_stays_usable_when_its_class_gets_pixels(page):
+    root, nodule = box(page, "root"), box(page, "nodule")
+    nodule.setFocus(Qt.FocusReason.TabFocusReason)
 
-    page.redo()  # the pixels are back: the box locks under the focus
+    drag(page, (20, 20))  # a root dab: the boxes neither move nor lock
 
-    assert not root.isEnabled() and root.isChecked()
-    assert QApplication.focusWidget() is page.graphics_view
+    assert_one_tick(page, "root")
+    assert root.isEnabled() and nodule.isEnabled()
+    assert QApplication.focusWidget() is nodule
+    QTest.keyClick(nodule, Qt.Key.Key_Space)
+    assert_one_tick(page, "nodule")
 
 
 def test_the_class_keys_still_work_from_a_focused_box(page):
@@ -1284,7 +1435,8 @@ def test_the_class_keys_still_work_from_a_focused_box(page):
 
     QTest.keyClick(nodule, Qt.Key.Key_3)
 
-    assert page.class_panel.active_key() == "root_tip" and not nodule.isChecked()
+    assert_one_tick(page, "root_tip")
+    assert not nodule.isChecked()
 
 
 def test_the_boxes_follow_the_gear_after_the_classes_change(page, monkeypatch):
@@ -1298,7 +1450,7 @@ def test_the_boxes_follow_the_gear_after_the_classes_change(page, monkeypatch):
     page.edit_classes()
     QApplication.processEvents()
     panel = page.class_panel
-    wanted = [panel._gear, *(box(page, c.key) for c in bigger.labelled())]
+    wanted = [panel._gear, *(box(page, c.key) for c in bigger.active())]  # Ignore's box last
 
     chain = walk(page)
 
@@ -1306,23 +1458,26 @@ def test_the_boxes_follow_the_gear_after_the_classes_change(page, monkeypatch):
     assert chain[start : start + len(wanted)] == wanted
 
 
-def test_a_refused_tick_goes_back(make_editor, project_bad_registry):
+def test_a_box_click_while_read_only_picks_the_class_and_edits_nothing(
+    make_editor, project_bad_registry
+):
     editor = make_editor(project_bad_registry.a, project_bad_registry.folder)
     editor.set_active_layer(CLASSES)
 
-    box(editor, "nodule").setChecked(True)
+    box(editor, "nodule").click()
 
-    assert not box(editor, "nodule").isChecked() and ticked(editor) == frozenset()
+    assert_one_tick(editor, "nodule")
+    assert not editor.layers[CLASSES].is_dirty() and not ids(editor).any()
 
 
 # ============================================================================ Discard
-def test_discard_restores_the_saved_labels_and_their_checks(page, prompts):
+def test_discard_restores_the_saved_labels_and_keeps_the_class_picked(page, prompts):
     paint(page, (10, 30), (70, 30))  # root
     assert page.save()
     saved = ids(page).copy()
     press(page, "2")
     paint(page, (40, 5), (40, 55))  # nodule
-    page.class_panel.reviewed_changed.emit("root_tip", True)
+    box(page, "root_tip").click()  # picks Tip: no edit
     prompts.answer = DISCARD
 
     assert page.maybe_save_changes() is True
@@ -1331,10 +1486,9 @@ def test_discard_restores_the_saved_labels_and_their_checks(page, prompts):
     assert not page.has_unsaved_changes() and np.array_equal(ids(page), saved)
     argb = pixmap_to_argb_array(page.layers[CLASSES].canvas.image)
     assert np.array_equal(argb, page.layers[CLASSES].document.lut()[saved])
-    assert ticked(page) == {"root"} and not box(page, "root_tip").isChecked()
-    assert not box(page, "nodule").isChecked()
+    assert_one_tick(page, "root_tip")  # Discard puts back pixels, never the class picked
     assert not page.layers[CLASSES].can_undo() and not page.undo_button.isEnabled()
-    assert row_text(page, CLASSES) == "GT · 1/3 checked"
+    assert row_text(page, CLASSES) == "GT"
 
 
 def test_an_edit_after_discard_never_saves_the_discarded_strokes(page, prompts, layout):
@@ -1354,25 +1508,15 @@ def test_an_edit_after_discard_never_saves_the_discarded_strokes(page, prompts, 
 
 def test_discard_without_a_labels_file_empties_the_canvas(page, prompts, layout):
     paint(page, (10, 10), (40, 10))
-    page.class_panel.reviewed_changed.emit("nodule", True)
+    box(page, "nodule").click()
     prompts.answer = DISCARD
 
     assert page.maybe_save_changes() is True
 
-    assert not ids(page).any() and ticked(page) == frozenset()
+    assert not ids(page).any()
+    assert_one_tick(page, "nodule")
     assert row_text(page, CLASSES) == "No class labels"
     assert not os.path.exists(layout.gt_path("a"))
-
-
-def test_discard_of_the_class_checks_alone(page, prompts):
-    """A tick is an edit of the labels too: Discard unticks it."""
-    page.class_panel.reviewed_changed.emit("nodule", True)
-    assert page.has_unsaved_changes() and ticked(page) == {"nodule"}
-    prompts.answer = DISCARD
-
-    assert page.maybe_save_changes() is True
-
-    assert ticked(page) == frozenset() and not box(page, "nodule").isChecked()
 
 
 # ============================================================================== opening
@@ -1405,15 +1549,16 @@ def test_a_labels_file_changed_on_disk_reloads_in_the_same_view(page, project, l
     view.set_zoom(3.0)
     zoom = view.zoom_factor
     other = np.zeros((H, W), np.uint8)
-    other[30:40, 30:40] = 2  # someone else's labels
-    write_tracing(layout.gt_path("a"), Tracing(other, frozenset({"nodule"})), default_registry())
+    other[30:40, 30:40] = 2  # someone else's labels, saved by an older SPROUTS
+    write_legacy_tracing(layout.gt_path("a"), Tracing(other), default_registry(), {"nodule"})
     bump(layout.gt_path("a"))
     reads.clear()
 
     page.load_image(project.a, project.folder)
 
     assert [norm(path) for path in reads] == [norm(layout.gt_path("a"))]
-    assert np.array_equal(ids(page), other) and ticked(page) == {"nodule"}
+    assert np.array_equal(ids(page), other)  # its old "reviewed" list is ignored
+    assert_one_tick(page, "root")
     assert not page.layers[CLASSES].can_undo() and view.zoom_factor == zoom
     assert not page.has_unsaved_changes()
     os.remove(layout.gt_path("a"))  # gone: empty labels
@@ -1511,13 +1656,14 @@ def test_the_remove_gt_box_defaults_to_cancel(monkeypatch):
     def exec_(box):
         cancel = box.button(QMessageBox.StandardButton.Cancel)
         assert box.defaultButton() is cancel and box.escapeButton() is cancel
-        seen.append((box.windowTitle(), box.text(), box.informativeText()))
+        seen.append((title_of(box), box.text(), box.informativeText()))
         answer = seen_answers.pop(0)
         if answer is not None:
             next(b for b in box.buttons() if b.text() == answer).click()
         return 0
 
     seen_answers: list[str | None] = [None, "Cancel", "Remove GT"]
+    record_titles(monkeypatch)
     monkeypatch.setattr(QMessageBox, "exec", exec_)
 
     assert ask_remove_gt(None, "a.png", "detail") is False  # closed: Esc
@@ -1639,18 +1785,20 @@ def test_the_panel_widens_for_longer_names_after_a_registry_change(made):
     assert panel.width() == narrow
 
 
-def test_a_locked_box_says_why_it_is_locked(made):
-    host = QWidget()
-    made.append(host)
-    panel = ClassPanel(host)
-    panel.set_registry(default_registry())
-    panel.set_reviewed({"nodule"}, {"root"})
-    root, nodule = panel._rows["root"].checkbox, panel._rows["nodule"].checkbox
-    assert not root.isEnabled() and root.isChecked()
-    assert nodule.isEnabled() and nodule.isChecked()
-    assert "pixels" in root.toolTip() and root.toolTip() != nodule.toolTip()
-    panel.set_reviewed(set(), set())
-    assert root.isEnabled() and root.toolTip() == nodule.toolTip()
+def test_the_tick_follows_the_class_painted_and_painting_locks_no_box(page):
+    """Painting never ticks or locks a box (owner bug report 2026-10-30: every painted class
+    was ticked at once): the one tick is the class the brush paints (owner decision
+    2026-11-01)."""
+    rows = page.class_panel._rows
+    for key, y in (("root", 40), ("root_tip", 80)):
+        page.layers[CLASSES].set_active_class(key)
+        drag(page, (20, y), (120, y))
+        settle(page)
+        assert_one_tick(page, key)
+
+    assert all(row.checkbox.isEnabled() for row in rows.values())
+    rows["nodule"].checkbox.click()
+    assert_one_tick(page, "nodule")
 
 
 # ===================================================================== the class editor
@@ -1761,10 +1909,9 @@ def _traced_project(folder: Path, n_images=3, n_traced=2) -> dict[str, str]:
         if i < n_traced:
             plane = np.zeros((60, 80), np.uint8)
             plane[10:20, 10:20] = 1
-            checked = frozenset({"root", "nodule", "root_tip"})  # fully checked
             write_tracing(
                 ProjectLayout.for_image(path).gt_path(f"plot_{i:03d}"),
-                Tracing(plane, checked),
+                Tracing(plane),
                 default_registry(),
             )
     return images
@@ -1819,7 +1966,9 @@ def test_export_with_no_traced_image_explains_and_stays_off(made, tmp_path):
     assert dlg.traced_label.text() == (
         "No image in this folder has class labels yet. Paint some on the Correct page (G) first."
     )  # the Trace GT stage is gone (WG-T11): the label names where to paint them
-    assert "Trace GT" not in dlg.only_complete_check.toolTip()
+    assert not [w for w in dlg.findChildren(QWidget) if "Trace GT" in w.toolTip()]
+    # No "Only fully checked images" option (2026-11-01): every labelled image is exported.
+    assert [b.text() for b in dlg.findChildren(QCheckBox)] == ["Keep each tube in one split"]
     dlg.output_edit.setText(str(tmp_path / "out"))
     assert not dlg.export_button.isEnabled()
     dlg.start_export()

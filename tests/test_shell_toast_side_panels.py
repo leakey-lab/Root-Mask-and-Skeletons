@@ -103,7 +103,11 @@ def test_the_stack_returns_to_its_corner_when_the_side_panel_hides(scene):
     scene.panel.hide()
     settle()
     assert_clear(scene)
-    assert all(t.geometry().right() == scene.host.width() - 17 for t in scene.toasts.toasts())
+    *older, front = scene.toasts.toasts()
+    assert front.geometry().right() == scene.host.width() - 17  # the corner
+    for toast in older:  # tucked behind the newest, inside its width
+        assert front.geometry().left() <= toast.geometry().left()
+        assert toast.geometry().right() <= front.geometry().right()
 
 
 def test_the_stack_follows_the_side_panel_when_it_grows(scene):

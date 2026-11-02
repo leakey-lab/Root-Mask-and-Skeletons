@@ -63,15 +63,3 @@ def test_stacked_bars_keep_their_labels_for_a_few_tubes(tmp_path, build):
 def test_stacked_bars_drop_labels_that_cannot_be_read(tmp_path, build):
     figure = build(tmp_path, _rows(theme.MAX_LABELLED_BARS + 1)).create_stacked_bar_chart()
     assert not _labelled(figure)
-
-
-def test_area_profile_counts_every_bar_of_a_group(tmp_path):
-    # 16 positions x 2 dates = 32 bars side by side: too narrow for labels.
-    dates = ("2024.07.18", "2024.08.07")
-    (tmp_path / "few").mkdir()
-    (tmp_path / "many").mkdir()
-    few = _area_charts(tmp_path / "few", _rows(1, positions=15, dates=dates[:1]))
-    many = _area_charts(tmp_path / "many", _rows(1, positions=16, dates=dates))
-
-    assert _labelled(few.show_area_profile(1))
-    assert not _labelled(many.show_area_profile(1))

@@ -169,15 +169,21 @@ def test_generate_page_offers_skeletons_only(mw, app):
 
 
 def test_the_correct_page_has_no_clear_button(mw, app):
-    """WG-T5: the Correct page holds Classes…, Export dataset… and Remove GT… (the Trace GT
-    stage and its page are gone, WG-T11). O18: its Clear is the dock's, not the top bar's."""
+    """WG-T5: the Correct page holds Classes…, Export dataset…, Mark empty (2026-11-02)
+    and Remove GT… (the Trace GT stage and its page are gone, WG-T11). O18: its Clear is the
+    dock's, not the top bar's."""
     _enter(mw, app, "Correct")
     window, editor = mw, mw.correct_editor
     try:
         page = window.action_bar_stack.currentWidget()
         assert not hasattr(editor, "clear_button")
         assert not [b for b in page.findChildren(QPushButton) if "Clear" in b.text()]
-        buttons = (mw.gt_classes_button, mw.gt_export_button, mw.gt_remove_button)
+        buttons = (
+            mw.gt_classes_button,
+            mw.gt_export_button,
+            mw.gt_empty_button,
+            mw.gt_remove_button,
+        )
         assert all(button.parentWidget() is page and button.isVisible() for button in buttons)
         xs = [button.mapTo(page, button.rect().topLeft()).x() for button in buttons]
         assert xs == sorted(xs)

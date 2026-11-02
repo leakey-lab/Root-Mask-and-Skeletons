@@ -27,6 +27,7 @@ from app.inference.batch_pipeline import progress_percent
 
 __all__ = [
     "FeedbackCall",
+    "NoticeAction",
     "NoticeKind",
     "NullFeedback",
     "RecordingFeedback",
@@ -35,6 +36,14 @@ __all__ = [
 ]
 
 NoticeKind = Literal["success", "info", "warn", "danger"]
+
+
+class NoticeAction(NamedTuple):
+    """The one button a toast may carry: ``label`` (e.g. "Open folder") and what it runs.
+    The toast closes after ``run()``."""
+
+    label: str
+    run: Callable[[], None]
 
 
 @runtime_checkable
@@ -63,8 +72,11 @@ class UiFeedback(Protocol):
     def status(self, message: str, timeout_ms: int = 5000) -> None:
         """Show a transient status-line message."""
 
-    def notify(self, message: str, kind: NoticeKind = "success") -> None:
-        """Show a toast (``kind``: success / info / warn / danger)."""
+    def notify(
+        self, message: str, kind: NoticeKind = "success", *, action: NoticeAction | None = None
+    ) -> None:
+        """Show a toast (``kind``: success / info / warn / danger), with ``action``'s
+        button when given."""
 
 
 class NullFeedback:
@@ -92,7 +104,9 @@ class NullFeedback:
     def status(self, message: str, timeout_ms: int = 5000) -> None:
         pass
 
-    def notify(self, message: str, kind: NoticeKind = "success") -> None:
+    def notify(
+        self, message: str, kind: NoticeKind = "success", *, action: NoticeAction | None = None
+    ) -> None:
         pass
 
 
@@ -167,6 +181,8 @@ class RecordingFeedback:
         self._record("status", message, timeout_ms)
         self.last_message = message
 
-    def notify(self, message: str, kind: NoticeKind = "success") -> None:
-        self._record("notify", message, kind)
+    def notify(
+        self, message: str, kind: NoticeKind = "success", *, action: NoticeAction | None = None
+    ) -> None:
+        self._record("notify", message, kind, **({} if action is None else {"action": action}))
         self.last_message = message

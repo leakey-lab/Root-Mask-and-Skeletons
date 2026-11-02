@@ -121,13 +121,16 @@ enhanced generator with batch normalisation and aspect ratio 3/4.
   (`2.8.0.dev20250325+cu128`, cuDNN 9.7.1): torch 2.7.0 / 2.7.1+cu128 (cuDNN 9.7.1)
   reproduced every output bit for bit; 2.8.0+cu128 and 2.9.0+cu128 (cuDNN 9.10.2) changed
   6 masks and 5 raw skeleton predictions and no CSV value (counted from the files' hashes;
-  how many pixels was not measured); 2.14.1+cu130 and +cu132 (cuDNN 9.24, the recommended
-  build; the two give the same outputs) changed 11 masks in 1 to 4 pixels each (the root
+  how many pixels was not measured); 2.14.1+cu130 and +cu132 (cuDNN 9.24; the two give the
+  same outputs) and 2.15.0+cu132 (cuDNN 9.26, the recommended build since 2026-10-29; the
+  same outputs as 2.14.1, GPU and CPU, bit for bit) changed 11 masks in 1 to 4 pixels each (the root
   pixel count by 1 or 2), 6 raw skeleton predictions in 1 to 25 pixels each by one
   intensity level (1 of 255), their thinned skeletons and the lengths not at all, and 3
   area values by 0.01 mm² (`CHANGELOG.md`, "Scientific output changes", lists the files).
   The Python version (3.10, 3.13, 3.14) changed nothing, and on the CPU torch 2.7.1 and
-  2.14.1 both reproduced the nightly's CPU outputs bit for bit. GPUs older than Turing (RTX
+  2.14.1 both reproduced the nightly's CPU outputs bit for bit, as does 2.15.0. The cu134 build
+  of 2.15.0 is not the same: against cu132 it moves 1 mask pixel and 6 raw skeleton
+  predictions by one level (no CSV value). GPUs older than Turing (RTX
   20 series, GTX 16xx) are not supported: the CUDA 13 builds have no kernels for them.
 - **Two independent predictions.** Skeletons are not derived from masks, so the two can
   disagree for the same image; a correction saved in *Correct* (GT) applies to one output only.

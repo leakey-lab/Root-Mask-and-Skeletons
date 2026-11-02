@@ -1,8 +1,8 @@
 """The Correct layers' opacity and visibility, kept across app restarts (QSettings).
 
 Each layer's user opacity (0..1) and visibility are stored as ``correct/<layer id>/opacity``
-and ``correct/<layer id>/visible`` in the app's QSettings (``QSettings("LeakeyLab",
-"SPROUTS")``, next to the window state and the recent projects). The page restores them
+and ``correct/<layer id>/visible`` in the app's settings (:func:`app.settings.app_settings`,
+the user's ``settings.ini``, next to the window state and the recent projects). The page restores them
 when it is built and stores them when it is hidden, which is also what quitting the app
 does to it: only the values that differ from what the settings hold (as read at restore,
 or last written) are written, and the settings are flushed only after a write, so a stage

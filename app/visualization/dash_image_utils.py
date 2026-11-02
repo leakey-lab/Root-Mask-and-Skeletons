@@ -1,5 +1,5 @@
 """
-Image utilities for the Growth-Lines hover panel of the length dashboard.
+Image utilities for the Growth-Lines hover panel of the metric dashboards (length and area).
 
 * :class:`ImageIndex` maps ``(tube, position, "YYYY.MM.DD")`` to an image path. It
   snapshots the image manager's names when the dashboard opens but parses them
@@ -19,7 +19,6 @@ thread-safe.
 
 from __future__ import annotations
 
-import base64
 import io
 import logging
 import re
@@ -73,11 +72,6 @@ def encode_thumbnail_jpeg(
         return b""
 
 
-def jpeg_data_url(data: bytes) -> str:
-    """``data:`` URL for JPEG bytes (``""`` for no data)."""
-    return f"data:image/jpeg;base64,{base64.b64encode(data).decode()}" if data else ""
-
-
 class ThumbnailCache:
     """Thread-safe LRU of encoded JPEG thumbnails keyed by :data:`ImageKey`.
 
@@ -111,10 +105,6 @@ class ThumbnailCache:
             while len(self._jpegs) > self._capacity:
                 self._jpegs.popitem(last=False)
         return data
-
-    def data_url(self, key: ImageKey) -> str:
-        """The thumbnail as a ``data:image/jpeg`` URL (``""`` if unavailable)."""
-        return jpeg_data_url(self.jpeg(key))
 
     def cached_keys(self) -> list[ImageKey]:
         """Keys currently held, least recently used first."""
@@ -157,7 +147,7 @@ class ImageIndex(Mapping[ImageKey, str]):
     def parse_in_background(self) -> threading.Thread:
         """Parse the names on a daemon thread now instead of on first use.
 
-        The length dashboard calls this once its first chart has been sent: the
+        A metric dashboard calls this once its first chart has been sent: the
         names are parsed while the browser draws it, and the first Depth Profile
         view no longer waits for them (~140 ms for 46k names). A lookup meanwhile
         waits for the same parse (one lock), never runs a second one.
@@ -237,27 +227,3 @@ def build_available_images_map(image_manager) -> ImageIndex:
         "YYYY.MM.DD") -> path``) whose ``thumbnails`` cache serves the images.
     """
     return ImageIndex(getattr(image_manager, "images", None))
-
-
-def get_encoded_image(available_images: Mapping, tube: int, position: int, date) -> str:
-    """Hover thumbnail of one image as a ``data:image/jpeg`` URL.
-
-    Args:
-        available_images: the map returned by :func:`build_available_images_map`.
-        tube: tube number.
-        position: position (depth) number.
-        date: pandas Timestamp or date object.
-
-    Returns:
-        The data URL, or ``""`` if the image is unknown or unreadable.
-    """
-    try:
-        key = (tube, position, date.strftime("%Y.%m.%d"))
-    except (AttributeError, ValueError) as exc:
-        logger.debug("Invalid date passed to get_encoded_image: %s (%s)", date, exc)
-        return ""
-    cache = getattr(available_images, "thumbnails", None)
-    if cache is not None:
-        return cache.data_url(key)
-    path = available_images.get(key)
-    return jpeg_data_url(encode_thumbnail_jpeg(path)) if path else ""

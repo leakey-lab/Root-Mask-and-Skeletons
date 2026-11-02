@@ -300,11 +300,12 @@ class SkeletonLayerItem(QGraphicsItem):
 
     def _paint_tiles(self, painter: QPainter, keys: list[TileKey]) -> None:
         """Level-0 overlay tiles, nearest, with edges on device pixels (no seams), where the
-        mask layer's tiles put theirs."""
+        mask layer's tiles put theirs: whole TILE px tiles, the last column and row too (the
+        clip ends them at the image edge), so Qt maps their pixels as it maps the mask's."""
         transform = painter.deviceTransform()
+        t = self.TILE
         for key in keys:
-            x0, y0, x1, y1 = self._tile_bounds(key)
-            target = snapped_rect(x0, y0, x1 - x0, y1 - y0, transform)
+            target = snapped_rect(key[0] * t, key[1] * t, t, t, transform)
             painter.drawImage(target, self._tile_image(key))
 
     def _paint_vectors(self, painter: QPainter, exposed: QRectF, seen: QRectF, scale: float) -> str:
@@ -372,32 +373,30 @@ class SkeletonLayerItem(QGraphicsItem):
     def _halo_layer(self, painter: QPainter, area: QRectF, lines, dots) -> None:
         """Raster engine: the halo drawn opaque into its own image over ``area`` (item px),
         blended once at HALO_ALPHA (S6): joints do not stack alpha. (A stroked path is
-        8x slower than drawLines on this engine.)"""
-        world = painter.worldTransform()
-        rect = world.mapRect(area).toAlignedRect()
+        8x slower than drawLines on this engine.)
+
+        The image covers whole device pixels and is blitted unscaled (X2-07): aligned to
+        logical pixels it sat up to half a device pixel off at 125-175 % scaling, and moved
+        with each repaint rect. The unscaled blit is also the engine's cheaper path."""
+        device = painter.deviceTransform()
+        rect = device.mapRect(area).toAlignedRect()  # device px
         if rect.isEmpty():
             return
-        device = painter.device()
-        ratio = device.devicePixelRatioF() if device is not None else 1.0
-        if rect.width() * rect.height() * ratio * ratio > self.HALO_LAYER_MAX_PX:
+        if rect.width() * rect.height() > self.HALO_LAYER_MAX_PX:
             _draw(painter, self._halo_pen, lines, dots)  # a huge render: memory first
             return
-        layer = QImage(
-            max(1, math.ceil(rect.width() * ratio)),
-            max(1, math.ceil(rect.height() * ratio)),
-            QImage.Format.Format_ARGB32_Premultiplied,
-        )
-        layer.setDevicePixelRatio(ratio)
+        layer = QImage(rect.width(), rect.height(), QImage.Format.Format_ARGB32_Premultiplied)
         layer.fill(0)
         inner = QPainter(layer)
         inner.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        inner.setTransform(world * QTransform.fromTranslate(-rect.x(), -rect.y()))
-        _draw(inner, self._halo_solid, lines, dots)
+        inner.setTransform(device * QTransform.fromTranslate(-rect.x(), -rect.y()))
+        _draw(inner, self._halo_solid, lines, dots)  # cosmetic pens: device px at any ratio
         inner.end()
         painter.save()
         painter.resetTransform()
+        painter.setWorldTransform(painter.deviceTransform().inverted()[0])  # device px
         painter.setOpacity(painter.opacity() * HALO_ALPHA / 255.0)
-        painter.drawImage(QPointF(rect.x(), rect.y()), layer)
+        painter.drawImage(rect.topLeft(), layer)
         painter.restore()
 
     def _count_on_screen(self, rect: Edges, limit: int) -> tuple[int, bool]:
@@ -508,10 +507,18 @@ class SkeletonLayerItem(QGraphicsItem):
         return tile
 
     def _tile_image(self, key: TileKey) -> QImage:
+        """The level-0 overlay of tile ``key``, TILE px square: past the image's right and
+        bottom edges padded transparent, as the mask layer pads its tiles."""
         image = self._tile_images.get(key)
         if image is None:
             x0, y0, x1, y1 = self._tile_bounds(key)
-            image = self._tile_images[key] = _argb(self._indices[y0:y1, x0:x1], self._table)
+            indices = self._indices[y0:y1, x0:x1]
+            t = self.TILE
+            if indices.shape != (t, t):
+                padded = np.zeros((t, t), np.uint8)  # index 0: transparent
+                padded[: y1 - y0, : x1 - x0] = indices
+                indices = padded
+            image = self._tile_images[key] = _argb(indices, self._table)
         return image
 
     def _tile_bounds(self, key: TileKey) -> tuple[int, int, int, int]:

@@ -25,9 +25,11 @@ You (Claude, running locally in the repo) will:
 
 | Concern | File |
 |---|---|
-| Length dashboard layout + callbacks | `app/visualization/dash_app.py` (composition), `dash_length_layout.py`, `dash_length_views.py`, `dash_length_callbacks.py` |
+| Dashboard class (both dashboards) | `app/visualization/dash_metric_app.py` (`MetricDashApp`) |
+| Dashboard layout + callbacks (both dashboards) | `dash_metric_layout.py` (`metric_shell`, `LENGTH_SHELL`, `AREA_SHELL`), `dash_metric_views.py`, `dash_metric_callbacks.py` |
+| Length dashboard | `app/visualization/dash_app.py` (`DashApp`, a thin subclass) |
 | Length chart builders | `app/visualization/dash_visualizations.py` |
-| Area dashboard | `app/visualization/dash_app_area.py` |
+| Area dashboard | `app/visualization/dash_app_area.py` (`DashAppArea`, a thin subclass) |
 | Qt wrappers (embed Dash in `QWebEngineView`) | `root_length_visulization.py`, `root_area_visualization.py` |
 | Ports | `app/config.py` (`DASH_LENGTH_PORT`, `DASH_AREA_PORT`) |
 
@@ -338,14 +340,14 @@ These are the dashboards' tokens. The desktop shell's own tokens are in `app/des
 ## View names and the date ramp
 
 Both dashboards name their views with the same words (keys unchanged: `stacked`, `time`,
-`lines` / `profile`, `faceted`):
+`lines`, `faceted`):
 
 | Key | View label | Chart title |
 |---|---|---|
 | `stacked` | Totals by Tube | `Root {Length\|Area} by Tube and Date` |
 | `time` | Growth Over Time | `Root {Length\|Area} Growth Over Time` |
-| `lines` (length), `profile` (area) | Depth Profile | `Root {Length\|Area} Depth Profile - Tube N` |
-| `faceted` (length only) | Depth Profile Grid | `Depth Profile Grid - Field Average (Left) vs Tube (Right)` |
+| `lines` | Depth Profile | `Root {Length\|Area} Depth Profile - Tube N` |
+| `faceted` | Depth Profile Grid | `Depth Profile Grid - Field Average (Left) vs Tube (Right)` |
 
 The legend title is "Measurement date" everywhere, hover dates are ISO (`%Y-%m-%d`) and both
 depth axes are titled "Position (L)". The faceted options card is "Depth Profile Grid Options".
@@ -392,9 +394,11 @@ dated 2026-10-27, with no display or data change:
   It must match plotly.py's plotly.js version, and the dashboards may use only its trace
   types (scatter, bar, pie): `tests/test_viz_dash_plotly_bundle.py` fails otherwise, and
   `app/assets/THIRD_PARTY.md` says how to update it. The plotly.js 3 defaults that
-  plotly.js 4 changed are set back: no "Upload to Cloud" modebar button, a 300 ms
-  double-click (`dash_shell.graph_config`) and the bar label colours
-  (`theme.inside_label_colour`).
+  plotly.js 4 changed are set back: no "Upload to Cloud" modebar button and a 300 ms
+  double-click (`dash_shell.graph_config`). Bar labels take plotly.js 4's colour (owner
+  decision #51, 2026-10-31): a label inside a bar is white on the fourth date-ramp blue
+  `#4f97d1` and the blends next to it (trials with 5, 8-10 or 12 or more dates), where
+  plotly.js 3 drew it dark grey `#444`.
 - **Zoom through Dash 4.4.1.** `app/assets/sprouts-uirevision.js` keeps a zoom when a
   callback redraws the view with the same `uirevision` (Select All, Clear All): Dash 4.4.1
   lost it (plotly/dash#4093).
@@ -407,12 +411,9 @@ dated 2026-10-27, with no display or data change:
 - **Legend.** The time views of both dashboards show their legend automatically for up to
   `dash_visualizations.AUTO_LEGEND_MAX_TUBES` (30) tubes: `legend-visible-store` starts as
   `None` (automatic), the toggle flips what is shown, and `theme.margin_right` makes room
-  for the legend only when it is shown. The area view takes these pieces from `dash_shell`
-  (`legend_store`, `legend_shown`, `flip_legend`, `legend_patch`,
-  `DashboardShell.register_legend_toggle`); its *Toggle Legend* floats over the chart's
-  top-left margin on the time view only, so that view keeps no control strip. The length
-  view takes `legend_store`, `flip_legend` and `legend_patch` (its toggle keeps its own
-  registration, which fires on page load).
+  for the legend only when it is shown. Both dashboards take `legend_store`, `flip_legend`
+  and `legend_patch` from `dash_shell`; the *Toggle Legend* button sits in the time view's
+  control strip, and its registration fires on page load.
 - **Message figures.** `theme.message_figure` is text only (no axes, transparent plot area),
   so a hint no longer looks like an empty chart.
 - **Figures without validation (2026-10-27).** The Growth Over Time views and the Depth

@@ -19,6 +19,7 @@ import time
 import pytest
 
 from app import project_layout
+from app.io_utils import path_key
 from app.naming import stem_key
 from app.project_layout import MASK_EXTENSIONS, SKELETON_SUFFIX, ProjectLayout, find_by_stem
 
@@ -116,7 +117,8 @@ def test_a_case_variant_added_after_a_miss_is_found(tmp_path):
     added = _touch(os.path.join(folder, "a_fake.png"))  # the folder changed: listed again
 
     found = find_by_stem(folder, "A", SKELETON_SUFFIX)
-    assert found is not None and os.path.normcase(found) == os.path.normcase(added)
+    # one file: a case-insensitive disk (Windows, macOS) finds it under the name asked for
+    assert found is not None and path_key(found) == path_key(added)
 
 
 def test_a_removed_case_variant_is_not_returned(tmp_path):

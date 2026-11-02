@@ -23,7 +23,7 @@ import numpy as np
 
 from app.io_utils import imread_unicode
 
-__all__ = ["is_generated_as_opened", "prewarm_skeletonize", "thin_raster"]
+__all__ = ["is_generated_as_opened", "prewarm_skeletonize", "resize_linear_u8", "thin_raster"]
 
 # scikit-image's skeletonize, imported on first use (see prewarm_skeletonize).
 _skimage_skeletonize: Callable[[np.ndarray], np.ndarray] | None = None
@@ -71,6 +71,63 @@ def _skeletonize_uint8(mask: np.ndarray) -> np.ndarray:
     return skel.view(np.uint8) * np.uint8(255)
 
 
+_COEF_SCALE = 2048  # OpenCV's INTER_RESIZE_COEF_SCALE: 11-bit fixed-point weights
+
+
+def _linear_taps(src: int, dst: int) -> tuple[np.ndarray, np.ndarray]:
+    """Per output index along one axis: the source index and the float32 fraction,
+    computed in the order and precision of OpenCV's ``resize`` (half-pixel centres)."""
+    scale = 1.0 / (dst / src)
+    f = ((np.arange(dst, dtype=np.float64) + 0.5) * scale - 0.5).astype(np.float32)
+    s = np.floor(f).astype(np.intp)
+    return s, f - s.astype(np.float32)
+
+
+def _weights(f: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The two fixed-point weights of fraction ``f`` (rounded half to even, as cvRound)."""
+    w0 = np.rint((np.float32(1.0) - f) * np.float32(_COEF_SCALE)).astype(np.int32)
+    w1 = np.rint(f * np.float32(_COEF_SCALE)).astype(np.int32)
+    return w0, w1
+
+
+def resize_linear_u8(img: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """``cv2.resize(img, size, interpolation=cv2.INTER_LINEAR)`` of a 2D uint8 image, pixel
+    for pixel as OpenCV computes it on x86, but on every CPU.
+
+    On arm64 (macOS, Linux aarch64) OpenCV's wheels route this resize through their
+    KleidiCV / carotene HAL, which rounds differently (up to 1.2 % of the pixels of an
+    upscaled prediction, by 1-3 levels): Correct then opened a prediction as a different
+    skeleton than on Windows or Linux x86 and saved other pixels. This is OpenCV's own
+    integer algorithm (11-bit weights, ``(b0 * (r0 >> 4) >> 16) + (b1 * (r1 >> 4) >> 16)``
+    rounded by 2 bits) in numpy, with its exact 2x shrink (a 2x2 box mean) too.
+    """
+    h, w = img.shape
+    dw, dh = size
+    src = img.astype(np.int32)
+    if (w, h) == (2 * dw, 2 * dh):  # OpenCV takes INTER_AREA's fast path here
+        quad = src[0::2, 0::2] + src[0::2, 1::2] + src[1::2, 0::2] + src[1::2, 1::2]
+        return ((quad + 2) >> 2).astype(np.uint8)
+    sx, fx = _linear_taps(w, dw)
+    outside = (sx < 0) | (sx >= w - 1)  # columns: clamped, and the fraction dropped
+    fx[outside] = 0
+    sx = np.clip(sx, 0, w - 1)
+    a0, a1 = _weights(fx)
+    rows = src[:, sx] * a0 + src[:, np.minimum(sx + 1, w - 1)] * a1
+    rows >>= 4  # the vertical pass reads each row >> 4 (at most 32640: int32 stays exact)
+    sy, fy = _linear_taps(h, dh)  # rows: the fraction kept, the two rows clamped
+    b0, b1 = _weights(fy)
+    out = rows[np.clip(sy, 0, h - 1)]
+    out *= b0[:, None]
+    out >>= 16
+    bottom = rows[np.clip(sy + 1, 0, h - 1)]
+    bottom *= b1[:, None]
+    bottom >>= 16
+    out += bottom
+    out += 2
+    out >>= 2
+    return out.astype(np.uint8)
+
+
 def thin_raster(
     raster_gray: np.ndarray, target_size: tuple[int, int], threshold: str = "otsu"
 ) -> np.ndarray:
@@ -80,7 +137,8 @@ def thin_raster(
     upscaled bilinearly *before* thresholding, so thin lines come out as smooth,
     connected 1 px lines of the right length instead of a nearest-neighbour
     staircase. A raster already at ``target_size`` (a GT skeleton saved at image
-    resolution) is only thresholded and thinned, so it reopens unchanged.
+    resolution) is only thresholded and thinned, so it reopens unchanged. The upscale is
+    :func:`resize_linear_u8`, so every platform opens a skeleton as the same pixels.
     """
     if raster_gray.ndim != 2:
         raise ValueError("Expected a grayscale image.")
@@ -88,7 +146,7 @@ def thin_raster(
     img = raster_gray
     w_t, h_t = target_size
     if (img.shape[1], img.shape[0]) != (w_t, h_t):
-        img = cv2.resize(img, (w_t, h_t), interpolation=cv2.INTER_LINEAR)
+        img = resize_linear_u8(img, (w_t, h_t))
     if threshold == "otsu":
         _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     else:

@@ -2,14 +2,15 @@
 
 The layer is a ``RasterLayer`` (Brush, Eraser and Fill, the ring, the history) over the
 Qt-free ``ClassesDocument``: it paints in the active class's colour, Fill reads the active
-class's outlines only, each class keeps its own brush size, a class with pixels stays
-checked, and an invalid ``gt/classes.json`` makes it read-only with one notice per image.
+class's outlines only, each class keeps its own brush size, picking a class is no edit
+(the class panel's tick is the active class, owner decision 2026-11-01), and an invalid
+``gt/classes.json`` makes it read-only with one notice per image.
 A recording ``FakeHost`` stands in for the page; a real ``CorrectSession`` with
 ``FakePrompts`` answers "would the page ask?".
 
 Ported here (the old files were deleted in WG-T11): the class semantics of
 ``tests/test_gt_tracing_interface.py`` and every case of ``tests/test_gt_unsaved_state.py``
-(unsaved = the ids or the ticks differ from the saved ones; a remap on open stays unsaved
+(unsaved = the ids differ from the saved ones; a remap on open stays unsaved
 until it is saved or discarded). Keys, PgDn, the class panel and the prompts' wording are
 the page's (WG-T5).
 """
@@ -56,7 +57,7 @@ from app.gui.key_text import platform_keys
 from app.gui.paint_canvas import pixmap_to_argb_array
 from app.gui.widgets import tokens
 from tests.correct_fakes import FakeHost, FakeLayer, FakePrompts
-from tests.gt_goldens_support import make_gt_project
+from tests.gt_goldens_support import make_gt_project, write_legacy_tracing
 
 H, W = 60, 80  # the ported tests' photo
 NO_MODIFIER = Qt.KeyboardModifier.NoModifier
@@ -185,7 +186,7 @@ def write_with_unknown_key(image: str) -> bytes:
     plane = np.zeros((H, W), np.uint8)
     plane[5:15, 5:15] = 4
     plane[30:40, 30:40] = 1
-    write_tracing(gt_path(image), Tracing(plane, frozenset({"root"})), other)
+    write_tracing(gt_path(image), Tracing(plane), other)
     return file_bytes(gt_path(image))
 
 
@@ -253,7 +254,7 @@ def test_painting_class_b_over_a_leaves_b_and_the_eraser_leaves_background(scene
     assert layer.document.present_keys() == {"root", "nodule"}
 
 
-def test_painted_classes_save_their_ids_and_ticks_and_never_touch_the_mask(scene, project):
+def test_painted_classes_save_their_ids_and_never_touch_the_mask(scene, project):
     mask_before = file_bytes(project.mask)
     layer, _, _ = open_layer(scene, project.image)
     layer.set_active_class("root")
@@ -271,11 +272,10 @@ def test_painted_classes_save_their_ids_and_ticks_and_never_touch_the_mask(scene
     assert tracing.ids[30, 15] == 1 and tracing.ids[30, 65] == 1  # root only
     assert tracing.ids[30, 40] == 2 and tracing.ids[10, 40] == 2  # the crossing is nodule
     assert tracing.ids[50, 10] == 0 and set(np.unique(tracing.ids).tolist()) == {0, 1, 2}
-    assert tracing.reviewed == {"root", "nodule"}
     assert os.path.exists(registry_path(project.folder))
     assert file_bytes(project.mask) == mask_before
     assert sorted(os.listdir(os.path.join(project.folder, "mask"))) == ["plot_001.png"]
-    assert layer.status() == LayerStatus("clean", "GT · 2/3 checked", "gt/plot_001.png")
+    assert layer.status() == LayerStatus("clean", "GT", "gt/plot_001.png")
 
 
 def test_fill_is_limited_to_the_active_class_outline(scene, project):
@@ -311,12 +311,53 @@ def test_the_brush_colour_is_the_active_class_colour(scene, gt_project):
     layer.set_active_class("no_such_class")  # refused: the active class stays
     assert layer.active_class() == "ignore"
     layer.set_active_class("root")
-    assert layer.brush_color.name() == "#5fd6a0"
+    assert layer.brush_color.name() == "#56b4e9"
 
     stroke(layer, (50, 50), size=6)
-    assert tuple(pixmap_to_argb_array(layer.canvas.image)[50, 50]) == (0xA0, 0xD6, 0x5F, 255)
-    layer.hover(QPoint(60, 60))  # the ring keeps the layer's colour
-    assert layer.ring.inner.pen().color() == QColor(tokens.ACCENT)
+    assert tuple(pixmap_to_argb_array(layer.canvas.image)[50, 50]) == (0xE9, 0xB4, 0x56, 255)
+
+
+def ring_colour(layer: ClassesLayer) -> str:
+    return layer.ring.inner.pen().color().name()
+
+
+def test_the_ring_takes_the_active_class_colour(scene, gt_project):
+    """The ring shows the class the brush paints, not the layer's purple (bug 2026-10-30:
+    Root tip, or a new class, kept a ring like Root's)."""
+    layer, _, _ = open_layer(scene, gt_project.image, (640, 480))
+    layer.hover(QPoint(60, 60))
+
+    layer.set_active_class("root")
+    assert ring_colour(layer) == "#56b4e9"
+    layer.set_active_class("root_tip")
+    assert ring_colour(layer) == "#ffd166"
+    layer.set_active_class("ignore")
+    assert ring_colour(layer) == "#8a8f98"
+    assert ring_colour(layer) != QColor(tokens.ACCENT).name()
+
+
+def test_the_eraser_ring_stays_dashed_in_the_class_colour(scene, gt_project):
+    layer, _, _ = open_layer(scene, gt_project.image, (640, 480))
+    layer.set_tool("eraser")
+    layer.set_active_class("nodule")
+
+    pen = layer.ring.inner.pen()
+    assert (pen.color().name(), pen.style()) == ("#ff7eb6", Qt.PenStyle.DashLine)
+    layer.set_tool("brush")
+    pen = layer.ring.inner.pen()
+    assert (pen.color().name(), pen.style()) == ("#ff7eb6", Qt.PenStyle.SolidLine)
+
+
+def test_a_new_or_recoloured_class_recolours_the_ring(scene, gt_project):
+    layer, _, _ = open_layer(scene, gt_project.image, (640, 480))
+
+    layer.apply_registry(layer.registry().add(key="xyz", name="XYZ", color="#3a86ff"))
+    layer.set_active_class("xyz")
+    assert ring_colour(layer) == "#3a86ff"
+    layer.apply_registry(layer.registry().update("xyz", color="#00b4d8"))
+    assert ring_colour(layer) == "#00b4d8"
+    layer.apply_registry(layer.registry().retire("xyz"))  # gone: back to the first class
+    assert layer.active_class() == "root" and ring_colour(layer) == "#56b4e9"
 
 
 def test_per_class_brush_size_is_remembered(scene, gt_project):
@@ -343,7 +384,7 @@ def test_retired_class_pixels_survive_open_and_save(scene, project):
     save_registry(project.folder, registry)
     plane = np.zeros((H, W), np.uint8)
     plane[5:15, 5:15] = 4
-    write_tracing(project.labels, Tracing(plane, frozenset({"nodule"})), registry)
+    write_tracing(project.labels, Tracing(plane), registry)
 
     layer, _, notices = open_layer(scene, project.image)
     assert notices == [] and not layer.is_dirty()
@@ -354,51 +395,74 @@ def test_retired_class_pixels_survive_open_and_save(scene, project):
     tracing = read_tracing(project.labels)
     assert (tracing.ids[5:15, 5:15] == 4).all() and tracing.ids[40, 60] == 1
     assert set(np.unique(tracing.ids).tolist()) == {0, 1, 4}
-    assert {"root", "nodule"} <= tracing.reviewed
 
 
-# ============================================================================== ticks
-def test_ticks_are_locked_while_the_class_has_pixels(scene, project):
+# ============================================================================== the tick
+def test_picking_a_class_tells_the_panel_and_is_no_edit(scene, project):
+    """The class panel ticks the active class (owner decision 2026-11-01): the layer tells
+    it of every pick, Ignore included, and a pick changes nothing to save."""
     layer, _, _ = open_layer(scene, project.image)
+    assert not hasattr(layer, "set_ticked")
     heard: list[int] = []
     layer.on_classes_changed = lambda: heard.append(1)
-    layer.set_active_class("root")
-    heard.clear()
 
+    for key in ("nodule", "ignore", "root_tip"):
+        heard.clear()
+        layer.set_active_class(key)
+        assert heard and layer.active_class() == key and not layer.is_dirty()
+
+    heard.clear()
     stroke(layer, (10, 30), (70, 30), size=6)
     assert heard  # the class panel hears of the new pixels
-
-    assert layer.set_ticked("root", False) is False and "root" in layer.document.reviewed()
-    assert layer.set_ticked("nodule", True) is True
-    assert layer.document.reviewed() == {"root", "nodule"}
-
-    layer.clear()  # the pixels are gone: root is no longer checked
-    assert layer.document.reviewed() == {"nodule"}
-    layer.undo()  # they are back: root is checked and locked again
-    assert layer.document.reviewed() == {"root", "nodule"}
-    assert layer.set_ticked("root", False) is False
+    assert ids(layer)[30, 40] == layer.registry().by_key("root_tip").id
 
 
-def test_an_empty_save_writes_a_file_with_the_ticks(scene, project):
+def test_a_stroke_paints_the_class_picked_last(scene, project):
+    """Owner bug 2026-11-01: Root nodule was ticked, Tip was picked with the mouse, and the
+    brush painted Tip. The class picked last is what the brush paints (and what the panel
+    ticks)."""
     layer, _, _ = open_layer(scene, project.image)
-    assert layer.set_ticked("nodule", True) is True
-    assert layer.is_dirty()
+    layer.set_active_class("nodule")
+    layer.set_active_class("root_tip")
 
-    assert layer.save().ok
+    stroke(layer, (10, 30), (70, 30), size=6)
 
-    tracing = read_tracing(project.labels)
-    assert tracing is not None and tracing.ids.shape == (H, W) and not tracing.ids.any()
-    assert tracing.reviewed == {"nodule"}
+    assert set(np.unique(ids(layer)).tolist()) == {0, layer.registry().by_key("root_tip").id}
 
 
-def test_a_refused_tick_still_tells_the_panel(scene, project):
+def test_a_class_picked_mid_stroke_ends_the_stroke_in_its_own_class(scene, project):
+    """A class key pressed during a drag: the stroke so far is committed in the class it
+    began with, and the rest of the drag paints nothing (the tick and the brush never part:
+    the drag cannot go on painting the old class under the new tick)."""
     layer, _, _ = open_layer(scene, project.image)
-    heard: list[int] = []
-    layer.on_classes_changed = lambda: heard.append(1)
+    layer.set_active_class("root")
+    layer.set_size(6)
+    layer.press(QPoint(10, 30), NO_MODIFIER)
+    layer.move(QPoint(40, 30), True)
+    assert layer.gesture_active()
 
-    assert layer.set_ticked("ignore", True) is False
+    layer.set_active_class("nodule")
 
-    assert heard == [1]  # the panel puts the box back
+    assert not layer.gesture_active() and layer.can_undo()
+    layer.move(QPoint(70, 30), True)
+    layer.release(QPoint(70, 30))
+    plane = ids(layer)
+    root = layer.registry().by_key("root").id
+    assert set(np.unique(plane).tolist()) == {0, root}
+    assert plane[30, 20] == root and plane[30, 65] == 0  # nothing after the pick
+    assert len(layer.document.history.undo_stack) == 1
+
+
+def test_an_older_file_with_a_reviewed_list_opens_clean(scene, project):
+    write_legacy_tracing(
+        project.labels, Tracing(np.ones((H, W), np.uint8)), default_registry(), {"nodule"}
+    )
+    save_registry(project.folder, default_registry())
+
+    layer, _, notices = open_layer(scene, project.image)
+
+    assert notices == [] and not layer.is_dirty() and ids(layer).all()
+    assert layer.status() == LayerStatus("clean", "GT", "gt/plot_001.png")
 
 
 # ============================================================================== registry
@@ -446,10 +510,9 @@ def test_every_edit_is_refused_while_read_only(scene, project):
     layer.set_tool("fill")
     click(layer, (20, 20))  # fill
     assert layer.clear() is False
-    assert layer.set_ticked("nodule", True) is False  # a user tick
 
     assert notices_of(host) == [(locked_text(layer), "danger")]  # the first refusal says why
-    assert layer.document.ticked() == frozenset() and not ids(layer).any()
+    assert not ids(layer).any()
     assert len(layer.document.history.undo_stack) == 0 and not layer.is_dirty()
 
     layer.open(project.image, (W, H), project.folder)  # the next open says it again
@@ -631,7 +694,7 @@ def test_a_lossless_remap_is_saved_without_a_prompt(scene, project):
     swapped["classes"][0]["id"], swapped["classes"][1]["id"] = 2, 1  # root=2, nodule=1
     plane = np.zeros((H, W), np.uint8)
     plane[5:15, 5:15] = 2  # root in the other project's ids
-    write_tracing(project.labels, Tracing(plane, frozenset({"root"})), Registry.from_dict(swapped))
+    write_tracing(project.labels, Tracing(plane), Registry.from_dict(swapped))
 
     opened = open_session(scene, project.image)
 
@@ -674,7 +737,7 @@ def test_undo_back_to_the_saved_labels_is_saved_again(scene, project):
 
     layer.undo()
     assert not layer.is_dirty()
-    assert layer.status() == LayerStatus("clean", "GT · 1/3 checked", "gt/plot_001.png")
+    assert layer.status() == LayerStatus("clean", "GT", "gt/plot_001.png")
     layer.redo()
     assert layer.is_dirty() and layer.status() == LayerStatus("dirty")
     layer.undo()
@@ -742,7 +805,7 @@ def test_erasing_a_stroke_by_hand_is_saved_again(scene, project):
     stroke(layer, (5, 30), (75, 30), size=20)
 
     assert not ids(layer).any() and not layer.is_dirty()
-    assert layer.status() == LayerStatus("clean", "GT · 0/3 checked", "gt/plot_001.png")
+    assert layer.status() == LayerStatus("clean", "GT", "gt/plot_001.png")
 
 
 def test_clearing_empty_labels_changes_nothing(scene, project):
@@ -751,25 +814,22 @@ def test_clearing_empty_labels_changes_nothing(scene, project):
     assert not opened.layer.is_dirty() and opened.dirty == []
 
 
-def test_ticking_and_unticking_a_class_changes_nothing(scene, project):
+def test_picking_classes_changes_nothing(scene, project):
     opened = open_session(scene, project.image)
 
-    opened.layer.set_ticked("nodule", True)
-    assert opened.layer.is_dirty()
-    opened.layer.set_ticked("nodule", False)
+    for key in ("nodule", "ignore", "nodule"):
+        opened.layer.set_active_class(key)
 
-    assert not opened.layer.is_dirty() and opened.dirty == [True, False]
+    assert not opened.layer.is_dirty() and opened.dirty == []
 
 
-def test_a_tick_still_differs_after_its_stroke_is_undone(scene, project):
+def test_a_class_picked_before_an_undone_stroke_leaves_nothing_to_save(scene, project):
     layer, _, _ = open_layer(scene, project.image)
-    layer.set_ticked("root_tip", True)
+    layer.set_active_class("root_tip")
     stroke(layer, (10, 30), (70, 30))
     layer.undo()
 
-    assert layer.is_dirty()  # the tick is still new
-    assert layer.save().ok
-    assert read_tracing(project.labels).reviewed == {"root_tip"}
+    assert not layer.is_dirty()  # a pick is no edit (it was a tick until 2026-11-01)
 
 
 def test_a_remapped_file_stays_unsaved_after_undoing_every_stroke(scene, project):
@@ -842,6 +902,7 @@ def _median_check_ms(layer, count=30) -> float:
     return statistics.median(times)
 
 
+@pytest.mark.wallclock
 def test_the_check_is_cheap_on_a_2048_plane(scene, project):
     """About 0.05 ms (cv2.norm over 3.1 MB); 2 ms leaves 40x headroom on a busy machine."""
     layer = _big_layer(scene, project)
@@ -849,6 +910,7 @@ def test_the_check_is_cheap_on_a_2048_plane(scene, project):
     assert _median_check_ms(layer) < 2.0
 
 
+@pytest.mark.wallclock
 @strict
 def test_the_check_is_within_0_25_ms_on_a_2048_plane(scene, project):
     assert _median_check_ms(_big_layer(scene, project), 200) <= 0.25

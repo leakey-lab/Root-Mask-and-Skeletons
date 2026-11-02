@@ -53,13 +53,13 @@ def build_length_app(tmp_path, image_manager=None):
     return DashApp(DataProcessor(csv), str(tmp_path), image_manager or FakeImageManager())
 
 
-def build_area_app(tmp_path):
+def build_area_app(tmp_path, image_manager=None):
     """Return a DashAppArea over a synthetic root_areas.csv in ``tmp_path``."""
     from app.data_processing.data_processor_area import DataProcessorArea
     from app.visualization.dash_app_area import DashAppArea
 
     csv = write_metric_csv(os.path.join(tmp_path, "root_areas.csv"), AREA_COLUMN)
-    return DashAppArea(DataProcessorArea(csv), str(tmp_path))
+    return DashAppArea(DataProcessorArea(csv), str(tmp_path), image_manager or FakeImageManager())
 
 
 def _split_output_key(key: str):

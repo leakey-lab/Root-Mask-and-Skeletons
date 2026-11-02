@@ -1,11 +1,12 @@
 """One settings factory (``app.settings.app_settings``): the only ``QSettings`` constructor.
 
 ``QSettings(organization, application)`` ignores ``setDefaultFormat`` and ``setPath``, so a
-store built anywhere else would read and write the user's real settings (the registry on
-Windows) from tests, scripts and agents (C5-04, X8). The factory gives the user's store
-on a screen and a fresh memory store on the ``offscreen`` platform; every default store
-goes through it. These tests never open the user's settings: the factory's ``QSettings``
-is replaced wherever a store could reach it.
+store built anywhere else could read and write the user's real settings (the settings file,
+or the registry on Windows) from tests, scripts and agents (C5-04, X8). The factory gives
+the user's settings file on a screen (``tests/test_settings_ini_import.py``: the file and
+its one-time import) and a fresh memory store on the ``offscreen`` platform; every default
+store goes through it. These tests never open the user's settings: the factory's
+``QSettings`` is replaced wherever a store could reach it.
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ from pathlib import Path
 import pytest
 
 import app.settings as factory
-from app import APP_NAME, ORGANIZATION_NAME
 from app.settings import MemorySettings, app_settings, headless
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,12 +70,13 @@ def test_headless_gives_a_fresh_memory_store_each_time(app, no_user_settings):
     assert second.value("recent_projects", "[]") == "[]"  # nothing is shared
 
 
-def test_on_a_screen_it_is_the_users_qsettings(app, monkeypatch):
+def test_on_a_screen_it_is_the_users_settings_file(app, monkeypatch, tmp_path):
     made = []
+    monkeypatch.setenv("SPROUTS_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(factory, "headless", lambda: False)
-    monkeypatch.setattr(factory, "QSettings", lambda *args: made.append(args) or "the user's")
+    monkeypatch.setattr(factory, "ini_settings", lambda path: made.append(path) or "the user's")
     assert app_settings() == "the user's"
-    assert made == [(ORGANIZATION_NAME, APP_NAME)]
+    assert made == [os.path.join(str(tmp_path), "settings.ini")]
 
 
 def test_the_memory_store_answers_what_the_stores_call():

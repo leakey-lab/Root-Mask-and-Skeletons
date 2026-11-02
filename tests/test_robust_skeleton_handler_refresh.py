@@ -57,7 +57,7 @@ def test_a_cancelled_skeleton_run_refreshes_the_window(project, qapp, monkeypatc
     toasts = [c.args for c in fb.calls if c.name == "notify"]
     assert toasts[-1] == (f"{cancelled}; finished skeletons were kept", "info")
     assert project.window.outputs_changed == [True]  # badges / display follow the disk
-    assert project.window.loaded == []  # no "Results loaded" for a cancelled run
+    assert project.window.loaded == []  # a cancelled run loads no results
 
 
 def test_a_failed_skeleton_run_refreshes_the_window(project, qapp, monkeypatch):  # noqa: F811

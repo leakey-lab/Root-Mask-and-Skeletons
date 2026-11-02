@@ -8,7 +8,8 @@ shell's surfaces:
   (item counts with ETA when a total is known, else a percent; Cancel wired to
   ``on_cancel``);
 * status -> ``QStatusBar.showMessage`` (mirrored in the statusline);
-* notify / task_failed -> toasts through an injected ``notifier(message, kind)``.
+* notify / task_failed -> toasts through an injected ``notifier(message, kind)``; a notice
+  with an action goes as ``notifier(message, kind, action)``.
 
 Every collaborator is injected, so the class is testable without a MainWindow.
 """
@@ -19,10 +20,11 @@ from collections.abc import Callable
 
 from PyQt6.QtWidgets import QStatusBar
 
-from app.feedback import NoticeKind, progress_percent
+from app.feedback import NoticeAction, NoticeKind, progress_percent
 from app.gui.task_progress import TaskProgressWidget
 
-Notifier = Callable[[str, str], None]
+#: ``notifier(message, kind)``, or ``notifier(message, kind, action)`` for a notice with a button.
+Notifier = Callable[..., None]
 
 
 class QtUiFeedback:
@@ -80,9 +82,15 @@ class QtUiFeedback:
         if self._status_bar is not None:
             self._status_bar.showMessage(message, timeout_ms)
 
-    def notify(self, message: str, kind: NoticeKind = "success") -> None:
-        if self._notifier is not None:
+    def notify(
+        self, message: str, kind: NoticeKind = "success", *, action: NoticeAction | None = None
+    ) -> None:
+        if self._notifier is None:
+            return
+        if action is None:
             self._notifier(message, kind)
+        else:
+            self._notifier(message, kind, action)
 
     def _task_ended(self) -> None:
         if self._on_task_end is not None:

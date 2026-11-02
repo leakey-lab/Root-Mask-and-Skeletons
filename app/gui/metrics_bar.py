@@ -113,6 +113,7 @@ class _ElidedLabel(QLabel):
         super().__init__(text, parent)
         self._forms = forms
         self._forms_of: tuple[str, list[str]] = ("", [""])  # (text, its forms), cached
+        self._note = ""  # one more tooltip line while the text is cut (set_note)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt override
@@ -134,16 +135,19 @@ class _ElidedLabel(QLabel):
         return self._forms_of[1]
 
     def _elided(self) -> str:
-        width = self.contentsRect().width()
-        metrics = self.fontMetrics()
+        # The first form that fits whole (fit_forms' rule: the fractional width rounded up).
+        return fit_forms(self._text_forms(), self.fontMetrics(), self.contentsRect().width())
 
-        def fits(form: str) -> bool:  # by the rounded advance (fit_forms' default: the exact one)
-            return metrics.horizontalAdvance(form) <= width
-
-        return fit_forms(self._text_forms(), metrics, width, fits)
+    def set_note(self, note: str) -> None:
+        """``note`` follows the full text in the tooltip while the text is cut (the label's
+        tooltip hides its cell's, e.g. the STATUS cell's GT note)."""
+        if note != self._note:
+            self._note = note
+            self._sync_tooltip()
 
     def _sync_tooltip(self) -> None:
-        self.setToolTip(self.text() if self._elided() != self.text() else "")
+        cut = self._elided() != self.text()
+        self.setToolTip("\n".join(filter(None, (self.text(), self._note))) if cut else "")
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt override
         painter = QPainter(self)
@@ -186,7 +190,9 @@ class MetricsBar(QWidget):
         row.setSizeConstraint(QHBoxLayout.SizeConstraint.SetNoConstraint)
 
         # A long image name falls back to its tube, depth, date and time (stem_forms).
-        self._name_cell, self._name_value = self._add_cell(row, None, first=True, elide=True)
+        self._name_cell, self._name_value = self._add_cell(
+            row, None, first=True, elide=True, forms=stem_forms
+        )
         self._name_value.setStyleSheet(
             f"color: {tokens.TEXT}; font-size: 11.5px; font-weight: 600; border: none;"
         )
@@ -194,7 +200,9 @@ class MetricsBar(QWidget):
         self._area_cell, self._area_value = self._add_cell(row, "AREA")
         self._fov_cell, self._fov_value = self._add_cell(row, "FOV")
         self.set_fov(fov_text(), fov_owner_tip())
-        self._status_cell, self._status_value = self._add_cell(row, "STATUS")
+        # STATUS elides too (P1-03), but only once the name is at its shortest: see
+        # _fit_status.
+        self._status_cell, self._status_value = self._add_cell(row, "STATUS", elide=True)
         # The Library display's zoom (the editors show theirs in their zoom cluster).
         self._zoom_cell, self._zoom_value = self._add_cell(row, "ZOOM")
         self._zoom_cell.setToolTip(_ZOOM_TIP)
@@ -219,11 +227,13 @@ class MetricsBar(QWidget):
         accent: bool = False,
         first: bool = False,
         elide: bool = False,
+        forms: Callable[[str], list[str]] | None = None,
     ) -> tuple[QFrame, QLabel]:
         """Add one inline label/value cell; return (cell, value QLabel).
 
-        ``elide`` makes the value shorten itself (middle ellipsis) rather than set the
-        bar's minimum width; used for the free-length image name.
+        ``elide`` makes the value shorten itself (``forms``' shorter forms, else a middle
+        ellipsis) rather than set the bar's minimum width; used for the free-length image
+        name and the STATUS words.
         """
         cell = QFrame()
         cell.setObjectName("metricsCell")
@@ -241,7 +251,7 @@ class MetricsBar(QWidget):
             )
             line.addWidget(label)
 
-        value = _ElidedLabel(_DASH, forms=stem_forms) if elide else QLabel(_DASH)
+        value = _ElidedLabel(_DASH, forms=forms) if elide else QLabel(_DASH)
         value.setProperty("baseColor", tokens.ACCENT if accent else tokens.TEXT)
         value.setStyleSheet(_value_qss(value.property("baseColor")))
         line.addWidget(value)
@@ -319,13 +329,16 @@ class MetricsBar(QWidget):
             by_time=area_by_time,
             method_note=method_notes.get("area", ""),
         )
+        status_tip = status_tip if status and status_tip else ""
+        self._status_value.set_note(status_tip)  # an elided STATUS keeps the cell's note
         self._status_value.setText(status if status else _DASH)
         self._name_value.setText(name if name else _DASH)
-        self._status_cell.setToolTip(status_tip if status and status_tip else "")
+        self._status_cell.setToolTip(status_tip)
         self._status_cell.setVisible(bool(status))
         self._name_cell.setVisible(bool(name))
         self._sync_separators()
         self._fit_zoom()
+        self._fit_status()
 
     def set_fov(self, text: str, tooltip: str = "") -> None:
         """Show ``text`` in the FOV cell (the field of view of the shown measurement, or the
@@ -345,15 +358,44 @@ class MetricsBar(QWidget):
         self._fit_zoom()
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt override
-        """The cells' minimum without the ZOOM cell: it never widens the window."""
+        """The cells' minimum without the ZOOM cell and with the STATUS words at their
+        shortest: neither widens the window."""
         hint = self.layout().minimumSize()
+        width = hint.width()
         if not self._zoom_cell.isHidden():
-            hint.setWidth(max(0, hint.width() - self._zoom_cell.minimumSizeHint().width()))
+            width -= self._zoom_cell.minimumSizeHint().width()
+        if not self._status_cell.isHidden():
+            width -= self._status_min() - self._status_value.minimumSizeHint().width()
+        hint.setWidth(max(0, width))
         return hint
 
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().resizeEvent(event)
         self._fit_zoom()
+        self._fit_status()
+
+    def _status_min(self) -> int:
+        """The STATUS value's minimum width as the layout reads it (its own, else its hint)."""
+        value = self._status_value
+        return value.minimumWidth() or value.minimumSizeHint().width()
+
+    def _fit_status(self) -> None:
+        """Give the STATUS words a minimum: whole while the bar has room for them with the
+        other cells at their minimum, else the room left (they elide, down to their own
+        minimum). So the bar looks as it did while STATUS fitted (ZOOM goes first, then the
+        name shortens) and STATUS no longer sets the window's minimum width (P1-03)."""
+        cell, value = self._status_cell, self._status_value
+        if cell.isHidden():
+            return
+        others = sum(
+            c.minimumSizeHint().width() for c in self._cells if c is not cell and not c.isHidden()
+        )
+        caption = cell.minimumSizeHint().width() - self._status_min()  # margins, STATUS, gap
+        room = self.width() - others - caption
+        wanted = max(value.minimumSizeHint().width(), min(value.sizeHint().width(), room))
+        if wanted != value.minimumWidth():
+            value.setMinimumWidth(wanted)
+            cell.updateGeometry()  # the bar's layout reads the new minimum at once
 
     def _fit_zoom(self) -> None:
         """Show the ZOOM cell while there is a zoom to report (an image is named) and room
@@ -361,7 +403,10 @@ class MetricsBar(QWidget):
         cell = self._zoom_cell
         wanted = self._zoom is not None and not self._name_cell.isHidden()
         if wanted:
+            # The STATUS words count whole: ZOOM goes before they elide.
             others = self.layout().minimumSize().width()
+            if not self._status_cell.isHidden():
+                others += self._status_value.sizeHint().width() - self._status_min()
             if not cell.isHidden():
                 others -= cell.minimumSizeHint().width()
             wanted = self.width() >= others + cell.minimumSizeHint().width()

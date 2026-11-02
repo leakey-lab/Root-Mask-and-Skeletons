@@ -1,16 +1,16 @@
 """
-Root-length dashboard: what each view shows for a selection (the view model).
+Metric dashboards (length and area): what each view shows for a selection (the view model).
 
 Given the dashboard and the values of the callback Inputs, these functions return
 the callback outputs: the figure of a view with its message and component styles,
 the one-line summary of the control strip, the legend Patch, the rows behind the
 "Export CSV" of a view and the date of a hovered point. The Dash wiring lives in
-:mod:`.dash_length_callbacks`, the figures in
+:mod:`.dash_metric_callbacks`, the figures in
 :class:`.dash_visualizations.DashVisualizations`.
 
-Functions that read the dashboard take it first (``dashboard``: the
-:class:`.dash_app.DashApp`, or anything with the attributes of
-:class:`LengthDashboard`) and read it when called, like the methods they were.
+Functions that read the dashboard take it first (``dashboard``: a
+:class:`.dash_metric_app.MetricDashApp`, or anything with the attributes of
+:class:`MetricDashboard`) and read it when called, like the methods they were.
 """
 
 import re
@@ -21,12 +21,12 @@ import pandas as pd
 from dash.exceptions import PreventUpdate
 
 from . import dash_export, theme
-from .dash_length_layout import (
+from .dash_metric_layout import (
+    CONTROLS_LABEL,
     FACETED_GRAPH_STYLE,
     GRAPH_STYLE,
     HIDDEN,
     IMAGES_SHOWN,
-    LENGTH_SHELL,
     SHOWN,
 )
 from .dash_shell import NO_OPTIONS_SUMMARY, count_label, plotted_tube, with_uirevision
@@ -39,10 +39,12 @@ if TYPE_CHECKING:
 
     from .dash_data_cache import DataCache
 
-    class LengthDashboard(Protocol):
+    class MetricDashboard(Protocol):
         """What the view model reads of the dashboard (see DashVisualizations)."""
 
         data_cache: DataCache
+        #: Its ``metric_label`` ("Length", "Area") names the metric in the export.
+        data_processor: Any
 
         def show_growth_over_time(self, **kwargs: Any) -> Any: ...
         def show_growth_lines(self, selected_tube: int) -> Any: ...
@@ -58,7 +60,7 @@ lines_tube = plotted_tube
 
 
 def controls_summary(
-    dashboard: "LengthDashboard", view, tube, selected_tubes, faceted_tubes, faceted_dates
+    dashboard: "MetricDashboard", view, tube, selected_tubes, faceted_tubes, faceted_dates
 ) -> str:
     """One line for the collapsed control strip (PV-15)."""
     if view == "lines":
@@ -78,7 +80,7 @@ def controls_summary(
 
 
 def render_view(
-    dashboard: "LengthDashboard",
+    dashboard: "MetricDashboard",
     view,
     selected_tube,
     selected_tubes,
@@ -88,7 +90,7 @@ def render_view(
     dates,
 ) -> tuple:
     """Outputs of update_visualization for ``view`` (figure, message, styles)."""
-    keep = dash.no_update  # tube-selector options are static (see dash_length_layout.controls)
+    keep = dash.no_update  # tube-selector options are static (see dash_metric_layout.controls)
     if view == "time":
         options = viz_options or []
         figure = dashboard.show_growth_over_time(
@@ -111,7 +113,7 @@ def render_view(
     return figure, "", HIDDEN, keep, GRAPH_STYLE, HIDDEN
 
 
-def faceted_outputs(dashboard: "LengthDashboard", tubes, dates) -> tuple:
+def faceted_outputs(dashboard: "MetricDashboard", tubes, dates) -> tuple:
     """(figure, message, tube-selector style) of the Depth Profile Grid view."""
     count = len(tubes or [])
     if count == 0 or count > MAX_TUBES:
@@ -122,9 +124,7 @@ def faceted_outputs(dashboard: "LengthDashboard", tubes, dates) -> tuple:
             )
             figure = theme.message_figure(text, color=theme.DANGER)
         else:
-            figure = theme.message_figure(
-                f"Select 1 to {MAX_TUBES} tubes under “{LENGTH_SHELL.controls_label}”"
-            )
+            figure = theme.message_figure(f"Select 1 to {MAX_TUBES} tubes under “{CONTROLS_LABEL}”")
         return figure, "", HIDDEN
     selected_dates = [pd.Timestamp(d) for d in dates] if dates else None
     figure = dashboard.create_faceted_depth_profile(tubes, selected_dates)
@@ -149,7 +149,7 @@ def legend_patch(view: str, visible: bool) -> tuple:
 
 
 def export_table(
-    dashboard: "LengthDashboard",
+    dashboard: "MetricDashboard",
     view,
     tube,
     selected_tubes,
@@ -159,10 +159,11 @@ def export_table(
 ) -> dash_export.ExportTable | None:
     """The rows behind ``view``, from the same DataCache aggregates as the chart."""
     cache = dashboard.data_cache
+    noun = dashboard.data_processor.metric_label.lower()  # "length", "area"
     if view == "stacked":
         return dash_export.ExportTable(
             dash_export.tube_date_totals(cache),
-            "Total root length per tube and measurement date (sum over positions)",
+            f"Total root {noun} per tube and measurement date (sum over positions)",
             {"tubes": "all", "dates": "all"},
         )
     if view == "time":
@@ -170,7 +171,7 @@ def export_table(
         field_average = "show_field_avg" in (viz_options or [])
         return dash_export.ExportTable(
             dash_export.growth_over_time(cache, tubes, field_average=field_average),
-            "Root length over time: field average of per-tube totals (dates within "
+            f"Root {noun} over time: field average of per-tube totals (dates within "
             "3 days merged; SD across tubes) and per-tube totals per measurement date",
             {
                 "tubes": ", ".join(map(str, tubes)) or "none",
@@ -183,7 +184,7 @@ def export_table(
             return None
         return dash_export.ExportTable(
             dash_export.depth_intervals(cache, plotted, interval_size=GROWTH_LINES_INTERVAL),
-            f"Root length statistics per {GROWTH_LINES_INTERVAL}-position depth interval "
+            f"Root {noun} statistics per {GROWTH_LINES_INTERVAL}-position depth interval "
             "and measurement date for one tube",
             {"tube": str(plotted), "dates": "all"},
         )
@@ -195,7 +196,7 @@ def export_table(
         profile = build_faceted_profile(cache, tubes, dates)
         return dash_export.ExportTable(
             dash_export.faceted_intervals(profile, cache.value_column),
-            "Mean root length per depth interval: each tube next to the field average "
+            f"Mean root {noun} per depth interval: each tube next to the field average "
             "(all tubes) of the same interval and date",
             {
                 "tubes": ", ".join(map(str, tubes)),

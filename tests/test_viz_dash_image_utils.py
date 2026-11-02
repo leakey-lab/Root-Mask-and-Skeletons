@@ -11,7 +11,6 @@ import io
 import os
 
 import numpy as np
-import pandas as pd
 import pytest
 from flask import Flask
 from PIL import Image
@@ -279,15 +278,14 @@ def test_thumbnail_cache_evicts_the_least_recently_used(tmp_path):
 def test_thumbnail_cache_serves_unknown_keys_as_empty(tmp_path):
     cache = diu.ThumbnailCache({}, capacity=4)
     assert cache.jpeg((1, 1, "2024.07.18")) == b""
-    assert cache.data_url((1, 1, "2024.07.18")) == ""
 
 
-def test_get_encoded_image_keeps_its_contract_with_jpeg_data(images):
-    index = diu.build_available_images_map(FakeImageManager(images))
-    url = diu.get_encoded_image(index, 1, 11, pd.Timestamp("2024-07-18"))
-    assert url.startswith("data:image/jpeg;base64,")
-    assert diu.get_encoded_image(index, 1, 12, pd.Timestamp("2024-07-18")) == ""
-    assert diu.get_encoded_image(index, 1, 11, "not a date") == ""
+def test_the_old_data_url_path_is_gone():
+    # S15-07 tier 2: thumbnails are served by URL only (PV-09); the base64 data-URL
+    # path (get_encoded_image, ThumbnailCache.data_url, jpeg_data_url) had no caller.
+    assert not hasattr(diu, "get_encoded_image")
+    assert not hasattr(diu, "jpeg_data_url")
+    assert not hasattr(diu.ThumbnailCache, "data_url")
 
 
 # ---- thumbnail route (PV-09) ---------------------------------------------------

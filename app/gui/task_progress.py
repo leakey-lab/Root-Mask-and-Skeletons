@@ -72,6 +72,7 @@ QToolButton:hover {{
 QToolButton:disabled {{
     color: {tokens.TEXT_FAINT};
 }}
+{tokens.focus_rule("QToolButton")}
 """
 
 

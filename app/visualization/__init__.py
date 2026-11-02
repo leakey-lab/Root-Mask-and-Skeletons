@@ -17,10 +17,10 @@ _EXPORTS: dict[str, str] = {
     # Dash apps
     "DashApp": ".dash_app",
     "DashAppArea": ".dash_app_area",
+    "MetricDashApp": ".dash_metric_app",
     "DashVisualizations": ".dash_visualizations",
     "DataCache": ".dash_data_cache",
     "build_available_images_map": ".dash_image_utils",
-    "get_encoded_image": ".dash_image_utils",
     # Qt windows
     "DashVizWindow": ".viz_window",
     "RootLengthVisualization": ".root_length_visulization",

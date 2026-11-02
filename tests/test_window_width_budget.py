@@ -5,11 +5,12 @@ patches, Qt toolkit item 4).
 A label that does not elide sets the window's minimum to its whole text, and the right panel
 spreads its largest page's minimum to every stage. ``test_shell_chrome_topbar`` checks 900 px
 with no project open; this file opens a project, with and without long names, and selects a
-measured image (whose STATUS cell is the known offender P1-03).
+measured image (its STATUS words set a 1,112-1,126 px minimum until they elided, P1-03).
 
 Widths need real fonts: offscreen Qt on Windows has an empty font database (every glyph a
 box) unless ``QT_QPA_FONTDIR`` names a font folder, which must be set before the application
-exists. So a child process measures, on the offscreen platform with the system fonts. The
+exists. So a child process measures, on the offscreen platform with the system fonts and the
+app's own (IBM Plex, which ``main.apply_stylesheet`` registers before the stylesheet). The
 dashboards are stand-ins there (no browser offscreen); their pages hold no chrome text.
 """
 
@@ -193,10 +194,5 @@ def test_every_stage_fits_the_budget_with_long_names(widths):
     assert _over_budget(widths, "nothing_selected") == {}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="P1-03 (owner question #13): the plain STATUS label of the metrics bar sets the "
-    "window minimum to about 1,112-1,126 px once a measured image is shown",
-)
 def test_every_stage_fits_the_budget_with_a_measured_image_selected(widths):
     assert _over_budget(widths, "measured") == {}

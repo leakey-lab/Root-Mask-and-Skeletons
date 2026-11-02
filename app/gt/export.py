@@ -37,7 +37,6 @@ from app.gt.store import (
     align_to_registry,
     gt_path,
     histogram,
-    is_complete,
     read_tracing,
 )
 from app.io_utils import atomic_open, atomic_write_text, path_key
@@ -86,15 +85,13 @@ class ExportOptions:
     ``out_dir`` must be empty or absent; a relative or drive-relative one (``D:out``) is
     resolved once, when the export starts. ``val_fraction`` (0-1) is the target
     share of exported images in the validation split; ``group_by_tube`` keeps
-    every image of one tube in the same split; ``only_complete`` exports only
-    images whose every active class was reviewed; ``seed`` makes the split
-    reproducible.
+    every image of one tube in the same split; ``seed`` makes the split
+    reproducible. Every image with a GT file is exported.
     """
 
     out_dir: str
     val_fraction: float = 0.2
     group_by_tube: bool = True
-    only_complete: bool = True
     seed: int = 0
 
 
@@ -106,7 +103,6 @@ class ExportResult:
     exported: int
     train: int
     val: int
-    skipped_incomplete: int
     errors: list[tuple[str, str]] = field(default_factory=list)
 
 
@@ -323,7 +319,6 @@ def _write_provenance(
             "exported": result.exported,
             "train": result.train,
             "val": result.val,
-            "skipped_incomplete": result.skipped_incomplete,
             "errors": len(result.errors),
         },
     )
@@ -377,7 +372,6 @@ def export_dataset(
         os.makedirs(d, exist_ok=True)
 
     errors: list[tuple[str, str]] = []
-    skipped_incomplete = 0
     rows: dict[str, dict] = {}  # exported stem -> its manifest row, in export order
     index = LabelsIndex()  # the names of each image folder's gt/
     listed: dict[str, dict[str, str]] = {}  # image folder -> its gt/ labels by stem key
@@ -402,12 +396,9 @@ def export_dataset(
                     for warning in warnings:
                         logger.info("GT alignment warning for %s: %s", stem, warning)
 
-                    if options.only_complete and not is_complete(aligned, registry):
-                        skipped_incomplete += 1
-                    else:
-                        rows[stem] = _export_stem(
-                            stem, image_path, aligned.ids, registry, masks_dir, images_dir
-                        )
+                    rows[stem] = _export_stem(
+                        stem, image_path, aligned.ids, registry, masks_dir, images_dir
+                    )
                 except (OSError, ValueError, _TOO_LARGE) as exc:
                     # A missing/unreadable/too large source image, or a write
                     # failure (disk full, bad permissions, malformed array), must
@@ -457,7 +448,6 @@ def export_dataset(
         exported=len(exported_stems),
         train=len(train_stems),
         val=len(val_stems),
-        skipped_incomplete=skipped_incomplete,
         errors=errors,
     )
     _write_provenance(manifest_path, project_dir, n, registry, options, result)

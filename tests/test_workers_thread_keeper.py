@@ -175,6 +175,7 @@ def test_release_in_a_result_slot_never_waits_for_the_thread(app):
         del thread
 
 
+@pytest.mark.wallclock
 def test_release_of_a_running_plain_qthread_never_blocks_and_outlives_its_references():
     # In a child process: destroying a running QThread aborts the whole process. A thread
     # that was not started through GuardedThread is kept from the release on.
@@ -518,7 +519,9 @@ def test_a_dashboard_deleted_while_its_server_runs_never_aborts(tmp_path, varian
         text=True,
         timeout=180,
     )
-    assert result.returncode == 0, (result.returncode, result.stderr[-2000:])
+    # A str message: pytest prints it whole (a tuple's repr was cut to one line on macOS,
+    # CI run 40970595195, hiding why the page never loaded there).
+    assert result.returncode == 0, f"exit {result.returncode}\n{result.stderr[-6000:]}"
     lines = result.stdout.strip().splitlines()
     assert lines[-1] == "server running at the end: False"
     if variant == "cleanup_raise":  # cleanup_server stops the threads even when it raises

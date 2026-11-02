@@ -177,7 +177,53 @@ def test_selection_follows_an_editor_that_kept_its_image(mw, tmp_path):
 # --------------------------------------------------------------------------- #
 #  Jobs (RB-04 / RB-07)
 # --------------------------------------------------------------------------- #
+def _weights(monkeypatch, tmp_path, *, mask: bool, skeleton: bool) -> dict[str, str]:
+    """Point both checkpoint paths into ``tmp_path``; each file exists only when asked."""
+    from app.inference import runtime
+
+    paths = {}
+    for name, exists in (("mask", mask), ("skeleton", skeleton)):
+        path = tmp_path / f"{name}.pth"
+        if exists:
+            path.write_bytes(b"w")
+        paths[name] = str(path)
+        monkeypatch.setattr(runtime, f"{name}_weights_path", lambda p=str(path): p)
+    return paths
+
+
+@pytest.mark.parametrize(
+    ("mask", "skeleton", "title"),
+    [(True, False, "Skeleton model missing"), (False, False, "Mask model missing")],
+)
+def test_generate_all_refuses_at_once_without_both_models(
+    mw, monkeypatch, tmp_path, mask, skeleton, title
+):
+    # S11-10: a missing skeleton model is said before the mask pass, not after it; with both
+    # missing, the mask model is named first, in one box.
+    _weights(monkeypatch, tmp_path, mask=mask, skeleton=skeleton)
+    started, boxes = [], []
+    mw.mask_generation_handler.generate_masks = lambda on_success=None: started.append(1)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: boxes.append(a[1]))
+
+    assert mw.generate_all() is False
+
+    assert started == [] and boxes == [title]
+
+
+def test_load_results_adds_no_toast_of_its_own(mw, monkeypatch, tmp_path):
+    # S11-09: the skeleton run's own toast is the one message ("Results loaded" is gone).
+    toasts = []
+    monkeypatch.setattr(mw, "notify", lambda message, *a, **k: toasts.append(message))
+    refreshed = []
+    monkeypatch.setattr(mw, "on_outputs_changed", lambda: refreshed.append(True))
+
+    mw.load_results(str(tmp_path))
+
+    assert refreshed == [True] and toasts == []
+
+
 def test_generate_all_chains_skeletons_only_on_success(mw, monkeypatch, tmp_path):
+    _weights(monkeypatch, tmp_path, mask=True, skeleton=True)
     seen = {}
     mw.mask_generation_handler.generate_masks = lambda on_success=None: seen.setdefault(
         "on_success", on_success

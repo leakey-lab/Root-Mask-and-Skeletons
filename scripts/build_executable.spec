@@ -9,7 +9,9 @@ scripts\\build.ps1 and scripts\\build.bat do exactly that and fail loudly on err
 Every path is anchored at the repository root by scripts/build_support.py, which also
 lists the bundled data files, writes build_info.json (what was built, from which commit)
 and builds the Windows version resource from app.__version__. The torch/CUDA DLLs are
-collected by PyInstaller's torch hook (no manual copying).
+collected by PyInstaller's torch hook (no manual copying); torchvision's operator
+libraries (_C_stable.pyd, image_stable.pyd in 0.29) are added by build_support: its
+hook still names _C, their name in torchvision 0.22.
 """
 
 import os
@@ -32,6 +34,8 @@ datas.append((str(build_info), "."))
 a = Analysis(  # noqa: F821
     [os.path.join(ROOT, "main.py")],
     pathex=[ROOT],
+    # torchvision loads its operator libraries by path: PyInstaller would miss them.
+    binaries=build_support.torchvision_op_libraries(),
     datas=datas,
     # app.* modules may be imported lazily (PEP 562 / importlib); bundle all of them.
     hiddenimports=build_support.app_modules() + ["resources.resource_utils"],

@@ -29,6 +29,7 @@ from app.gui.paint_canvas import PaintCanvas, pixmap_to_argb_array
 from app.gui.patch_history import PatchHistory
 from app.gui.widgets import tokens
 from tests import guards
+from tests.box_titles import record_titles, title_of
 from tests.qt_teardown import delete_widgets
 
 W, H = 200, 150  # the photos of the behaviour tests
@@ -178,9 +179,10 @@ class Answers:
 def answer_prompts(monkeypatch) -> Answers:
     """Replace ``QMessageBox.exec``: each box is recorded and answered from the queue."""
     answers = Answers()
+    record_titles(monkeypatch)
 
     def exec_(box):
-        answers.seen.append((box.windowTitle(), box.text()))
+        answers.seen.append((title_of(box), box.text()))
         if not answers.queue:
             pytest.fail(f"unexpected prompt {box.text()!r}")
         return answers.queue.pop(0)

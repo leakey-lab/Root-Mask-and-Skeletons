@@ -8,12 +8,14 @@ a skeleton Save writes a correction only when it is not.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 import app.gui.skeleton_graph_model as sgm
 from app.editing import thinning
@@ -143,3 +145,66 @@ def test_the_skeletonize_wrapper_refuses_what_is_not_a_plane():
                 assert str(exc) == "Expected a 2D binary mask."
             else:
                 raise AssertionError(f"{fn.__name__} took a {np.asarray(bad).shape} array")
+
+
+# ------------------------------------------------------------- the bilinear upscale
+#: (source (w, h), target (w, h)): a prediction to photo sizes, downscales, the exact 2x
+#: shrink (OpenCV serves it from INTER_AREA), odd and 1-px sizes
+_RESIZE_SIZES = [
+    ((341, 256), (640, 480)),
+    ((341, 256), (2048, 1536)),
+    ((640, 480), (341, 256)),
+    ((682, 512), (341, 256)),
+    ((100, 80), (37, 53)),
+    ((13, 7), (5, 3)),
+    ((5, 3), (13, 7)),
+    ((1, 1), (9, 9)),
+    ((300, 1), (77, 5)),
+    ((640, 480), (639, 481)),
+]
+#: sha256 of resize_linear_u8 over _resize_cases(): recorded on x86, where it equals
+#: cv2.resize, and the same under QEMU aarch64 (2026-10-29, A7)
+_RESIZE_DIGEST = "dda0a814447e3128a745293399ad95c06bc5ab66cb377afbe5b9a09168effd51"
+
+
+def _resize_cases():
+    rng = np.random.default_rng(29)
+    for (sw, sh), size in _RESIZE_SIZES:
+        yield rng.integers(0, 256, (sh, sw), dtype=np.uint8), size
+
+
+def _resize_goes_to_an_arm_hal() -> bool:
+    """True for OpenCV builds with the carotene or KleidiCV HAL (the arm64 wheels), whose
+    cv2.resize rounds unlike OpenCV's own code."""
+    hal = [line for line in cv2.getBuildInformation().splitlines() if "Custom HAL:" in line]
+    return any(name in line for line in hal for name in ("carotene", "KleidiCV"))
+
+
+def test_the_upscale_gives_the_same_pixels_on_every_platform():
+    """thin_raster's resize is integer numpy: the digest recorded on x86 holds on arm64 too,
+    where cv2.resize gave other pixels (macOS CI run 40970595195)."""
+    digest = hashlib.sha256()
+    for img, size in _resize_cases():
+        out = thinning.resize_linear_u8(img, size)
+        assert out.dtype == np.uint8 and out.shape == (size[1], size[0])
+        digest.update(out.tobytes())
+    assert digest.hexdigest() == _RESIZE_DIGEST
+
+
+@pytest.mark.skipif(
+    _resize_goes_to_an_arm_hal(), reason="cv2.resize goes to an arm64 HAL here: why the port exists"
+)
+def test_the_upscale_equals_opencvs_bilinear_resize():
+    rng = np.random.default_rng(123)
+    cases = list(_resize_cases())
+    for i in range(80):
+        sw, sh = int(rng.integers(1, 400)), int(rng.integers(1, 400))
+        if i % 4 == 0:  # the exact 2x shrink
+            sw, sh = 2 * max(1, sw // 2), 2 * max(1, sh // 2)
+            size = (sw // 2, sh // 2)
+        else:
+            size = (int(rng.integers(1, 900)), int(rng.integers(1, 900)))
+        cases.append((rng.integers(0, 256, (sh, sw), dtype=np.uint8), size))
+    for img, size in cases:
+        want = cv2.resize(img, size, interpolation=cv2.INTER_LINEAR)
+        assert np.array_equal(thinning.resize_linear_u8(img, size), want), (img.shape, size)

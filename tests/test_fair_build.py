@@ -87,6 +87,37 @@ def test_present_model_weights_are_bundled_at_their_runtime_path(bs, tmp_path):
     assert bundled[weights[1]] == "checkpoints/skeletonizer"
 
 
+# ------------------------------------------------- torchvision op libraries
+
+
+def test_torchvision_op_libraries_bundles_every_top_level_extension(bs, tmp_path):
+    """torchvision loads _C_stable / image_stable by path; PyInstaller's hook still names
+    the pre-0.29 _C, so a frozen import torchvision failed without them."""
+    import importlib.machinery
+
+    suffix = importlib.machinery.EXTENSION_SUFFIXES[-1]
+    for name in ("_C_stable", "image_stable"):
+        (tmp_path / f"{name}{suffix}").write_bytes(b"x")
+    (tmp_path / "__init__.py").write_text("", encoding="utf-8")
+    (tmp_path / "ops").mkdir()
+    (tmp_path / "ops" / f"nested{suffix}").write_bytes(b"x")  # only the top level is loaded
+    found = bs.torchvision_op_libraries(tmp_path)
+    assert [(Path(src).name, dest) for src, dest in found] == [
+        (f"_C_stable{suffix}", "torchvision"),
+        (f"image_stable{suffix}", "torchvision"),
+    ]
+
+
+def test_installed_torchvision_op_library_is_found(bs):
+    """The environment the bundle is built from: its torchvision ops library is collected."""
+    import importlib.util
+
+    if importlib.util.find_spec("torchvision") is None:
+        pytest.skip("torchvision not installed")
+    names = {Path(src).stem.split(".")[0] for src, _dest in bs.torchvision_op_libraries()}
+    assert names & {"_C", "_C_stable"}, names
+
+
 # ------------------------------------------------------------- version info
 
 
@@ -182,7 +213,11 @@ def test_spec_wires_repo_paths_icon_version_and_build_info(bs, tmp_path, monkeyp
     datas = analysis["datas"]
     assert all(Path(src).exists() for src, _dest in datas)
     assert (str(tmp_path / "work" / "build_info.json"), ".") in datas
+    # The Qt UI fonts (app/gui/widgets/fonts.py) once, at the path the app reads them from.
+    fonts = [dest for src, dest in datas if Path(src).resolve() == (ROOT / "resources/fonts")]
+    assert fonts == ["resources/fonts"]
     assert "app.gt.registry" in analysis["hiddenimports"]
+    assert analysis["binaries"] == bs.torchvision_op_libraries()
 
     _args, exe = _Recorder.calls["EXE"]
     assert exe["name"] == app.APP_NAME
@@ -208,37 +243,66 @@ def test_spec_and_helpers_are_not_git_ignored():
 # ------------------------------------------------------------ build scripts
 
 _STUB_OK_VERSION = '@if "%2"=="PyInstaller" if "%3"=="--version" exit /b 0\r\n@exit /b 1\r\n'
+# Every call succeeds and appends its arguments to args.txt next to the stub.
+_STUB_RECORD = '@>>"%~dp0args.txt" echo %*\r\n@exit /b 0\r\n'
+
+
+def _run_build_script(bs, root: Path, script: str, stub_text: str, env_extra=None):
+    """Run a copy of ``script`` in a throw-away tree at ``root`` with a stub interpreter."""
+    _make_required_tree(bs, root)
+    (root / "main.py").write_text("", encoding="utf-8")
+    (root / "scripts").mkdir(exist_ok=True)
+    shutil.copy2(SCRIPTS / script, root / "scripts" / script)
+    stub = root / "fake_python.bat"
+    stub.write_text(stub_text, encoding="ascii")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("SPROUTS_BUILD_")}
+    env.update(SPROUTS_BUILD_PYTHON=str(stub), SPROUTS_BUILD_NO_PAUSE="1", **(env_extra or {}))
+    if script.endswith(".ps1"):
+        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+        cmd += [str(root / "scripts" / script), "-AllowMissingModels"]
+    else:
+        cmd = ["cmd", "/c", str(root / "scripts" / script), "/allow-missing-models"]
+    # cwd is the throw-away copy too: nothing a script does may reach the real repository.
+    return subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows build scripts")
 @pytest.mark.parametrize("script", ["build.bat", "build.ps1"])
 def test_build_script_exits_nonzero_when_pyinstaller_fails(bs, tmp_path, script):
     """A failed PyInstaller run must end the script with an error, never 'success'."""
-    _make_required_tree(bs, tmp_path)
-    (tmp_path / "main.py").write_text("", encoding="utf-8")
-    (tmp_path / "scripts").mkdir(exist_ok=True)
-    shutil.copy2(SCRIPTS / script, tmp_path / "scripts" / script)
-    stub = tmp_path / "fake_python.bat"  # PyInstaller present, every build fails
-    stub.write_text(_STUB_OK_VERSION, encoding="ascii")
-    env = {**os.environ, "SPROUTS_BUILD_PYTHON": str(stub), "SPROUTS_BUILD_NO_PAUSE": "1"}
-    if script.endswith(".ps1"):
-        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
-        cmd += [str(tmp_path / "scripts" / script), "-AllowMissingModels"]
-    else:
-        cmd = ["cmd", "/c", str(tmp_path / "scripts" / script), "/allow-missing-models"]
-    # cwd is the throw-away copy too: nothing a script does may reach the real repository.
-    result = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
-        cwd=tmp_path,
-        stdin=subprocess.DEVNULL,
-    )
+    result = _run_build_script(bs, tmp_path, script, _STUB_OK_VERSION)  # every build fails
     assert result.returncode != 0
     assert "successfully" not in result.stdout.lower()
     assert "failed" in (result.stdout + result.stderr).lower()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows build scripts")
+@pytest.mark.parametrize("script", ["build.bat", "build.ps1"])
+@pytest.mark.parametrize("custom", [False, True], ids=["repo-folders", "env-folders"])
+def test_build_script_sends_the_output_folders_to_pyinstaller(bs, tmp_path, script, custom):
+    """dist/ and build/ in the repository by default; SPROUTS_BUILD_DISTPATH and
+    SPROUTS_BUILD_WORKPATH move them (a build outside the checkout, U2)."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    dist, work = (tmp_path / "out dist", tmp_path / "out work") if custom else (None, None)
+    env = {"SPROUTS_BUILD_DISTPATH": str(dist), "SPROUTS_BUILD_WORKPATH": str(work)}
+    result = _run_build_script(bs, root, script, _STUB_RECORD, env if custom else None)
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = (root / "args.txt").read_text(encoding="ascii").splitlines()
+    build = [line for line in calls if "--distpath" in line]
+    assert len(build) == 1, calls
+    expected_dist, expected_work = (dist, work) if custom else (root / "dist", root / "build")
+    assert f'--distpath "{expected_dist}"' in build[0] or f"--distpath {expected_dist}" in build[0]
+    assert f'--workpath "{expected_work}"' in build[0] or f"--workpath {expected_work}" in build[0]
+    assert str(expected_dist / "SPROUTS" / "SPROUTS.exe") in result.stdout
 
 
 def test_citation_is_bundled_at_the_bundle_root(bs):

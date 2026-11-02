@@ -107,7 +107,7 @@ def init_ui(window: "MainWindow"):
     window.feedback = QtUiFeedback(
         window.task_progress,
         status_bar=window.status_bar,
-        notifier=lambda message, kind: window.notify(message, kind),
+        notifier=lambda message, kind, action=None: window.notify(message, kind, action=action),
         on_task_end=window.statusline.refresh_runtime,
     )
     # After the first paint: one warning when the canvases draw without OpenGL by accident.

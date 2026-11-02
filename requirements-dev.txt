@@ -1,5 +1,8 @@
 # Development & CI dependencies (not required to run the app)
 pytest>=9.2
+# Parallel local runs (pytest -n auto -m "not wallclock", then -m wallclock serially; README
+# "Tests"). CI runs the suite serially.
+pytest-xdist>=3.8
 ruff>=0.17.3  # lint, import sort and format (black/isort are not used)
 pre-commit>=4.7
 # Read by the FAIR metadata tests (tests/test_fair_*.py)

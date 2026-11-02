@@ -60,6 +60,8 @@ try:
     )
     from app.gui.main_window import MainWindow
     from app.gui.widgets import tokens
+    from app.gui.widgets.focus import use_tab_only_buttons
+    from app.gui.widgets.fonts import register_fonts
     from app.workers import describe_error
     from resources.resource_utils import resource_path  # re-exported: the ui-harness uses it
 except Exception:
@@ -77,7 +79,11 @@ _session: tuple[QApplication, MainWindow] | None = None
 
 
 def apply_stylesheet(app: QApplication) -> None:
-    """Apply the SPROUTS QSS theme and the matching application palette."""
+    """Register the SPROUTS fonts, then apply the QSS theme and the matching palette.
+
+    The fonts come first: the stylesheet names IBM Plex Sans and IBM Plex Mono.
+    """
+    register_fonts()
     with open(resource_path("resources", "themes", "dark_theme.qss"), encoding="utf-8") as f:
         app.setStyleSheet(f.read())
     app.setPalette(_sprouts_palette())
@@ -172,9 +178,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     _apply_window_icon(app)
     app.setDesktopFileName(DESKTOP_FILE_NAME)
-    style = qt_style_for()
-    if style:
-        app.setStyle(style)
+    # Fusion off Windows, the native style on Windows; either way no button takes the
+    # keyboard on a click (Tab still reaches it). Before any widget exists.
+    use_tab_only_buttons(app, qt_style_for())
     try:
         apply_stylesheet(app)
     except OSError:

@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import time
 
+import pytest
+
 from app.config import AREA_CSV_HEADERS, LENGTH_CSV_HEADERS
 from app.data_processing.measurement_index import Measurement, MeasurementIndex
 from app.inference.metrics import write_metric_csv
@@ -169,6 +171,7 @@ def test_sources_name_the_csv_files(tmp_path):
     assert index.sources()["area"] is None
 
 
+@pytest.mark.wallclock
 def test_warm_lookup_is_fast(tmp_path):
     rows = [_row(f"IMG_{i:06d}", LENGTH_CSV_HEADERS[5], i / 100) for i in range(46_000)]
     _write_lengths(tmp_path, rows)

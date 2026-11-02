@@ -163,7 +163,7 @@ def test_a_measure_run_end_re_reads_the_csvs(window, monkeypatch, tmp_path):
     assert until(lambda: not window.metrics.loading)
     assert seen["invalidated"] == 1
     assert sorted(seen["parsed"]) == ["root_areas.csv", "root_lengths.csv"]
-    assert jobs == [1]  # the CSV is where Measure writes it: no search of the legacy folders
+    assert jobs == [1]  # one parse: the bar's refresh found the rewritten CSV
 
 
 def test_a_job_end_of_no_known_name_re_reads_the_csvs(window, monkeypatch):
@@ -204,8 +204,8 @@ def test_a_measure_run_end_counts_measure_once_while_its_csv_is_parsed(window, m
 
 def test_a_measure_run_end_parses_once_when_its_parse_also_searches(app, tmp_path, monkeypatch):
     """A project measured for area only: after a Measure Area run the bar's refresh starts a
-    parse, which looks for root_lengths.csv in the legacy folders too; no second, located
-    parse follows it."""
+    parse, which also looks for root_lengths.csv; no second, located parse follows it (the
+    job end's search of the older layout's folders is gone, #38)."""
     root = write_photos(tmp_path / "proj", [STEM])
     _csv(root / "mask" / "root_areas.csv", AREA_CSV_HEADERS, 4.5)
     made = [build_window(tmp_path / "s.ini", size=None, show=False)]

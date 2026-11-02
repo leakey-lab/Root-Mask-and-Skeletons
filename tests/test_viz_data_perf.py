@@ -19,10 +19,13 @@ from app.data_processing.data_processor import DataProcessor
 from app.visualization.dash_data_cache import DataCache
 from app.visualization.dash_visualizations import DashVisualizations
 
-pytestmark = pytest.mark.skipif(
-    os.environ.get("SPROUTS_PERF_TESTS") != "1",
-    reason="wall-clock budget; set SPROUTS_PERF_TESTS=1 to run",
-)
+pytestmark = [
+    pytest.mark.wallclock,
+    pytest.mark.skipif(
+        os.environ.get("SPROUTS_PERF_TESTS") != "1",
+        reason="wall-clock budget; set SPROUTS_PERF_TESTS=1 to run",
+    ),
+]
 
 BUDGET_S = 1.5
 

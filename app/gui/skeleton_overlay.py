@@ -441,13 +441,29 @@ class SkeletonDecorations:
 
     # ---------------------------------------------------------------- polyline
     def show_polyline(
-        self, points: Sequence[QPoint], cursor: QPoint | None, *, smooth: bool
+        self,
+        points: Sequence[QPoint],
+        cursor: QPoint | None,
+        start: QPoint | None = None,
+        *,
+        smooth: bool,
     ) -> None:
+        """The line through ``points`` and its handles; the rubber band to ``cursor`` goes on
+        from the last point, or from ``start`` as a straight line apart from the line."""
         pts = [(p.x(), p.y()) for p in points]
         handles = _centred(pts)
-        if cursor is not None and (not pts or (cursor.x(), cursor.y()) != pts[-1]):
+        if (
+            start is None
+            and cursor is not None
+            and (not pts or (cursor.x(), cursor.y()) != pts[-1])
+        ):
             pts.append((cursor.x(), cursor.y()))
-        self.polyline_item.setPath(polyline_path(_centred(pts).tolist(), smooth))
+        path = polyline_path(_centred(pts).tolist(), smooth)
+        if start is not None and cursor is not None and cursor != start:
+            (x0, y0), (x1, y1) = _centred([(start.x(), start.y()), (cursor.x(), cursor.y())])
+            path.moveTo(x0, y0)
+            path.lineTo(x1, y1)
+        self.polyline_item.setPath(path)
         self.handles_item.set_points(handles)
 
     def clear_polyline(self) -> None:

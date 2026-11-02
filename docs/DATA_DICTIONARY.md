@@ -24,9 +24,15 @@ SPROUTS works on one folder of images (the *project*) and writes next to it:
 `<stem>` is the image file name without its last extension: `X.png.jpg` has the stem
 `X.png`, so its GT files are `gt/mask/X.png.png`, `gt/skeletons/X.png.png` and
 `gt/X.png.png`, and its prediction is `skeletons/X.png_fake.png`. Images are read in their
-stored orientation (EXIF orientation ignored). Older projects may have skeletons
-in `output/skeletonizer/test_latest/images/` or masks in `output/mask/`; Measure still
-finds them there.
+stored orientation (EXIF orientation ignored). The older layout (skeletons in
+`[output/]skeletonizer/test_latest/images/`, masks in `output/mask/`) is not read since
+2026-10-31: those files and CSVs are not found. A skeleton's `_fake.png` suffix is read in
+any letter case (`B_fake.PNG`, since 2026-10-31), for an image without a GT skeleton file
+only: an image with `gt/skeletons/<stem>.png` (valid or not) is measured as before, and a
+suffix in another case is not read for it. Where a case-sensitive disk holds several
+skeletons of one image, a file with the exact suffix is measured before one with the suffix
+in another case (`A_fake.png` before `a_FAKE.png` for image `a`), and the others are
+duplicates.
 
 Stems compare without case, on every platform: `A.png`, `a.jpg` and `a.png` are one
 image. When several files share a stem, SPROUTS uses one of them everywhere: the one the
@@ -116,7 +122,7 @@ changes a CSV value.
 
 | Column | Type | Unit | Meaning |
 |---|---|---|---|
-| `Image` | text | | Image stem: the prediction's file name without `_fake.png` / `.png`, or the GT file's without `.png` when the image has no prediction |
+| `Image` | text | | Image stem: the prediction's file name without `_fake.png` / `.png` (in any letter case), or the GT file's without `.png` when the image has no prediction Measure reads |
 | `Tube` | integer | | Tube number from the file name; empty if absent or if the row failed |
 | `Position` | integer | | Position along the tube; empty if absent or if the row failed |
 | `Date` | text `YYYY.MM.DD` | | Capture date from the file name (dots, not ISO 8601 dashes); empty if absent or failed |
@@ -227,16 +233,21 @@ a human saved.
 8-bit palette PNG at the source image's resolution. Pixel value = class id: `0`
 background (transparent in the palette), `1`-`254` classes from `gt/classes.json`, `255`
 Ignore (excluded from training loss). The palette shows each class in its colour. A text
-chunk `sprouts_gt` holds JSON: `{"v": 1, "classes": {"<id>": "<key>", ...}, "reviewed":
-["<key>", ...]}`, the id-to-key map the file was written with and the classes the
-annotator checked on this image ("looked for it"). A saved file with nothing painted is a
-valid negative example.
+chunk `sprouts_gt` holds JSON: `{"v": 1, "classes": {"<id>": "<key>", ...}}`, the
+id-to-key map the file was written with. Files saved before 2026-11-01 also hold a
+`"reviewed": ["<key>", ...]` list (the classes once ticked as fully annotated); the app no
+longer writes it and ignores it when it reads such a file. A saved file with nothing
+painted (every pixel `0`) means "checked, none of the classes": a valid negative example,
+exported like any other labels file. Save writes no file for an image that was not edited
+(since 2026-11-01); **Mark empty** on the Correct page (since 2026-11-02) writes this empty
+file for an image without one, with `gt/classes.json` when it is missing, and never
+replaces an existing labels file.
 
 ### `gt/classes.json`
 
 ```json
 {"version": 1, "classes": [
-  {"id": 1, "key": "root", "name": "Root", "color": "#5fd6a0", "retired": false},
+  {"id": 1, "key": "root", "name": "Root", "color": "#56b4e9", "retired": false},
   {"id": 255, "key": "ignore", "name": "Ignore", "color": "#8a8f98", "retired": false}]}
 ```
 
@@ -280,10 +291,11 @@ off until it is fixed).
 | `exif_orientation` | the source image's EXIF Orientation tag (0x0112) as an integer 1-8; empty when the image has none or its EXIF cannot be read. Recorded only: no stage applies it, the image and the mask are the stored pixel grid |
 | `px_background`, `px_<key>`, `px_ignore` | pixels of the exported mask with that exported id: background (0), each exported class in `classes.json` order, and Ignore (255: Ignore, retired and unknown classes). They add up to width x height. The set of `px_<key>` columns follows the `classes.json` of that export (a retired class has none) |
 
-By default only images on which every active class was checked are exported. The split
-is reproducible: stems are grouped by tube (so one tube never spans train and val), the
-groups are shuffled with the recorded `seed`, and whole groups go to val until it holds
-at least `val_fraction` of the images; the last group always stays in train.
+Every image with a GT file is exported (before 2026-11-01, by default only images on
+which every active class was ticked as fully annotated). The split is reproducible:
+stems are grouped by tube (so one tube never spans train and val), the groups are
+shuffled with the recorded `seed`, and whole groups go to val until it holds at least
+`val_fraction` of the images; the last group always stays in train.
 
 An image fails, and nothing is written for it, when its GT file cannot be read, its source
 image is missing or unreadable, or the class-label file is not the size of the image (the
@@ -332,7 +344,7 @@ with `git_commit` `null`, `runtime`, `models`, `inputs` and `parameters` empty (
 | `calibration` | `fov_width_mm`, `fov_height_mm`, `source` (`"default"`: the app's field of view; `"project"`: the project's `sprouts_project.json`). A project-sourced record also has `file` (`"sprouts_project.json"`), `evidence` (the file's `calibration.source` text, `""` when it has none) and, when the file states it, `reference_size_px` (`[width, height]`). Generation records always carry the default (generation uses no field of view). |
 | `runtime` | Python version and implementation, OS, versions of the libraries that were loaded, and (when PyTorch was used) its CUDA/cuDNN versions and precision flags |
 | `models` | per model: `path` (relative to the app folder), `sha256`, `size` in bytes; empty for the GT export |
-| `inputs`, `parameters`, `outputs` | set by the writer. GT export: `inputs` = project folder name, number of images, the class registry with its original ids; `parameters` = `val_fraction`, `group_by_tube`, `only_complete`, `seed`; `outputs` = `exported`, `train`, `val`, `skipped_incomplete`, `errors`. Measure (`root_lengths.csv.provenance.json` / `root_areas.csv.provenance.json`): `inputs` = `folder`, `n_images`, `names_sha256`, `n_without_image` / `without_image` and `n_duplicate` / `duplicates` (predictions by file name, GT files as `gt/skeletons/<file>` / `gt/mask/<file>`), and `gt` = `folder` (`gt/skeletons` / `gt/mask`), `n_used`, `files` (`{stem: SHA-256}` of the GT files measured), `skipped` (`[{"stem", "reason"}]`, reason `size` / `unedited` / `unreadable`); `parameters` = `input` (`"gt/skeletons/<stem>.png where valid, else skeletons/<stem>_fake.png"` / `"gt/mask/<stem>.png where readable and the photo's size, else mask/<stem>.png"`), `source_rule` (`"gt-first"`), `binarization` (and `estimator` for length); `outputs` = `csv`, `columns`, `value_column`, `n_rows`, `n_errors`, `n_zero`, `n_gt`, `n_prediction` and, for area only, `n_non_binary` (masks whose grey decode held a value other than 0 and 255; Measure then warns once); and `inputs.sizes_px` = `{"WxH": n, ...}`, the number of measured files of each decoded pixel size, most common first, GT files and predictions together (Error rows are not counted). GT files are at the photo's resolution (for example `640x480`), predictions at the model's (skeletons `341x256`, masks `640x480`), so a project that mixes GT and predictions lists both sizes without that being a problem. Measure warns once when the GT files of a run have more than one size (the photos differ, and one field of view is applied to each), or when the predictions do (files the model did not write); a project without GT files is not checked for photo sizes. The decoded size lives only on the in-memory row (`_size_px`); it is never a CSV column. Generation (`_sprouts_run.json`): `inputs` = `folder`, `n_images`, `names_sha256`; `parameters` = the batch size, `batch_policy` (`"fixed"`: every forward at `batch_size`, the last batch padded with zero images whose outputs are dropped, out of GPU memory stops the run; `"auto"`: the former VRAM-sized, halving behaviour; from `SPROUTS_BATCH_POLICY`) and the model's input settings; `outputs` = `status` (`completed`: the run reached the end, even if every input failed; `cancelled`; `failed`: it stopped with an error), `error` (`null` or `"<ExceptionType>: <message>"`), `n_inputs`, `n_written`, `n_failed`, `n_skipped`, `cancelled`, `batch_size`, `effective_batch_size` (on a GPU the batch size can change outputs slightly, see `docs/KNOWN_ISSUES.md` #7), `elapsed_s`, `failed` (`input` + `reason` per input), `skipped`, `batch_shapes` (forward size as a string key, largest first, -> number of input slots that ran at that size; zero-filled slots included; only forwards that returned a result count), `oom_events` (`{"at": <input file name of the slice's first slot>, "from": <slice length>, "to": <retry length>}` in the order they happened; a single image that runs out of memory alone is a `failed` entry, not an event), `free_vram_gib` (the driver's free GPU memory in GiB, read after the model loaded and before the first batch of a fixed-policy GPU run, 2 dp; `null` on the CPU or under `auto`). Under `fixed`, `batch_shapes` has one key (`batch_size`; padding rows are in the size, never in the count) and `oom_events` is always empty: running out of memory ends the run (`status` `failed`). |
+| `inputs`, `parameters`, `outputs` | set by the writer. GT export: `inputs` = project folder name, number of images, the class registry with its original ids; `parameters` = `val_fraction`, `group_by_tube`, `seed`; `outputs` = `exported`, `train`, `val`, `errors` (records written before 2026-11-01 also hold `parameters.only_complete` and `outputs.skipped_incomplete`, the removed complete-only filter). Measure (`root_lengths.csv.provenance.json` / `root_areas.csv.provenance.json`): `inputs` = `folder`, `n_images`, `names_sha256`, `n_without_image` / `without_image` and `n_duplicate` / `duplicates` (predictions by file name, GT files as `gt/skeletons/<file>` / `gt/mask/<file>`), and `gt` = `folder` (`gt/skeletons` / `gt/mask`), `n_used`, `files` (`{stem: SHA-256}` of the GT files measured), `skipped` (`[{"stem", "reason"}]`, reason `size` / `unedited` / `unreadable`); `parameters` = `input` (`"gt/skeletons/<stem>.png where valid, else skeletons/<stem>_fake.png"` / `"gt/mask/<stem>.png where readable and the photo's size, else mask/<stem>.png"`), `source_rule` (`"gt-first"`), `binarization` (and `estimator` for length); `outputs` = `csv`, `columns`, `value_column`, `n_rows`, `n_errors`, `n_zero`, `n_gt`, `n_prediction` and, for area only, `n_non_binary` (masks whose grey decode held a value other than 0 and 255; Measure then warns once); and `inputs.sizes_px` = `{"WxH": n, ...}`, the number of measured files of each decoded pixel size, most common first, GT files and predictions together (Error rows are not counted). GT files are at the photo's resolution (for example `640x480`), predictions at the model's (skeletons `341x256`, masks `640x480`), so a project that mixes GT and predictions lists both sizes without that being a problem. Measure warns once when the GT files of a run have more than one size (the photos differ, and one field of view is applied to each), or when the predictions do (files the model did not write); a project without GT files is not checked for photo sizes. The decoded size lives only on the in-memory row (`_size_px`); it is never a CSV column. Generation (`_sprouts_run.json`): `inputs` = `folder`, `n_images`, `names_sha256`; `parameters` = the batch size, `batch_policy` (`"fixed"`: every forward at `batch_size`, the last batch padded with zero images whose outputs are dropped, out of GPU memory stops the run; `"auto"`: the former VRAM-sized, halving behaviour; from `SPROUTS_BATCH_POLICY`) and the model's input settings; `outputs` = `status` (`completed`: the run reached the end, even if every input failed; `cancelled`; `failed`: it stopped with an error), `error` (`null` or `"<ExceptionType>: <message>"`), `n_inputs`, `n_written`, `n_failed`, `n_skipped`, `cancelled`, `batch_size`, `effective_batch_size` (on a GPU the batch size can change outputs slightly, see `docs/KNOWN_ISSUES.md` #7), `elapsed_s`, `failed` (`input` + `reason` per input), `skipped`, `batch_shapes` (forward size as a string key, largest first, -> number of input slots that ran at that size; zero-filled slots included; only forwards that returned a result count), `oom_events` (`{"at": <input file name of the slice's first slot>, "from": <slice length>, "to": <retry length>}` in the order they happened; a single image that runs out of memory alone is a `failed` entry, not an event), `free_vram_gib` (the driver's free GPU memory in GiB, read after the model loaded and before the first batch of a fixed-policy GPU run, 2 dp; `null` on the CPU or under `auto`). Under `fixed`, `batch_shapes` has one key (`batch_size`; padding rows are in the size, never in the count) and `oom_events` is always empty: running out of memory ends the run (`status` `failed`). |
 | `provenance_error` | only in a minimal record (generation): why the full record could not be made, `"<ExceptionType>: <message>"` |
 
 Paths in records are relative to the app or project folder so a shared record does not
@@ -351,8 +363,8 @@ ignored. Missing: the default field of view. Invalid: the default, and Measure s
 18×13.5 mm.`). A CSV whose provenance records another field of view (or, for length, another
 `parameters.estimator`) is marked outdated in the metrics bar and on the Measure status line
 until measured again; a CSV without a provenance `calibration` is never marked. The
-dashboards' export finds the file of the CSV's project by looking up to five folders above
-the CSV, nearest first.
+dashboards' export finds the file of the CSV's project by looking up to two folders above
+the CSV, nearest first (five before 2026-10-31, for the older layout).
 
 ## Windows app build information
 
@@ -360,6 +372,35 @@ The Windows app (`dist/SPROUTS`) contains `_internal/build_info.json`: `name`, `
 `git_commit`, `git_dirty`, `built_at` (ISO 8601 with UTC offset), `python`, `platform`
 and `packages` (torch, torchvision, PyQt6, PyInstaller versions; the torch version names
 its CUDA build, e.g. `2.8.0+cu128`).
+
+## Settings
+
+`settings.ini` (INI format, written by Qt's `QSettings`) in the per-user config folder
+(`app/user_paths.py`): `%APPDATA%\SPROUTS` on Windows, `~/.config/sprouts` on Linux
+(`$XDG_CONFIG_HOME/sprouts` when set), `~/Library/Application Support/SPROUTS` on macOS;
+`SPROUTS_CONFIG_DIR` moves it. `app/settings.py` `app_settings()` opens it.
+
+| Section, key | Value |
+|---|---|
+| `[window]` `geometry`, `body_splitter` | the main window's geometry and the library / canvas splitter state (`@ByteArray(...)`) |
+| `[window]` `last_folder` | the folder opened last (the Open dialog's start folder) |
+| `[General]` `recent_projects` | the recent projects: a JSON list of `{"name", "path", "count", "ts"}`, most recent first |
+| `[correct]` `<layer>\opacity`, `<layer>\visible` | each Correct layer's opacity (0 to 1) and visibility; `<layer>` = `mask`, `skeleton`, `classes` |
+| `[device_check]` `at_startup` | `false` turns off the start-up device check (`SPROUTS_DEVICE_CHECK` wins) |
+| `[native_import]` `date`, `source`, `keys` | when the one-time import of the older native settings ran, where they came from, and how many values it copied |
+
+Up to 2026-10-31 the settings lived in the OS's native store: the registry on Windows
+(`HKEY_CURRENT_USER\Software\LeakeyLab\SPROUTS`), a plist on macOS,
+`~/.config/LeakeyLab/SPROUTS.conf` on Linux. The first start whose file has no `date` under
+`[native_import]` copies the native values the file lacks (a value already in the file
+wins), records `[native_import]`, and does not run again. The native store is only read, so
+an older version still finds its values there; values it writes there later are not copied.
+If the native store cannot be read, nothing is recorded and the next start tries again.
+Deleting `settings.ini` makes the next start copy the old native values again, where an
+older version left them. To reset the settings, delete every line of the file except its
+`[native_import]` section. Headless runs (`QT_QPA_PLATFORM=offscreen`: tests, scripts) never
+read or write the file. The Enhance defaults are a separate file in the same folder,
+`normalization_defaults.json`.
 
 ## Logs
 

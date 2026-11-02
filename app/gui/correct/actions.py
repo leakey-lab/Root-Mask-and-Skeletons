@@ -3,11 +3,14 @@
 
 What the page does to files beyond a layer's own Save: open another skeleton file (Load
 skeleton file…), put a layer's prediction back (Load prediction), edit the project's classes
-(Classes…, the class editor: ``gt/classes.json``) and delete the open image's GT (Remove
-GT…, the topbar button it owns: on while an image is open and nothing is unsaved). Each ends
-a drag in progress first, as every transition of the page does. It also turns the session's
-report of each layer save into the page's signal: ``mask_saved`` / ``mask_cleared`` /
-``skeleton_saved`` / ``skeleton_cleared`` / ``gt_saved``, on every save path.
+(Classes…, the class editor: ``gt/classes.json``), delete the open image's GT (Remove GT…,
+the topbar button it owns: on while an image is open and nothing is unsaved) and save its
+class labels with nothing labelled (Mark empty, its other topbar button: "checked, none of
+the classes", a negative example for training; on while the class labels are untouched and
+no labels file is saved or kept for the image). Each ends a drag in progress first, as every
+transition of the page does. It also turns the session's report of each layer save into the
+page's signal: ``mask_saved`` / ``mask_cleared`` / ``skeleton_saved`` /
+``skeleton_cleared`` / ``gt_saved``, on every save path.
 """
 
 from __future__ import annotations
@@ -22,16 +25,18 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 from app import gt
 from app.dialogs import run_modal
 from app.gt.files import GtRemoveError, gt_files, remove_gt
-from app.gui.correct.classes_document import REGISTRY_LABEL
+from app.gui.correct.classes_document import EMPTY_CLOSED, REGISTRY_LABEL
 from app.gui.correct.layer import CLASSES, MASK, SKELETON, SaveOutcome, project_label
 from app.gui.widgets import keep_canvas_focus
 from app.gui.widgets.buttons import ghost_button
 from app.project_layout import ProjectLayout
 
 if TYPE_CHECKING:  # pragma: no cover
+    from PyQt6.QtWidgets import QPushButton
+
     from app.gui.correct.editor import CorrectEditor
 
-__all__ = ["REMOVE_DETAIL", "PageActions", "ask_remove_gt"]
+__all__ = ["EMPTY_NO_IMAGE_TIP", "EMPTY_TIP", "REMOVE_DETAIL", "PageActions", "ask_remove_gt"]
 
 SKELETON_FILES = "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"
 REMOVE_DETAIL = (
@@ -41,6 +46,11 @@ REMOVE_DETAIL = (
 REMOVE_TIP = "Remove the GT of this image: its saved mask, skeleton and class labels"
 REMOVE_UNSAVED_TIP = "Save or discard your edits first"
 REMOVE_NO_IMAGE_TIP = "Open an image to remove its GT"
+EMPTY_TIP = (
+    "Mark this image empty: save its class labels with nothing labelled, as it shows none of "
+    "the classes (an empty example for training)"
+)
+EMPTY_NO_IMAGE_TIP = EMPTY_CLOSED
 
 
 def ask_remove_gt(parent: QWidget | None, name: str, detail: str) -> bool:
@@ -59,9 +69,9 @@ def ask_remove_gt(parent: QWidget | None, name: str, detail: str) -> bool:
 
 
 class PageActions(QObject):
-    """The page's file actions, its Remove GT… button (``remove_button``) and its reports.
-    ``confirm_remove(parent, name, detail) -> bool`` asks before Remove GT deletes anything
-    (:func:`ask_remove_gt`; a test hands its own)."""
+    """The page's file actions, its Remove GT… and Mark empty buttons (``remove_button``,
+    ``empty_button``) and its reports. ``confirm_remove(parent, name, detail) -> bool`` asks
+    before Remove GT deletes anything (:func:`ask_remove_gt`; a test hands its own)."""
 
     def __init__(self, editor: CorrectEditor) -> None:
         super().__init__(editor)
@@ -70,8 +80,14 @@ class PageActions(QObject):
         self.remove_button = ghost_button("Remove GT…", "trash", compact=True)
         self.remove_button.setEnabled(False)
         self.remove_button.setToolTip(REMOVE_NO_IMAGE_TIP)
-        keep_canvas_focus(self.remove_button)
+        # No icon: with one the topbar outgrows the 900 px window budget (the Correct page is
+        # its widest action page; tests/test_window_width_budget.py).
+        self.empty_button = ghost_button("Mark empty", compact=True)
+        self.empty_button.setEnabled(False)
+        self.empty_button.setToolTip(EMPTY_NO_IMAGE_TIP)
+        keep_canvas_focus(self.remove_button, self.empty_button)
         self.remove_button.clicked.connect(self.remove_gt)
+        self.empty_button.clicked.connect(self.save_empty_labels)
 
     # ------------------------------------------------------------------ actions
     def load_skeleton_file(self) -> None:
@@ -85,7 +101,14 @@ class PageActions(QObject):
         start = skeleton.dialog_start()  # the generated skeleton, else skeletons/
         title = "Select Skeleton File"
         path, _ = QFileDialog.getOpenFileName(editor, title, start, SKELETON_FILES)
-        if not path or not editor.session.release([SKELETON]):
+        if not path:
+            return
+        # Read before the prompt, so a file that cannot be read costs no edits (C6-03);
+        # load_file reads it again after the prompt, as a Save there can rewrite it.
+        unreadable = skeleton.document.check_file(path)
+        for notice in unreadable:
+            editor.notify(notice.message, notice.kind)
+        if unreadable or not editor.session.release([SKELETON]):
             return
         for notice in skeleton.load_file(path):
             editor.notify(notice.message, notice.kind)
@@ -165,6 +188,17 @@ class PageActions(QObject):
         )
         editor.notify(f"Remove GT · {name}: removed {done}; could not remove {kept}", "danger")
 
+    def save_empty_labels(self) -> None:
+        """Mark empty: the open image's class labels saved with nothing labelled (all
+        background) through the session's save, which reports, toasts and takes the stamps as
+        for any save; only the class labels are saved. Saved labels are never replaced: the
+        button is off while a labels file is saved or kept for the image (Remove GT… deletes
+        it again)."""
+        self._editor.session.finish_gestures()
+        if self._empty_refusal():
+            return  # the button is off then
+        self._editor.session.save_layer(CLASSES)
+
     def save_for_paging(self) -> bool:
         """PgDn / PgUp: True when the image may be left. The unsaved layers are saved without
         a prompt, unless one must be asked about (``save_needs_prompt``: a lossy class remap
@@ -176,18 +210,25 @@ class PageActions(QObject):
         return session.save_dirty().ok  # a failed save stays (its toast says why)
 
     def sync(self) -> None:
-        """The Remove GT… button: on while an image is open and nothing is unsaved."""
-        session, button = self._editor.session, self.remove_button
+        """The Remove GT… button: on while an image is open and nothing is unsaved. Mark empty:
+        on while an empty save would replace no file and drop no painted label (its tooltip
+        says why not)."""
+        session = self._editor.session
         if not session.image_path:
             enabled, tip = False, REMOVE_NO_IMAGE_TIP
         elif session.is_dirty():
             enabled, tip = False, REMOVE_UNSAVED_TIP
         else:
             enabled, tip = True, REMOVE_TIP
-        if button.isEnabled() != enabled:
-            button.setEnabled(enabled)
-        if button.toolTip() != tip:
-            button.setToolTip(tip)
+        _show(self.remove_button, enabled, tip)
+        refusal = self._empty_refusal()
+        _show(self.empty_button, not refusal, refusal or EMPTY_TIP)
+
+    def _empty_refusal(self) -> str:
+        """Why Mark empty is off ("" while it is on)."""
+        if not self._editor.session.image_path:
+            return EMPTY_NO_IMAGE_TIP
+        return self._editor.layers[CLASSES].document.empty_save_refusal()
 
     # ------------------------------------------------------------------ reports
     def report(self, outcome: SaveOutcome) -> None:
@@ -207,3 +248,11 @@ class PageActions(QObject):
             editor.skeleton_saved.emit(written)
         elif layer_id == CLASSES and written:
             editor.gt_saved.emit(path)
+
+
+def _show(button: QPushButton, enabled: bool, tip: str) -> None:
+    """Set ``button``'s state and tooltip where they changed."""
+    if button.isEnabled() != enabled:
+        button.setEnabled(enabled)
+    if button.toolTip() != tip:
+        button.setToolTip(tip)

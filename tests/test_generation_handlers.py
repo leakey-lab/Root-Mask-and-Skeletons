@@ -175,6 +175,58 @@ def test_missing_weights_are_refused_before_starting(project, monkeypatch, tmp_p
     assert [d[0] for d in project.dialogs] == ["warning"]
 
 
+def test_missing_skeleton_weights_are_refused_before_starting(project, monkeypatch, tmp_path):
+    # S11-10: refused at once with a box naming the file, as a missing mask model is; before,
+    # the worker raised only once the run had started.
+    missing = str(tmp_path / "none.pth")
+    monkeypatch.setattr(runtime, "skeleton_weights_path", lambda: missing)
+    handler = gsh.GenerateSkeletonHandler(project.window)
+    assert handler.generate_skeleton() is False
+    assert handler._thread is None
+    assert [kind for kind, _ in project.dialogs] == ["warning"]
+    _parent, title, text = project.dialogs[0][1]
+    assert title == "Skeleton model missing"
+    assert text == (
+        f"Skeleton generation is unavailable: the model weights were not found at\n{missing}"
+    )
+    assert not (project.folder / "skeletons").exists()
+    assert "task_started" not in project.window.feedback.names()
+
+
+@pytest.mark.parametrize("kind", ["mask", "skeleton"])
+def test_a_failed_run_refreshes_the_window_then_shows_one_box(
+    project, qapp, monkeypatch, caplog, kind
+):
+    # L2b: both kinds end a failed run the same way: one log wording, the window re-reads
+    # the outputs written before the error, then the one error box.
+    def unavailable(device=None):
+        raise runtime.ModelUnavailableError("weights not found: x.pth")
+
+    project.window.on_outputs_changed = lambda: project.dialogs.append(("refresh", ()))
+    if kind == "mask":
+        monkeypatch.setattr(runtime, "get_mask_model", unavailable)
+        handler = mgh.MaskGenerationHandler(project.window)
+        assert handler.generate_masks() is True
+        thread, title = handler.generation_thread, "Mask generation"
+    else:
+        monkeypatch.setattr(runtime, "get_skeleton_model", unavailable)
+        handler = gsh.GenerateSkeletonHandler(project.window)
+        assert handler.generate_skeleton() is True
+        thread, title = handler._thread, "Skeleton generation"
+    with caplog.at_level("ERROR"):
+        _wait(thread, qapp)
+
+    assert [k for k, _ in project.dialogs] == ["refresh", "critical"]
+    assert project.dialogs[1][1][1] == f"{title} failed"
+    assert "weights not found: x.pth" in project.dialogs[1][1][2]
+    logged = [r for r in caplog.records if r.name == type(handler).__module__]
+    assert [r.getMessage().split(":")[0] for r in logged] == [f"{title} failed"]
+    assert [c.args[0] for c in project.window.feedback.calls if c.name == "task_failed"] == [
+        f"{title} failed"
+    ]
+    assert project.window.loaded == []
+
+
 def test_busy_job_registry_refuses_politely(project, qapp):
     project.window.jobs = _Jobs(accept=False)
     handler = mgh.MaskGenerationHandler(project.window)

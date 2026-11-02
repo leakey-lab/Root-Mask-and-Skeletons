@@ -1,15 +1,17 @@
 """
 Tests for the GT palette-PNG store (``app/gt/store.py``).
 
-Covers the write/read round trip (ids, ``reviewed``, ``file_classes``), the
+Covers the write/read round trip (ids, ``file_classes``; no ``reviewed`` list is written,
+and an older file's list is ignored), the
 palette + transparency written into the PNG, path derivation (multi-dot
 stems, non-ASCII paths), atomic writes, error handling for the wrong PNG
 mode, a corrupt metadata chunk, a file Pillow refuses as too large and a broken
-PNG chunk, ``align_to_registry`` (spec §1.4), and ``present_keys``/``is_complete``.
+PNG chunk, ``align_to_registry`` (spec §1.4), and ``present_keys``.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import struct
 import zlib
@@ -26,11 +28,11 @@ from app.gt.store import (
     align_to_registry,
     empty_tracing,
     gt_path,
-    is_complete,
     present_keys,
     read_tracing,
     write_tracing,
 )
+from tests.gt_goldens_support import write_legacy_tracing
 
 
 def _ids_with_values(shape, values):
@@ -77,7 +79,7 @@ def break_a_chunk(path) -> None:
 
 def test_round_trip_ids_and_chunk(tmp_path):
     ids = _ids_with_values((30, 40), [0, 1, 2, 3, 255])
-    tracing = Tracing(ids=ids, reviewed=frozenset({"root", "nodule"}))
+    tracing = Tracing(ids=ids)
     registry = default_registry()
     path = str(tmp_path / "gt" / "a.png")
 
@@ -86,8 +88,38 @@ def test_round_trip_ids_and_chunk(tmp_path):
 
     assert result is not None
     assert np.array_equal(result.ids, ids)
-    assert result.reviewed == frozenset({"root", "nodule"})
     assert result.file_classes == {1: "root", 2: "nodule", 3: "root_tip", 255: "ignore"}
+    with Image.open(path) as image:  # the id map only: no "reviewed" list (2026-11-01)
+        meta = json.loads(image.text[GT_META_CHUNK])
+    assert meta == {
+        "v": 1,
+        "classes": {"1": "root", "2": "nodule", "3": "root_tip", "255": "ignore"},
+    }
+
+
+def test_an_older_file_with_a_reviewed_list_reads_the_same(tmp_path):
+    """A file written before 2026-11-01 lists its "checked" classes in the chunk: the list is
+    read past (no field keeps it) and the ids and the id map read as from a new file."""
+    ids = _ids_with_values((30, 40), [0, 1, 2, 3, 255])
+    registry = default_registry()
+    old, new = str(tmp_path / "old.png"), str(tmp_path / "new.png")
+    write_legacy_tracing(old, Tracing(ids), registry, {"root", "nodule"})
+    write_tracing(new, Tracing(ids), registry)
+    with Image.open(old) as image:
+        assert json.loads(image.text[GT_META_CHUNK])["reviewed"] == ["nodule", "root"]
+
+    result = read_tracing(old)
+
+    assert np.array_equal(result.ids, ids)
+    assert result.file_classes == read_tracing(new).file_classes
+    assert not hasattr(result, "reviewed")
+
+
+def test_reviewed_is_no_longer_a_field():
+    """The second positional field was ``reviewed``: an old call fails instead of passing
+    the set as the id map."""
+    with pytest.raises(TypeError):
+        Tracing(np.zeros((2, 2), np.uint8), frozenset({"root"}))
 
 
 def test_palette_matches_registry(tmp_path):
@@ -102,7 +134,7 @@ def test_palette_matches_registry(tmp_path):
         im.load()
         assert im.mode == "P"
         palette = im.getpalette()
-        assert palette[3:6] == [0x5F, 0xD6, 0xA0]  # root
+        assert palette[3:6] == [0x56, 0xB4, 0xE9]  # root
         ignore = registry.by_key("ignore")
         ig_id = ignore.id
         expected_ignore_rgb = [int(ignore.color[i : i + 2], 16) for i in (1, 3, 5)]
@@ -218,7 +250,6 @@ def test_file_without_chunk_reads_empty_meta(tmp_path):
     Image.fromarray(ids, mode="L").save(path, format="PNG")
     result = read_tracing(str(path))
     assert result is not None
-    assert result.reviewed == frozenset()
     assert result.file_classes == {}
 
 
@@ -277,13 +308,9 @@ def test_align_id_missing_from_map():
     assert np.all(aligned.ids[ids == 1] == 1)
 
 
-def test_present_keys_and_is_complete():
+def test_present_keys():
     ids = _ids_with_values((4, 4), [1, 255])
     tracing = Tracing(ids=ids)
     registry = default_registry()
 
     assert present_keys(tracing, registry) == {"root"}
-    assert is_complete(tracing, registry) is False
-
-    complete = Tracing(ids=ids, reviewed=frozenset({"root", "nodule", "root_tip"}))
-    assert is_complete(complete, registry) is True

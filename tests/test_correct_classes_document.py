@@ -1,8 +1,8 @@
 """ClassesDocument: the class labels of one image, without Qt (WG-T4).
 
 The document is the Trace GT editor's storage half (``GtTracingInterface``) with the Qt
-removed: the class-id plane and its patch history, the "checked" ticks, the pixel count of
-every id kept from each patch, ids read back from the canvas by exact colour match, Save
+removed: the class-id plane and its patch history, the pixel count of every id kept from
+each patch (no "checked" ticks since 2026-11-01: the class panel's box is the active class), ids read back from the canvas by exact colour match, Save
 (``gt/classes.json`` first when it is missing, then ``gt/<stem>.png``, always written) and
 the open of a remapped, unreadable or read-only file. It never reads ``mask/`` or
 ``skeletons/``.
@@ -14,6 +14,7 @@ the counts from patches, the exact histogram, Save's checks).
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -22,7 +23,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from PIL import Image
 
+from app.config import GT_META_CHUNK
 from app.gt import (
     Tracing,
     default_registry,
@@ -39,7 +42,7 @@ from app.gui.correct.classes_paint import canvas_ids, class_lut
 from app.gui.correct.layer import LayerStatus
 from app.io_utils import imwrite_unicode
 from app.project_layout import ProjectLayout
-from tests.gt_goldens_support import GT_STEM, make_gt_project
+from tests.gt_goldens_support import GT_STEM, make_gt_project, write_legacy_tracing
 
 ROOT = Path(__file__).resolve().parents[1]
 W, H = 640, 480
@@ -195,7 +198,7 @@ def test_opens_empty_and_never_reads_mask_or_skeletons(gt_project, monkeypatch):
     assert doc.counts() == {"background": W * H}
     assert not doc.is_dirty() and not doc.is_read_only() and not doc.lossy_remap()
     assert doc.status() == LayerStatus("none", "No class labels")
-    assert doc.reviewed() == frozenset() and doc.active_key == "root"
+    assert doc.active_key == "root"
 
 
 def test_a_lossy_remap_opens_dirty_with_warnings_and_needs_a_prompt(gt_project_lossy):
@@ -212,7 +215,6 @@ def test_a_lossy_remap_opens_dirty_with_warnings_and_needs_a_prompt(gt_project_l
     )
     assert (doc.history.plane[300:400, 350:500] == 255).all()  # unknown_x became Ignore
     assert doc.counts() == {"background": 272200, "root": 20000, "ignore": 15000}
-    assert doc.reviewed() == {"root"}  # Ignore never appears
 
 
 def test_a_discarded_remap_is_clean_and_only_a_save_ends_the_prompt(gt_project_lossy):
@@ -237,7 +239,6 @@ def test_an_invalid_registry_makes_the_document_read_only(gt_project_bad_registr
         "error", "Read-only", f"gt/classes.json is invalid: {doc.registry_error}", local=True
     )
     assert doc.registry == default_registry()
-    assert doc.set_ticked("root_tip", True) is False
     assert doc.save() == ClassesSaveResult(False, None, doc.registry_error)
     assert not os.path.exists(gt_project_bad_registry.labels)
     assert not doc.is_dirty()
@@ -281,27 +282,37 @@ def test_a_file_that_cannot_be_used_opens_empty_not_shown_and_kept(gt_project, k
     assert read_tracing(gt_project.labels).ids.shape == (H, W)
 
 
-# ------------------------------------------------------------------------------ ticks
-def test_ticks_are_locked_while_pixels_exist(gt_project):
+# ------------------------------------------------------------------------------ no ticks
+def test_the_document_has_no_checked_state(gt_project):
+    """Owner decision 2026-11-01: the class panel's tick is the active class, so the
+    document keeps no "checked" / reviewed set and picking a class is no edit."""
     doc = opened(gt_project)
-    commit(doc, (100, 100, 20, 20), 1)  # root pixels
+    for name in ("ticked", "reviewed", "set_ticked"):
+        assert not hasattr(doc, name)
 
-    assert doc.set_ticked("root", False) is False and "root" in doc.reviewed()
-    assert doc.set_ticked("root", True) is False and doc.ticked() == frozenset()
-    assert doc.present_keys() == {"root"}
-    assert doc.set_ticked("ignore", True) is False  # Ignore is never checked
-    assert doc.set_ticked("no_such_class", True) is False
-    assert doc.set_ticked("nodule", True) is True and doc.reviewed() == {"root", "nodule"}
-
-    undo(doc)  # the pixels are gone: the box unlocks
-    assert doc.reviewed() == {"nodule"} and doc.set_ticked("root", True) is True
+    for key in ("nodule", "ignore", "root_tip"):
+        assert doc.set_active_class(key) and doc.active_key == key
+        assert not doc.is_dirty()
 
 
-def test_a_tick_and_its_takeback_leave_the_document_clean(gt_project):
-    doc = opened(gt_project)
+def test_an_older_file_with_a_reviewed_list_opens_clean(gt_project):
+    """A file written before 2026-11-01 lists its "checked" classes: the list is ignored,
+    the file opens clean, shows as GT, and a save writes it without the list."""
+    ids = np.zeros((H, W), np.uint8)
+    ids[5:10, 5:10] = 2
+    save_registry(gt_project.folder, default_registry())
+    write_legacy_tracing(gt_project.labels, Tracing(ids), default_registry(), {"root", "nodule"})
+    doc = ClassesDocument()
 
-    assert doc.set_ticked("nodule", True) and doc.is_dirty()
-    assert doc.set_ticked("nodule", False) and not doc.is_dirty()
+    assert doc.open(gt_project.image, (W, H)) == []
+
+    assert not doc.is_dirty() and np.array_equal(doc.history.plane, ids)
+    assert doc.status() == LayerStatus("clean", "GT", LABELS)
+    assert doc.matches_disk() and doc.read_back(doc.file_stamps()) is not None
+    commit(doc, (40, 30, 1, 1), 1)
+    assert doc.save().ok
+    with Image.open(gt_project.labels) as image:
+        assert "reviewed" not in json.loads(image.text[GT_META_CHUNK])
 
 
 # ------------------------------------------------------------------------------ classes
@@ -381,28 +392,66 @@ def test_an_empty_save_writes_a_file(gt_project):
     assert os.path.isfile(gt_project.labels)
     tracing = read_tracing(gt_project.labels)
     assert tracing.ids.shape == (H, W) and tracing.ids.max() == 0
-    assert tracing.reviewed == frozenset()
-    assert doc.status() == LayerStatus("clean", "GT · 0/3 checked", LABELS)
+    assert doc.status() == LayerStatus("clean", "GT", LABELS)  # as the mask and the skeleton
 
 
-def test_save_writes_the_ticks_and_the_present_classes_and_makes_them_the_ticks(gt_project):
+def test_an_empty_save_is_offered_only_for_untouched_labels_without_a_file(gt_project):
+    """Mark empty (2026-11-02): a reason while it would write anything but an empty
+    file over no file, "" otherwise (the plane is all background then)."""
+    doc = ClassesDocument()
+    assert doc.empty_save_refusal().startswith("Open an image")
+    doc.open(gt_project.image, (W, H))
+
+    assert doc.empty_save_refusal() == "" and not doc.history.plane.any()
+    commit(doc, (10, 10, 5, 5), 1)
+    assert doc.empty_save_refusal() == "Save or discard your painted class labels first"
+    undo(doc)
+    assert doc.empty_save_refusal() == ""
+    commit(doc, (10, 10, 5, 5), 0)  # background over background: nothing to save
+    assert doc.empty_save_refusal() == ""
+
+    assert doc.save().ok
+    assert doc.empty_save_refusal() == "This image already has class labels"
+
+
+def test_an_empty_save_is_refused_while_the_registry_is_invalid(gt_project_bad_registry):
+    doc = opened(gt_project_bad_registry)
+
+    assert doc.empty_save_refusal().startswith("gt/classes.json is invalid")
+
+
+@pytest.mark.parametrize("kind", ["unreadable", "size"])
+def test_an_empty_save_is_refused_over_a_kept_file(gt_project, kind):
+    os.makedirs(os.path.dirname(gt_project.labels))
+    if kind == "unreadable":
+        with open(gt_project.labels, "wb") as fh:
+            fh.write(b"not a png")
+    else:
+        write_tracing(gt_project.labels, Tracing(np.ones((10, 10), np.uint8)), default_registry())
+
     doc = opened(gt_project)
-    commit(doc, (100, 100, 20, 20), 1)
-    doc.set_ticked("root_tip", True)
+
+    assert "could not be shown" in doc.empty_save_refusal()
+
+
+def test_save_writes_no_reviewed_list(gt_project):
+    doc = opened(gt_project)
+    commit(doc, (100, 100, 20, 20), 1)  # root pixels
+    doc.set_active_class("root_tip")
 
     assert doc.save().ok
 
-    assert read_tracing(gt_project.labels).reviewed == {"root", "root_tip"}
-    assert doc.ticked() == {"root", "root_tip"} and not doc.is_dirty()
-    undo(doc)  # root's pixels go; its tick stays (it was saved)
-    assert doc.reviewed() == {"root", "root_tip"} and doc.is_dirty()
-    assert doc.status() == LayerStatus("dirty")
+    with Image.open(gt_project.labels) as image:
+        meta = json.loads(image.text[GT_META_CHUNK])
+    assert set(meta) == {"v", "classes"} and not doc.is_dirty()
+    undo(doc)  # root's pixels go
+    assert doc.is_dirty() and doc.status() == LayerStatus("dirty")
 
 
 def test_a_failed_registry_write_leaves_the_file_alone(gt_project, monkeypatch):
     ids = np.zeros((H, W), np.uint8)
     ids[5:10, 5:10] = 2
-    write_tracing(gt_project.labels, Tracing(ids, frozenset({"nodule"})), default_registry())
+    write_tracing(gt_project.labels, Tracing(ids), default_registry())
     before = file_bytes(gt_project.labels)  # saved by another copy: no classes.json yet
     doc = opened(gt_project)
     commit(doc, (40, 30, 1, 1), 1)
@@ -442,38 +491,37 @@ def test_a_first_save_without_a_file_writes_nothing_when_the_registry_fails(
     assert os.path.isfile(registry_path(gt_project.folder))
 
 
-def test_save_writes_the_same_checks_as_present_keys(gt_project):
+def test_save_writes_the_plane_of_a_random_session(gt_project):
     doc = opened(gt_project, size=(120, 90))
     rng = np.random.default_rng(4)
     for i, _ in enumerate(_random_session(doc, rng, 30)):
         if i % 5 == 4:
             plane = doc.history.plane.copy()
-            expected = doc.ticked() | present_keys(Tracing(plane), doc.registry)
             assert doc.save().ok
-            tracing = read_tracing(gt_project.labels)
-            assert np.array_equal(tracing.ids, plane)
-            assert tracing.reviewed == expected
+            assert np.array_equal(read_tracing(gt_project.labels).ids, plane)
+            assert not doc.is_dirty()
 
 
 # ------------------------------------------------------------------------------ revert
-def test_revert_puts_back_the_saved_ids_and_ticks_with_an_empty_history(gt_project):
+def test_revert_puts_back_the_saved_ids_with_an_empty_history(gt_project):
     doc = opened(gt_project)
     commit(doc, (100, 100, 20, 20), 1)
     assert doc.save().ok
     saved = doc.history.plane.copy()
     commit(doc, (10, 10, 30, 30), 2)
-    doc.set_ticked("root_tip", True)
+    doc.set_active_class("root_tip")
 
     doc.revert()
 
-    assert np.array_equal(doc.history.plane, saved) and doc.reviewed() == {"root"}
+    assert np.array_equal(doc.history.plane, saved) and doc.active_key == "root_tip"
     assert not doc.is_dirty() and not doc.history.can_undo
     assert doc.counts() == expected_counts(doc)
 
 
 # ------------------------------------------------------------------------------ counts
 def _random_session(doc: ClassesDocument, rng, steps: int):
-    """Random actions on the plane (boxes of random ids, Clear, undo, redo, ticks)."""
+    """Random actions on the plane (boxes of random ids, Clear, undo, redo, a class
+    picked)."""
     height, width = doc.history.plane.shape
     ids = np.array([0, 1, 2, 3, 255, 7], np.uint8)  # 7: no class owns it
     keys = ["root", "nodule", "root_tip"]
@@ -486,7 +534,7 @@ def _random_session(doc: ClassesDocument, rng, steps: int):
         elif op == 2:
             commit(doc, (0, 0, width, height), 0)  # Clear
         elif op == 3:
-            doc.set_ticked(keys[int(rng.integers(0, 3))], bool(rng.integers(0, 2)))
+            doc.set_active_class(keys[int(rng.integers(0, 3))])
         else:
             x, y = int(rng.integers(0, width - 1)), int(rng.integers(0, height - 1))
             w = int(rng.integers(1, width - x + 1))
@@ -642,12 +690,12 @@ def test_a_read_of_files_that_changed_since_is_not_used(gt_project):
     read = ClassesDocument.read(gt_project.image, (W, H))
     ids = np.zeros((H, W), np.uint8)
     ids[:10, :10] = 1
-    write_tracing(gt_project.labels, Tracing(ids, frozenset({"root"})), default_registry())
+    write_tracing(gt_project.labels, Tracing(ids), default_registry())
     doc = ClassesDocument()
 
     doc.open(gt_project.image, (W, H), read)
 
-    assert doc.history.plane[:10, :10].all() and doc.reviewed() == {"root"}
+    assert doc.history.plane[:10, :10].all() and doc.has_saved_file
 
 
 def test_matches_disk_reads_the_files_again(gt_project):
@@ -657,12 +705,14 @@ def test_matches_disk_reads_the_files_again(gt_project):
     assert doc.matches_disk()
 
     save_registry(gt_project.folder, default_registry())
-    write_tracing(gt_project.labels, Tracing(doc.history.plane, frozenset({"root"})), doc.registry)
+    write_tracing(gt_project.labels, Tracing(doc.history.plane), doc.registry)
     assert doc.matches_disk()  # rewritten as it was
+    write_legacy_tracing(gt_project.labels, Tracing(doc.history.plane), doc.registry, {"root"})
+    assert doc.matches_disk()  # an old reviewed list is no difference
 
     other = doc.history.plane.copy()
     other[0, 0] = 2
-    write_tracing(gt_project.labels, Tracing(other, frozenset({"root"})), doc.registry)
+    write_tracing(gt_project.labels, Tracing(other), doc.registry)
     assert not doc.matches_disk()
 
 
@@ -676,10 +726,10 @@ def test_read_back_hands_the_clean_document_back(gt_project):
     read = doc.read_back(stamps)
 
     assert isinstance(read, ClassesRead) and read.stamps == stamps
-    assert read.tracing.ids is doc.history.plane and read.tracing.reviewed == {"root"}
+    assert read.tracing.ids is doc.history.plane
     other = ClassesDocument()
     assert other.open(gt_project.image, (W, H), read) == []
-    assert other.history.plane is read.tracing.ids and other.reviewed() == {"root"}
+    assert other.history.plane is read.tracing.ids and not other.is_dirty()
 
 
 def test_read_back_is_none_while_a_remap_is_only_in_memory(gt_project_lossy):

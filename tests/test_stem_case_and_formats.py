@@ -25,6 +25,7 @@ from app.handlers.deps import HandlerDependencies
 from app.inference import mask_inference as mi
 from app.inference import skeleton_inference as si
 from app.inference.mask_origin import OverwritePolicy, scan_existing_masks
+from app.io_utils import path_key
 from app.naming import image_stem, stem_key
 from app.project_layout import ImageScan, ProjectLayout
 from tests.qt_wait import wait_until as _wait
@@ -368,6 +369,4 @@ def test_a_miss_on_a_case_insensitive_disk_lists_no_folder(tmp_path, monkeypatch
     monkeypatch.setattr(project_layout.os, "scandir", no_listing)
     assert layout.find_mask("A") is None and layout.find_skeleton("A") is None
     _touch(os.path.join(layout.mask_dir, "a.png"))
-    assert os.path.normcase(layout.find_mask("A")) == os.path.normcase(
-        os.path.join(layout.mask_dir, "a.png")
-    )
+    assert path_key(layout.find_mask("A")) == path_key(os.path.join(layout.mask_dir, "a.png"))

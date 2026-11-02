@@ -1,8 +1,8 @@
 """A checked checkbox shows a check mark, not just a colour (walkthrough W9).
 
 The theme drew a checked indicator as a solid accent square: the state was carried by the
-fill alone, and in the Trace GT class panel a checked "reviewed" box looked like one more
-class colour swatch. The checked indicator now carries a check mark in the accent ink
+fill alone, and in the class panel a checked box looked like one more class colour
+swatch. The checked indicator now carries a check mark in the accent ink
 (WCAG 1.4.11: at least 3:1 against the fill), from an SVG shipped in resources/icons that
 the QSS reaches through the ``sprouts-theme:`` search path (never the working directory).
 """
@@ -112,7 +112,7 @@ def _near(pixel: QColor, hex_color: str, tolerance: int = 12) -> bool:
 
 
 def test_a_checked_box_draws_a_mark_on_the_accent_fill(app):
-    box = QCheckBox("Only fully checked images")
+    box = QCheckBox("Keep each tube in one split")
     box.setStyleSheet(_qss())  # the app theme, on this widget only
     box.resize(box.sizeHint())
     try:

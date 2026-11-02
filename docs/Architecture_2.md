@@ -104,7 +104,7 @@ flowchart TB
   image just left back to the read-ahead.
 - **Small parts**: `keys.py` (the page's shortcut table), `chip.py` (the status chip),
   `layer_prefs.py` (layer opacity and visibility in QSettings), `actions.py` (Load skeleton
-  file, Load prediction, Classes, Remove GT).
+  file, Load prediction, Classes, Mark empty, Remove GT).
 - The shared canvas parts are `EditorCanvasView`, `EditorChrome`, `PaintCanvas`
   (`app/gui/paint_canvas.py`) and the render items in `app/gui/canvas_layers/`.
 - Every `app/gui/correct/*.py` stays at or under 450 lines (a ratchet test).

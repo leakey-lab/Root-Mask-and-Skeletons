@@ -48,9 +48,9 @@ LOADING_DELAY_MS = 250
 
 #: The Growth Over Time legend of either dashboard: the store holds None (automatic: the
 #: dashboard decides from the number of tubes) or the user's choice, which the toggle
-#: button flips and which is kept across views. The ids are the length dashboard's.
+#: button flips and which is kept across views. The id is that of the page both
+#: dashboards share (:mod:`.dash_metric_layout`).
 LEGEND_STORE_ID = "legend-visible-store"
-LEGEND_TOGGLE_ID = "toggle-legend-btn"
 
 # The strip, its caret and its visibility change in the browser, in the click's own
 # frame. As server callbacks their responses raced the new figure's: the chart was
@@ -326,6 +326,10 @@ class DashboardShell:
 
     def __init__(self, spec: ShellSpec):
         self.spec = spec
+        #: Called with a one-line message when "Export CSV" fails; the dashboard window
+        #: sets it to show a warning toast. It runs on a server request thread, so it must
+        #: be thread-safe (a Qt signal's emit is). None: the failure is only logged.
+        self.on_export_failed: Callable[[str], None] | None = None
 
     # ---- layout ------------------------------------------------------------
 
@@ -527,33 +531,6 @@ class DashboardShell:
             Input("view-selector", "value"),
         )
 
-    def register_legend_toggle(
-        self,
-        app: Dash,
-        *,
-        automatic: Callable[..., bool],
-        states: Sequence[State] = (),
-    ) -> None:
-        """Wire the legend toggle (:data:`LEGEND_TOGGLE_ID`): each press stores the
-        opposite of what is shown in :data:`LEGEND_STORE_ID` (see :func:`flip_legend`).
-
-        Args:
-            app: the dashboard's Dash app.
-            automatic: ``automatic(*state_values)`` -> whether the legend is shown while
-                nobody chose (e.g. up to 30 tubes).
-            states: the selection States ``automatic`` needs.
-        """
-
-        @app.callback(
-            Output(LEGEND_STORE_ID, "data"),
-            Input(LEGEND_TOGGLE_ID, "n_clicks"),
-            State(LEGEND_STORE_ID, "data"),
-            *states,
-            prevent_initial_call=True,
-        )
-        def toggle_legend(n_clicks, choice, *values):
-            return flip_legend(n_clicks, choice, automatic(*values))
-
     def register_export(
         self,
         app: Dash,
@@ -586,18 +563,33 @@ class DashboardShell:
         def export_view(_n_clicks, view, *values):
             try:
                 table = build_table(view, *values)
-            except Exception:  # noqa: BLE001 -- a failed export must not break the page
+                if table is None:  # nothing to export: not a failure
+                    raise PreventUpdate
+                now = datetime.now().astimezone()
+                text = dash_export.render_csv(
+                    table,
+                    source_csv=source_csv,
+                    metric_column=metric_column,
+                    view=view,
+                    generated_at=now,
+                )
+                filename = dash_export.export_filename(metric_slug, view, now)
+            except PreventUpdate:
+                raise
+            except Exception as exc:  # noqa: BLE001 -- a failed export must not break the page
                 logger.exception("Could not export the %s view", view)
+                self._report_export_failure(view, exc)
                 raise PreventUpdate from None
-            if table is None:
-                raise PreventUpdate
-            now = datetime.now().astimezone()
-            text = dash_export.render_csv(
-                table,
-                source_csv=source_csv,
-                metric_column=metric_column,
-                view=view,
-                generated_at=now,
-            )
-            filename = dash_export.export_filename(metric_slug, view, now)
             return dcc.send_string(text, filename, type="text/csv")
+
+    def _report_export_failure(self, view: str, exc: Exception) -> None:
+        """Hand the failed export of *view* to :attr:`on_export_failed`, if set."""
+        report = self.on_export_failed
+        if report is None:
+            return
+        label = next((v.label for v in self.spec.views if v.value == view), view)
+        try:
+            reason = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            report(f"Could not export the {label} view: {reason}")
+        except Exception:  # noqa: BLE001 -- e.g. the window went while the request ran
+            logger.exception("Could not report the failed export of the %s view", view)

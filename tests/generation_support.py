@@ -91,6 +91,7 @@ def generation_project(tmp_path, monkeypatch, *, list_images: bool = True):
     weights = tmp_path / "weights.pth"
     weights.write_bytes(b"w")
     monkeypatch.setattr(runtime, "mask_weights_path", lambda: str(weights))
+    monkeypatch.setattr(runtime, "skeleton_weights_path", lambda: str(weights))  # S11-10 check
     stub = StubMaskModel().eval()
     monkeypatch.setattr(runtime, "get_mask_model", lambda device=None: stub)
     monkeypatch.setattr(runtime, "get_skeleton_model", lambda device=None: StubSkeletonModel())

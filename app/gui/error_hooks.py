@@ -151,7 +151,8 @@ class CrashDialogPresenter(QObject):
     ``report()`` is thread-safe: the request is queued to this object's (GUI)
     thread. While the dialog is open, further reports only raise its "N more
     errors" count. The dialog's "don't show again" box mutes the presenter for
-    the rest of the session (errors are still logged).
+    the rest of the session (errors are still logged), also when the box goes
+    with the window it is parented to.
     """
 
     _requested = pyqtSignal(str, str)
@@ -164,6 +165,7 @@ class CrashDialogPresenter(QObject):
         self._dialog: QMessageBox | None = None
         self._extra = 0
         self._muted = False
+        self._ticked = False  # the open box's "don't show again" tick, kept as it changes
         self._requested.connect(self._present, Qt.ConnectionType.QueuedConnection)
 
     @property
@@ -190,12 +192,17 @@ class CrashDialogPresenter(QObject):
         try:
             if self._dialog is not None and sip.isdeleted(self._dialog):
                 # It went with the window it was parented to (no finished()): it is closed.
+                # Its tick can no longer be read, so the one recorded as it changed counts.
                 self._dialog = None
+                if self._ticked:
+                    self._muted = True
+                    return
             if self._dialog is not None:
                 self._extra += 1
                 self._dialog.setInformativeText(self._informative_text())
                 return
             self._extra = 0
+            self._ticked = False
             self._dialog = show_transient(
                 self._build_dialog(summary, details), self._on_dialog_finished, modal=False
             )
@@ -214,7 +221,9 @@ class CrashDialogPresenter(QObject):
         # Parent the checkbox to the box: PyQt6's setCheckBox() does not take
         # ownership, so a parentless temporary is garbage-collected and the box
         # then dereferences a deleted widget (access violation on relayout).
-        box.setCheckBox(QCheckBox("Don't show error dialogs again this session", box))
+        checkbox = QCheckBox("Don't show error dialogs again this session", box)
+        checkbox.toggled.connect(self._on_tick_toggled)
+        box.setCheckBox(checkbox)
         box.setWindowModality(Qt.WindowModality.NonModal)
         return box
 
@@ -229,10 +238,13 @@ class CrashDialogPresenter(QObject):
             parts.append(f"{self._extra} more {noun} occurred since; see the log.")
         return "\n\n".join(parts)
 
+    @pyqtSlot(bool)
+    def _on_tick_toggled(self, checked: bool) -> None:
+        self._ticked = checked
+
     def _on_dialog_finished(self, _result: int) -> None:
-        box, self._dialog = self._dialog, None
-        checkbox = box.checkBox() if box is not None else None
-        if checkbox is not None and checkbox.isChecked():
+        self._dialog = None
+        if self._ticked:
             self._muted = True
 
 

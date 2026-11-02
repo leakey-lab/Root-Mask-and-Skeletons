@@ -3,7 +3,7 @@ Tests for the dataset exporter (``app/gt/export.py``).
 
 Covers ``remap_ids`` (background/active/ignore/retired/unknown mapping),
 ``assign_splits`` (determinism, tube grouping, non-empty splits, val_fraction
-0.0), and ``export_dataset`` (only-complete filtering, output layout,
+0.0), and ``export_dataset`` (every image with a GT file exported, output layout,
 ``classes.json``/``manifest.csv`` contents, non-empty ``out_dir`` guard, a
 corrupt GT file landing in ``errors`` without aborting the run, and source
 files being left untouched).
@@ -17,10 +17,10 @@ import os
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import Image, PngImagePlugin
 
 import app
-from app.config import GT_IGNORE_ID
+from app.config import GT_IGNORE_ID, GT_META_CHUNK
 from app.gt.export import ExportError, ExportOptions, assign_splits, export_dataset, remap_ids
 from app.gt.registry import default_registry
 from app.gt.store import Tracing, gt_path, write_tracing
@@ -42,7 +42,7 @@ def _make_ids(shape, values):
     return flat.reshape(h, w)
 
 
-def _build_project(tmp_path, *, incomplete_stem=None, dead_root_stem=None):
+def _build_project(tmp_path, *, dead_root_stem=None):
     """Six 20x20 RGB images + GT files (registry has an added-then-retired class).
 
     Returns (project_dir, images, write_registry, export_registry).
@@ -57,8 +57,6 @@ def _build_project(tmp_path, *, incomplete_stem=None, dead_root_stem=None):
     export_registry = write_registry.retire("dead_root")
 
     images: dict[str, str] = {}
-    complete_keys = frozenset({"root", "nodule", "root_tip"})
-    incomplete_keys = frozenset({"root", "nodule"})
 
     for stem in _STEMS:
         image_path = project_dir / f"{stem}.png"
@@ -70,9 +68,7 @@ def _build_project(tmp_path, *, incomplete_stem=None, dead_root_stem=None):
         else:
             ids = _make_ids((20, 20), [0, 1, 2, 3, 255])
 
-        reviewed = incomplete_keys if stem == incomplete_stem else complete_keys
-        tracing = Tracing(ids=ids, reviewed=reviewed)
-        write_tracing(gt_path(image_path), tracing, write_registry)
+        write_tracing(gt_path(image_path), Tracing(ids=ids), write_registry)
 
     return str(project_dir), images, write_registry, export_registry
 
@@ -149,40 +145,46 @@ def test_assign_splits_groups_by_the_tube_token_not_a_project_prefix():
 # --------------------------- export_dataset ----------------------------------
 
 
-def test_export_only_complete_true_skips_incomplete(tmp_path):
-    project_dir, images, _write_reg, export_registry = _build_project(
-        tmp_path, incomplete_stem=_STEMS[0]
+def _add_old_reviewed_list(path, reviewed):
+    """Re-save the GT file at ``path`` as a version before 2026-11-01 wrote it: its metadata
+    chunk also holds a ``reviewed`` list (the old "checked" boxes)."""
+    with Image.open(path) as image:
+        image.load()
+        meta = json.loads(image.text[GT_META_CHUNK])
+        old = image.copy()
+    meta["reviewed"] = sorted(reviewed)
+    info = PngImagePlugin.PngInfo()
+    info.add_text(GT_META_CHUNK, json.dumps(meta))
+    old.save(path, format="PNG", pnginfo=info, transparency=0)
+
+
+def test_export_includes_an_old_file_with_an_incomplete_reviewed_list(tmp_path):
+    """Every image with a GT file is exported: the ``reviewed`` list of an older file
+    (here not every class) no longer filters anything."""
+    project_dir, images, _write_reg, export_registry = _build_project(tmp_path)
+    old_file = gt_path(images[_STEMS[0]])
+    _add_old_reviewed_list(old_file, {"root"})
+    with Image.open(old_file) as image:
+        assert json.loads(image.text[GT_META_CHUNK])["reviewed"] == ["root"]
+
+    result = export_dataset(
+        project_dir, images, export_registry, ExportOptions(out_dir=str(tmp_path / "out"))
     )
-    options = ExportOptions(out_dir=str(tmp_path / "out"), only_complete=True)
 
-    result = export_dataset(project_dir, images, export_registry, options)
-
-    assert result.exported == 5
-    assert result.skipped_incomplete == 1
-
-
-def test_export_only_complete_false_exports_all(tmp_path):
-    project_dir, images, _write_reg, export_registry = _build_project(
-        tmp_path, incomplete_stem=_STEMS[0]
-    )
-    options = ExportOptions(out_dir=str(tmp_path / "out"), only_complete=False)
-
-    result = export_dataset(project_dir, images, export_registry, options)
-
-    assert result.exported == 6
-    assert result.skipped_incomplete == 0
+    assert result.exported == 6 and not result.errors
+    assert (tmp_path / "out" / "masks" / f"{_STEMS[0]}.png").exists()
 
 
 def test_export_output_layout(tmp_path):
     project_dir, images, _write_reg, export_registry = _build_project(
-        tmp_path, incomplete_stem=_STEMS[0], dead_root_stem=_STEMS[1]
+        tmp_path, dead_root_stem=_STEMS[1]
     )
     out_dir = tmp_path / "out"
-    options = ExportOptions(out_dir=str(out_dir), only_complete=False, val_fraction=0.34, seed=2)
+    options = ExportOptions(out_dir=str(out_dir), val_fraction=0.34, seed=2)
 
     result = export_dataset(project_dir, images, export_registry, options)
 
-    exported_stems = set(_STEMS)  # only_complete=False -> all 6 exported
+    exported_stems = set(_STEMS)  # every image with a GT file is exported
     assert result.exported == 6
 
     for stem in exported_stems:
@@ -242,10 +244,7 @@ def test_export_manifest_reads_tube_and_position_tokens(tmp_path):
     image = project / f"{stem}.png"
     Image.new("RGB", (8, 8)).save(image)
     registry = default_registry()
-    reviewed = frozenset(c.key for c in registry.labelled())
-    write_tracing(
-        gt_path(image), Tracing(ids=np.zeros((8, 8), np.uint8), reviewed=reviewed), registry
-    )
+    write_tracing(gt_path(image), Tracing(ids=np.zeros((8, 8), np.uint8)), registry)
 
     export_dataset(str(project), {stem: str(image)}, registry, ExportOptions(str(tmp_path / "out")))
 
@@ -270,9 +269,7 @@ def _strings(value):
 
 
 def test_export_records_its_options_counts_and_registry_next_to_the_manifest(tmp_path):
-    project_dir, images, _write_reg, export_registry = _build_project(
-        tmp_path, incomplete_stem=_STEMS[0]
-    )
+    project_dir, images, _write_reg, export_registry = _build_project(tmp_path)
     out_dir = tmp_path / "out"
     options = ExportOptions(out_dir=str(out_dir), val_fraction=0.34, seed=7)
 
@@ -285,14 +282,12 @@ def test_export_records_its_options_counts_and_registry_next_to_the_manifest(tmp
     assert record["parameters"] == {
         "val_fraction": 0.34,
         "group_by_tube": True,
-        "only_complete": True,
         "seed": 7,
     }
     assert record["outputs"] == {
-        "exported": 5,
+        "exported": 6,
         "train": result.train,
         "val": result.val,
-        "skipped_incomplete": 1,
         "errors": 0,
     }
     assert record["inputs"]["images"] == 6
@@ -418,7 +413,7 @@ def test_export_corrupt_gt_file_lands_in_errors_others_continue(tmp_path):
         fh.write(b"not a png")
     corrupted_contents = open(corrupt_path, "rb").read()
 
-    options = ExportOptions(out_dir=str(tmp_path / "out"), only_complete=False)
+    options = ExportOptions(out_dir=str(tmp_path / "out"))
     result = export_dataset(project_dir, images, export_registry, options)
 
     assert len(result.errors) == 1
@@ -446,7 +441,7 @@ def test_export_missing_source_image_lands_in_errors_others_continue(tmp_path):
     missing_stem = _STEMS[0]
     os.remove(images[missing_stem])  # source image gone; its GT file remains
 
-    options = ExportOptions(out_dir=str(tmp_path / "out"), only_complete=False)
+    options = ExportOptions(out_dir=str(tmp_path / "out"))
     result = export_dataset(project_dir, images, export_registry, options)
 
     assert len(result.errors) == 1

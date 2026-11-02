@@ -49,8 +49,9 @@ py -3.14 -m venv venv
 
 # 1. PyTorch: CUDA 13.2 build (Turing - GTX 16xx, RTX 20xx - and newer GPUs, RTX 50-series
 #    included; driver of the 580 series or newer)
-pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu132
-#    Same results: the same versions from .../whl/cu130 (also Turing and newer, driver 580+)
+pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cu132
+#    Use this cu132 build: 2.15.0 has no cu130 build, and its cu134 build moves a few pixels
+#    (no CSV value)
 #    No NVIDIA GPU, or one older than Turing: the same versions from .../whl/cpu
 
 # 2. Application dependencies (the exact versions the app is tested with)
@@ -68,8 +69,9 @@ before installing the requirements (`pip uninstall -y opencv-python`), because i
 
 Results published so far were produced with a PyTorch nightly
 (`torch 2.8.0.dev20250325+cu128`, cuDNN 9.7.1) that is no longer downloadable. On the CPU,
-torch 2.14.1 above reproduces the nightly's CPU outputs bit for bit. On the GPU every later
-build moves a few pixels through its cuDNN: with torch 2.14.1 (cuDNN 9.24), 11 of 40 test
+torch 2.15.0 above reproduces the nightly's CPU outputs bit for bit. On the GPU every later
+build moves a few pixels through its cuDNN: with torch 2.15.0 (cuDNN 9.26), exactly as with
+2.14.1 (cuDNN 9.24), 11 of 40 test
 masks differ in 1 to 4 pixels (the root pixel count by 1 or 2), 6 of 40 raw skeleton
 predictions in up to 25 pixels by one intensity level (their thinned skeletons, which
 Measure reads, and so the lengths do not change), and 3 of 40 areas by 0.01 mm²
@@ -93,12 +95,12 @@ source venv/bin/activate
 # 1. PyTorch, one of:
 #    Linux + NVIDIA GPU (CUDA 13.2 build; Turing - GTX 16xx, RTX 20xx - and newer GPUs;
 #    driver of the 580 series or newer):
-pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cu132
+pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cu132
 #    Linux, CPU only, also for an NVIDIA GPU older than Turing (without --index-url pip
 #    pulls about 3 GB of CUDA wheels):
-pip install torch==2.14.1 torchvision==0.29.1 --index-url https://download.pytorch.org/whl/cpu
+pip install torch==2.15.0 torchvision==0.29.2 --index-url https://download.pytorch.org/whl/cpu
 #    macOS 14+ (Apple silicon, CPU):
-pip install torch==2.14.1 torchvision==0.29.1
+pip install torch==2.15.0 torchvision==0.29.2
 
 # 2. Application dependencies, then optionally the development tooling
 pip install -r requirements.txt
@@ -106,18 +108,22 @@ pip install -r requirements-dev.txt
 
 # 3. Linux only: system libraries (Debian / Ubuntu package names)
 sudo apt install libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
-     libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 libxcb-xkb1 \
-     libdbus-1-3 libnss3 libfontconfig1
+     libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+     libxcb-xkb1 libdbus-1-3 libnss3 libfontconfig1
 #    Minimal / server images also need these for the embedded browser (QtWebEngine):
-#    sudo apt install libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2t64
+#    sudo apt install libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libgbm1 \
+#         libasound2t64
+#    A Wayland-only system also needs libwayland-client0 libwayland-cursor0 libwayland-egl1
 #    (Ubuntu 22.04 and Debian 12 name the last one libasound2)
 
 python main.py
 ```
 
 Troubleshooting: as root or in a container the app sets `QTWEBENGINE_DISABLE_SANDBOX=1`
-itself; on Ubuntu 24.04 with restricted user namespaces
-(`kernel.apparmor_restrict_unprivileged_userns=1`) set it yourself before starting the app.
+itself. A normal user keeps Chromium's sandbox. On Ubuntu 24.04
+(`kernel.apparmor_restrict_unprivileged_userns=1`) the dashboards still open: Qt WebEngine
+runs its renderer without user namespaces and keeps its seccomp filter (checked by
+emulation, 2026-10-29), so there is no need to turn the sandbox off.
 
 ### Model weights
 
@@ -169,6 +175,18 @@ Logs go to `app.log` in `%LOCALAPPDATA%\SPROUTS\Logs` (Windows),
 to `fault.log` next to it (the file also records handled Windows exceptions such as `0x8001010d`, so an entry alone is not a sign of a crash); an unexpected Python error is logged and shown in a dialog
 instead of closing the app.
 
+Settings (window size and position, recent projects, the Correct layers' opacity and
+visibility, the device-check switch) are kept in one file, `settings.ini`, in the user
+config folder: `%APPDATA%\SPROUTS` (Windows), `~/.config/sprouts` (Linux;
+`$XDG_CONFIG_HOME/sprouts` when set) or `~/Library/Application Support/SPROUTS` (macOS);
+`SPROUTS_CONFIG_DIR` moves it. The Enhance defaults are next to it, in
+`normalization_defaults.json`. Earlier versions kept the settings in the Windows registry or
+the system's own store. The first start copies those values into the file once, records
+the date under `[native_import]`, and leaves them in place, so an older version still finds
+them. Deleting `settings.ini` makes the next start copy the old values again, where an older
+version left them. To reset the settings, delete every line of the file except its
+`[native_import]` section.
+
 Set `ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT=0` to draw the canvases without OpenGL; About (row
 `Canvas`) and the device chip's tooltip say which path is active, and a warning appears at
 start-up when OpenGL is unavailable and you did not turn it off.
@@ -177,8 +195,8 @@ The status line names the GPU (or CPU) it will use without waiting for a first r
 check asks the NVIDIA driver directly, so it does not load PyTorch. The heavy libraries
 load when you head for the stage that needs them (entering Generate loads PyTorch;
 entering Measure or pointing at Visualize loads the dashboards). Set
-`SPROUTS_DEVICE_CHECK=0` (or the setting `device_check/at_startup` to `false`) to turn it
-off; the status line then reads "Device not detected yet" until the first run.
+`SPROUTS_DEVICE_CHECK=0` (or `at_startup=false` under `[device_check]` in `settings.ini`) to
+turn it off; the status line then reads "Device not detected yet" until the first run.
 
 ## Stages
 
@@ -219,6 +237,7 @@ the two are independent.
 | Fix the model's mask of an image | Mask layer (area) | `gt/mask/<stem>.png` |
 | Fix the model's skeleton of an image | Skeleton layer (length) | `gt/skeletons/<stem>.png` |
 | Make labels to train a model | Classes layer | `gt/<stem>.png` (with `gt/classes.json`) |
+| Label an image that shows none of the classes | **Mark empty** (top bar) | `gt/<stem>.png`, all background |
 | Get the prediction back | **Load prediction** in the layer, or **Remove GT…** for the whole image | removes or replaces the GT file; `mask/` and `skeletons/` never change |
 
 Measure reads GT first and falls back to the prediction (last CSV column `Source`). The
@@ -348,15 +367,14 @@ are kept across restarts.
   Measure reads the GT skeleton first where it is valid.
 - **Classes** (purple; the class labels): Brush, Eraser and Fill in the colour of the
   active class, picked in the class panel that shows under the Layers panel while the
-  class labels are edited (or with `1`–`9`, `0` = Ignore). Each class keeps its own
-  brush size; Fill reads the active class's outlines only; a class with pixels stays
-  *checked*, and the panel's boxes mark the classes looked for on the image (the
-  dataset export filters on them). It opens and saves only `gt/<stem>.png`
+  class labels are edited (or with `1`–`9`, `0` = Ignore). The panel's one tick is always
+  on the active class: a click on a row or its box, or a number key, moves the tick and
+  the highlight together. Each class keeps its own brush size; Fill reads the active
+  class's outlines only. It opens and saves only `gt/<stem>.png`
   (`gt/classes.json` is written first when missing) and never reads or writes `mask/`,
-  `skeletons/` or the GT mask and skeleton. Saving an untouched image writes nothing:
-  tick the boxes to record that you looked and found nothing. While `gt/classes.json` is
-  invalid only the class labels are read-only: the row reads *Read-only*, and the first
-  edit you try on an image says why.
+  `skeletons/` or the GT mask and skeleton. Saving an untouched image writes nothing.
+  While `gt/classes.json` is invalid only the class labels are read-only: the row reads
+  *Read-only*, and the first edit you try on an image says why.
 - **Enhance** (the contrast button on the tool rail) changes how the photo is shown, for
   every image while it is on; it never changes a mask, a skeleton or a measurement. For
   `.jpg` / `.jpeg` photos, **Smooth JPEG blocks** (off by default) softens the 8 x 8
@@ -438,10 +456,11 @@ at 100 %, whichever is smaller.
 **GT actions** (the Correct page of the top bar): **Classes…** adds, renames, recolours or
 retires the project's classes (`gt/classes.json`; the gear of the class panel opens it
 too). **Export dataset…** saves the open image's edits first, then exports the images and
-their class-id label images (`masks/`). **Remove GT…** (on while an image is open and nothing is unsaved)
-asks, then deletes the image's `gt/mask/<stem>.png`, `gt/skeletons/<stem>.png` and
-`gt/<stem>.png` and reopens it from its predictions; the predictions in `mask/` and
-`skeletons/` and `gt/classes.json` are kept. This cannot be undone.
+their class-id label images (`masks/`). **Mark empty** saves the open image's class labels
+with nothing labelled (see *Class labels* below). **Remove GT…** (on while an image is open
+and nothing is unsaved) asks, then deletes the image's `gt/mask/<stem>.png`,
+`gt/skeletons/<stem>.png` and `gt/<stem>.png` and reopens it from its predictions; the
+predictions in `mask/` and `skeletons/` and `gt/classes.json` are kept. This cannot be undone.
 
 ### Class labels (GT for training)
 
@@ -449,14 +468,14 @@ The **class labels** are the third layer of *Correct* (key `G`, row "Classes"): 
 ground truth that you paint for training segmentation models (for example, roots vs nodules).
 They are independent of every model in the app: they never start from the ResNet mask and
 never read or write `mask/` or `skeletons/`. They label classes; they do not measure them.
-**Classes…**, **Export dataset…** and **Remove GT…** are on the Correct page.
+**Classes…**, **Export dataset…**, **Mark empty** and **Remove GT…** are on the Correct page.
 
 **Files** (next to the images, in the loaded folder):
 
 - `gt/<stem>.png` — the class labels of an image: an 8-bit palette PNG where each pixel is one
   class id (`0` background, `1`–`254` classes, `255` Ignore). Any image viewer
-  shows it in the class colours. A text chunk records the class list and which
-  classes were checked on that image.
+  shows it in the class colours. A text chunk records the class list the file was saved
+  with (the key of each class id).
 - `gt/classes.json` — the project's classes (id, key, name, colour). Defaults:
   Root, Nodule, Root tip, Ignore. Edit them with **Classes…**; a deleted class is
   retired (its id is never reused); a retired class is listed under "Retired" in the
@@ -464,14 +483,24 @@ never read or write `mask/` or `skeletons/`. They label classes; they do not mea
   is edited by hand and a field has the wrong type, the app names the class and field
   and turns GT saving off until it is fixed.
 
-A saved file means the image was annotated, even when nothing is painted: tick the classes
-you looked for and save ("checked, nothing present" is a valid negative example).
+A saved file means the image was annotated: Export dataset exports every image that has
+one, also a file with nothing painted. A file that is all background means "checked, none
+of the classes": a valid negative example for training. Save writes no file for an image
+you did not paint on, so for an image that shows none of the classes, click **Mark empty**
+(Correct page, top bar): it saves `gt/<stem>.png` with nothing labelled (and
+`gt/classes.json` when it is missing). It saves only the class labels: unsaved mask or
+skeleton edits stay unsaved. It is on only while the image's class labels are untouched,
+`gt/classes.json` is valid and the image has no labels file yet, so it never replaces saved
+labels; its tooltip says why when it is off. **Remove GT…** deletes the file again.
 
 **Painting:** the class labels use Correct's Brush, Eraser and Fill, with the class panel
 under the Layers panel while they are edited. The brush paints the active class and replaces whatever was
-under it (one class per pixel). Each class has a ✓ box: it ticks itself when the
-class has pixels, and you tick it by hand for "looked for it, none present" (with the
-mouse, or reach the boxes with Tab and press Space).
+under it (one class per pixel). The tick shows the active class: every row, Ignore
+included, has a ✓ box, and only the box of the class you paint with is ticked. Click a row
+or its box, or press the class's number key, to paint with that class; a click on the
+ticked box keeps it ticked. A click never takes the keyboard from the canvas. With the
+keyboard, Tab reaches the gear and then each box in class order, and Space makes the
+focused box's class active.
 
 | Key | Action |
 |---|---|
@@ -493,9 +522,9 @@ manifest.csv                   stem, source image, split, tube, position, date, 
 manifest.csv.provenance.json   how it was made: options (split seed), counts, class registry, app version
 ```
 
-By default only images where every class is checked are exported, and all images
-of one tube stay in the same split (so the same root on different dates cannot
-leak between train and validation). The split is reproducible from the seed recorded
+Every image with a GT file is exported. By default all images of one tube stay in the
+same split (so the same root on different dates cannot leak between train and
+validation). The split is reproducible from the seed recorded
 in `manifest.csv.provenance.json`. Images that fail to export (for example a label file
 whose size no longer matches its image) are listed in the dialog and in `errors.txt`; the
 rest still export. A relative output folder is created next to the images.
@@ -512,9 +541,12 @@ powershell -ExecutionPolicy Bypass -File scripts\build.ps1     # or: scripts\bui
 
 This runs PyInstaller on `scripts/build_executable.spec` and produces
 `dist\SPROUTS\SPROUTS.exe` (zip the whole `dist\SPROUTS` folder to distribute; with CUDA
-PyTorch it is about 6 GB). Run `scripts/fetch_models.py` first. The scripts work from any
-folder, stop if the model weights are missing (pass `-AllowMissingModels` /
+PyTorch it is about 4 GB, a 2.5 GB zip). Run `scripts/fetch_models.py` first. The scripts
+work from any folder, stop if the model weights are missing (pass `-AllowMissingModels` /
 `/allow-missing-models` to build anyway) and exit with an error when the build fails.
+`-Python`, `-DistPath` and `-WorkPath` (or `SPROUTS_BUILD_PYTHON`, `SPROUTS_BUILD_DISTPATH`
+and `SPROUTS_BUILD_WORKPATH`, which `build.bat` reads too) pick the interpreter and the
+output folders. Build a release from a clean checkout of its commit.
 The app records its version and git commit in `_internal\build_info.json`.
 
 The bundle is distributed under the GPL: ship `LICENSE` and `THIRD_PARTY_NOTICES.md` (the
@@ -533,6 +565,11 @@ The suite pins the scientific calibration (length/area), skeleton vectorization,
 CSV schema, and imports of every app module. CI runs it on Windows, Linux and macOS, builds
 the Python wheel and validates `CITATION.cff`.
 
+A faster local run, with pytest-xdist from `requirements-dev.txt`: `pytest -n auto -m "not
+wallclock"` runs every test except the wall-clock ones on all cores (about 1 min on 16
+cores). Then run `pytest -m wallclock` serially; a busy CPU fails those tests. CI runs the
+whole suite serially.
+
 ## How to cite
 
 Use GitHub's **Cite this repository** button (generated from
@@ -547,8 +584,9 @@ SPROUTS is free software under the **GNU General Public License v3.0 or later**
 (`GPL-3.0-or-later`, see [`LICENSE`](LICENSE)); PyQt6, which it imports, is GPL-3.0 too.
 Copyright (c) 2026 the SPROUTS authors. Third-party code and assets keep their licences:
 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and
-[`app/assets/THIRD_PARTY.md`](app/assets/THIRD_PARTY.md). The **model weights** are not
-part of the source and are licensed separately under **CC-BY-4.0**
+[`app/assets/THIRD_PARTY.md`](app/assets/THIRD_PARTY.md); the IBM Plex fonts the interface
+draws with ship in `resources/fonts/` under the SIL Open Font License 1.1. The **model
+weights** are not part of the source and are licensed separately under **CC-BY-4.0**
 ([`docs/MODELS.md`](docs/MODELS.md)). The three example images in `docs/examples/` are
 licensed CC-BY-4.0 too (see their README).
 

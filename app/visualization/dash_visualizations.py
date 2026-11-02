@@ -1,7 +1,7 @@
 """
 Figure builders for the Dash root-metric dashboards.
 
-``DashVisualizations`` holds every chart of the length dashboard. It is
+``DashVisualizations`` holds the charts of the metric dashboards (length and area). It is
 metric-agnostic (AR-15): the metric label and unit come from the processor, and
 every aggregate comes from the DataCache, so the same builders can chart root
 area. Figures are memoized per instance because the data is immutable while a
@@ -115,7 +115,7 @@ def stacked_bar_figure(cache, label: str, unit: str) -> go.Figure:
                     marker_color=colour,
                     x=x,
                     y=values,
-                    **theme.bar_labels(theme.value_labels(values), len(tubes), colour),
+                    **theme.bar_labels(theme.value_labels(values), len(tubes)),
                     hovertemplate=theme.hover(
                         "%{x}",
                         [
@@ -140,7 +140,7 @@ def stacked_bar_figure(cache, label: str, unit: str) -> go.Figure:
 
 class DashVisualizations:
     """
-    Mixin class providing visualization methods for DashApp.
+    Mixin class providing visualization methods for MetricDashApp.
     Should be used as a mixin with a class that has:
     - self.data_cache: DataCache instance
     - self.data_processor: MetricDataProcessor instance (its ``metric_label`` and
@@ -193,6 +193,7 @@ class DashVisualizations:
 
         dates = self.data_cache.dates
         ramp = theme.date_colors(len(dates))  # the date's place among ALL dates of the trial
+        images = self.available_images
         for date, colour in zip(dates, ramp, strict=True):
             table = self.data_cache.get_interval_data(tube, date, size)
             if not table:
@@ -207,7 +208,12 @@ class DashVisualizations:
                 averages.append(stats["avg"])
                 if stats["count"] > 0:
                     max_length = max(max_length, stats["max"])
-                    has_image = (tube, pos, date_str) in self.available_images
+                    # The side panel shows every image of the interval, not only its
+                    # end position's: "Available" when any of them has one (S14-05).
+                    has_image = any(
+                        (tube, position, date_str) in images
+                        for position in range(pos - size + 1, pos + 1)
+                    )
                     hover_info.append(self._interval_hover(pos, date_str, stats, unit, has_image))
                 else:
                     hover_info.append(f"No Data  Interval L{pos - size + 1}-L{pos}")
@@ -435,7 +441,8 @@ class DashVisualizations:
     ) -> go.Figure:
         """
         Create a faceted depth profile visualization showing horizontal bar charts
-        of root length by depth for each date-tube combination with 10-position binning.
+        of the root metric (length or area) by depth for each date-tube combination
+        with 10-position binning.
 
         Args:
             selected_tubes: List of tube numbers to display (up to 6)

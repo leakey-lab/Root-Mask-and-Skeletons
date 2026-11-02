@@ -100,6 +100,7 @@ def test_the_count_is_the_one_the_old_code_gave(awkward):
         assert count_traced(subset) == _reference_count(subset), subset
 
 
+@pytest.mark.wallclock
 def test_46k_images_are_counted_before_the_dialog_is_due(tmp_path):
     """At 46k images (100 traced) the old count took 0.57-0.75 s here and the new one about
     0.07 s, on a loaded machine; the bound is generous."""

@@ -810,6 +810,32 @@ def test_a_connect_drag_joins_two_endpoints(gap_layer, host):
     assert _count(host, "layer_edited") == 1
 
 
+def test_connect_starts_at_the_endpoint_nearest_the_press(host, scene, project):
+    # Two tips both within reach of the press: the nearer one, not the first in row-major
+    # order, is where the line starts (a guard of the owner bug report of 2026-11-02).
+    layer = _open(host, scene, project, [(100, 200, 100), (207, 300, 108)])
+    assert {(199, 100), (207, 108)} <= set(layer.model.endpoints())
+    layer.set_tool("connect")
+
+    layer.press(QPoint(205, 106), NO_MOD)  # 2.8 px from (207, 108), 8.5 px from (199, 100)
+
+    assert layer._tools["connect"].first == QPoint(207, 108)
+    layer.release(QPoint(205, 106))
+    layer.cancel_scheduled_render()
+
+
+def test_connect_breaks_a_tie_between_endpoints_by_the_lower_y_then_x(host, scene, project):
+    layer = _open(host, scene, project, [(100, 200, 100), (100, 200, 110)])
+    assert {(199, 100), (199, 110)} <= set(layer.model.endpoints())
+    layer.set_tool("connect")
+
+    layer.press(QPoint(199, 105), NO_MOD)  # 5 px from both
+
+    assert layer._tools["connect"].first == QPoint(199, 100)
+    layer.release(QPoint(199, 105))
+    layer.cancel_scheduled_render()
+
+
 # -------------------------------------------------------------------------------- clear
 def test_clear_is_undoable_and_posts_the_cleared_notice(layer, host):
     assert layer.clear() is True

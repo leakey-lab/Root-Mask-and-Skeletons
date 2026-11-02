@@ -340,6 +340,18 @@ def test_degree_map_counts_every_8_neighbour_including_at_the_borders():
     assert np.array_equal(deg, _degree(field))
 
 
+def test_the_neighbour_kernels_are_float_on_every_platform():
+    """An integer kernel over a uint8 image goes to OpenCV's carotene HAL on arm64 (macOS,
+    Linux aarch64), which halves the sum: the degrees, so the tips, Connect and the
+    vectorization were wrong on a Mac (CI run 40970595195). x86 has no such HAL, so the
+    degree test above passes there with either kernel; this pins the kernel type."""
+    from app.gui.skeleton_graph_model import _NEIGHBOR_KERNEL
+    from app.inference.metrics import _NEIGHBOUR_CODE
+
+    assert _NEIGHBOR_KERNEL.dtype == np.float32
+    assert _NEIGHBOUR_CODE.dtype == np.float32
+
+
 @pytest.mark.parametrize("eps", [0.0, 1.0, 1.5])
 def test_output_identical_to_reference_when_no_walk_returns_to_its_start(eps):
     cases = _loop_free_cases()
@@ -388,3 +400,52 @@ def test_real_generated_skeletons_unchanged():
         checked += 1
     if not checked:
         pytest.skip("no sample skeleton found")
+
+
+# --------------------------------------------------------------------------------------
+# Own pixels: what deleting a branch erases (S03-01), rings included (S03-06)
+# --------------------------------------------------------------------------------------
+
+
+def _dist_to_polyline(p, poly) -> float:
+    """Distance from point ``p`` to the polyline ``poly`` (a single point for one vertex)."""
+    px, py = p
+    best = math.inf
+    for (x0, y0), (x1, y1) in pairwise(poly) if len(poly) > 1 else [(poly[0], poly[0])]:
+        dx, dy = x1 - x0, y1 - y0
+        t = 0.0 if dx == dy == 0 else ((px - x0) * dx + (py - y0) * dy) / (dx * dx + dy * dy)
+        t = min(max(t, 0.0), 1.0)
+        best = min(best, math.hypot(px - (x0 + t * dx), py - (y0 + t * dy)))
+    return best
+
+
+def _own_cases() -> dict[str, np.ndarray]:
+    cases = dict(_loop_free_cases())
+    cases["lollipop"] = _lollipop()
+    rng = np.random.default_rng(1)
+    for i in range(6):
+        cases[f"curl{i}"] = _loop_drawn_onto_its_branch(rng)
+    ring_and_line = np.zeros((80, 120), np.uint8)
+    cv2.circle(ring_and_line, (40, 40), 20, 255, 1)
+    cv2.line(ring_and_line, (80, 10), (110, 70), 255, 1)
+    cases["ring and line"] = _skeleton(ring_and_line)
+    return cases
+
+
+@pytest.mark.parametrize("eps", [0.0, 1.5])
+def test_own_pixels_split_the_skeleton_without_its_junctions_by_branch(eps):
+    for key, skel in _own_cases().items():
+        topo = vectorize_skeleton(skel, simplify_epsilon=eps)
+        deg, fg = _degree(skel), skel > 0
+        assert len(topo.own) == len(topo.polylines), key
+        seen: set[tuple[int, int]] = set()
+        for poly, own in zip(topo.polylines, topo.own, strict=True):
+            pixels = set(own)
+            assert len(pixels) == len(own), f"{key}: a pixel twice in one branch"
+            assert not pixels & seen, f"{key}: a pixel in two branches"
+            seen |= pixels
+            assert all(fg[y, x] and deg[y, x] < 3 for x, y in own), f"{key}: a junction pixel"
+            if not own:  # an edge between two junction pixels
+                assert deg[poly[0][1], poly[0][0]] >= 3 and deg[poly[-1][1], poly[-1][0]] >= 3
+            assert all(_dist_to_polyline(p, poly) <= eps + 1e-6 for p in own), key
+        assert seen == _pixels(fg & (deg > 0) & (deg < 3)), f"{key}: a pixel in no branch"

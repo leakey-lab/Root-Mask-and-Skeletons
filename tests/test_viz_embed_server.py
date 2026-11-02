@@ -212,6 +212,7 @@ def test_the_server_thread_is_kept_from_its_start_until_qt_says_it_finished(star
     assert wait_until(lambda: thread not in kept_threads())
 
 
+@pytest.mark.wallclock
 def test_stop_wakes_the_accept_loop_promptly(start_server):
     thread, events = start_server(_closed_port())  # a fixed free port, like 8050
     assert wait_until(lambda: events["ports"])
@@ -225,6 +226,7 @@ def test_stop_wakes_the_accept_loop_promptly(start_server):
     assert events["errors"] == []
 
 
+@pytest.mark.wallclock
 def test_stop_before_the_server_listens_returns_at_once(qapp):
     thread = _DashServerThreadBase(_StubDash(), _closed_port())  # never started
 

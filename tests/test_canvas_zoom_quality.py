@@ -29,12 +29,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from app.gt import default_registry
 from app.gui import canvas_gl, editor_prompts
 from app.gui.correct.editor import CorrectEditor
 from app.gui.correct.layer import CLASSES
 from app.gui.display_controller import DisplayController
 from app.gui.image_manager import ImageManager
-from app.gui.widgets import tokens
 from tests.correct_support import drag
 from tests.qt_teardown import flush_deleted
 from tests.render_metrics import (
@@ -340,7 +340,7 @@ def test_class_labels_show_exact_pixels_when_magnified(canvases, patterns, zoom)
 
     rgb = canvas.grab(float(zoom), (x0 + n / 2, y0 + n / 2))
     origin = canvas.view.mapFromScene(QPointF(x0, y0))
-    root = np.array([int(c) for c in bytes.fromhex(tokens.MASK[1:])])
+    root = np.array(list(bytes.fromhex(default_registry().by_key("root").color[1:])))
     painted = np.round(0.6 * root + 0.4 * 90)  # the class colour at 60 % over the grey
     for row in range(n):
         for col in range(n):

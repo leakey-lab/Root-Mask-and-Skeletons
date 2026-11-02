@@ -11,8 +11,16 @@ produced before and after the change can be told apart.
 
 ## [Unreleased]
 
-Seven passes, not yet released:
+Eight passes, not yet released:
 
+- **Owner-answers build, waves 1 and 2** (branch `feat/unified-correct-editor`,
+  2026-10-31, `0b4d352`..`a2ea0a5`): the owner answered the 43 open questions of the
+  2026-10-29 decision sheet on 2026-10-31, and two waves built all 28 "yes" answers in
+  lanes with
+  disjoint files, each reviewed and committed on its own. Entries carry the sheet's item
+  number (for example #20) and the audit ID; `docs/KNOWN_ISSUES.md` table 4 gives every
+  answer and its state. Three answers change scientific output (#1, #2, #3: *Scientific
+  output changes*).
 - **Python 3.14 and the newest dependencies** (branch `feat/unified-correct-editor`,
   2026-10-27; the owner's decision: "Use python 3.14 i accept gpu cudnn changes. Upgrade to
   most latest versions"): built and checked in an isolated worktree and venv. The GPU
@@ -60,6 +68,209 @@ Seven passes, not yet released:
   a 161-finding audit implemented by per-area packages, then integrated and reviewed.
 
 ### Fixed
+- **Correct, skeleton layer: a picked branch goes on from its end nearest the pointer
+  (2026-11-02, owner bug report).** "The spline starts from a random node and not the node
+  closest to where my cursor/mouse pointer is." Select handed the picked branch to Polyline
+  in the order the topology traced it: from whichever of its two nodes a Python set gave
+  first, which has nothing to do with the pointer. The preview's rubber band and the next
+  click always went on from the branch's last traced point, often its far end, so a click
+  beyond one end drew a line (with Smooth, a curve) from the other end, across the branch.
+  Now a click on a picked branch adds its point at the end nearer the click, by
+  straight-line distance; at equal distance, the end with the lower y, then x. Clicks can
+  extend both ends. A closed pick opens at its vertex nearest the click: a ring, or a loop
+  whose ends are the same pixel or two pixels of the junction cluster it hangs from. The
+  rubber band runs from the same point; a closed pick is previewed as Enter draws it, so
+  moving the pointer does not move the seam of its smoothed curve. Undoing the click (Ctrl+Z
+  during the polyline, or a double-click that takes its own point back) undoes the turn too:
+  the pick is exactly as picked again, its point order included, so pick, click, Ctrl+Z, S,
+  Enter saves the same pixels as pick, S, Enter. Dragging an end handle no longer shows a
+  line from the other end. A new line keeps its points in the order they were placed; the
+  Connect tool already started at the endpoint nearest the press. See *Scientific output
+  changes*.
+- **Correct, Classes layer: the class tick is the active class (2026-11-01, owner bug
+  report; owner decision "Tick = active class").** Each row of the class panel had a
+  highlight, the class the brush paints with, and a box that meant "fully annotated on this
+  image". The two could disagree: with Nodule ticked and Root tip picked with the mouse, the
+  brush painted in Root tip's colour. Now the panel has one tick, always on the class you
+  paint with. A click on a row or on its box, or `1`-`9` / `0`, moves the tick and the
+  highlight together: they come from one source and cannot disagree. A click on the box that
+  is already ticked keeps it ticked, and so does a screen reader's Toggle action (a toggle
+  of another box picks that class). The Ignore row (key `0`) has a box too. A click never
+  takes the keyboard from the canvas, also a click on the box that holds the keys; Tab still
+  reaches the gear and then each box in class order, and Space on a box makes its class
+  active and keeps the keys there. A class key pressed during a stroke ends the stroke first,
+  in the class it began with. The box's tooltip reads "Paint with this class (key N)". The
+  "reviewed" state is gone: the status chip of saved class labels reads "GT", as the mask and
+  skeleton layers do, with the file's path as its tooltip (it read "GT · n/m checked"), and
+  Export dataset no longer has its "Only fully checked images" option. Since a tick is no
+  longer an edit, an image you did not paint on can no longer get an empty `gt/<stem>.png`
+  (a negative example): Save writes only edited layers (O2), so the only way to get one is to
+  save painted labels, Clear them, and save again (since 2026-11-02, **Mark empty** saves
+  one: see *Added*). This replaces the hand ticks of 2026-10-30 (below). See *Scientific
+  output changes*.
+- **Correct, skeleton layer: Delete and branch edits erase only the picked branch's own
+  pixels (S03-01, 2026-10-31, owner decision #1).** Select kept only the branch's
+  simplified line, and Delete or an edit (drag a point, then Enter) erased a 9 px band along
+  it. At a junction the band's round end cut the first 4-5 px of every other branch there:
+  deleting one arm of a Y left the other two arms apart, and an edited branch was redrawn to
+  the junction while its neighbours stayed cut. The band also cut an unconnected branch
+  within about 4 px. Now the pick keeps the branch's pixel chain from the same walk, and
+  Delete or a commit erases exactly those pixels, not the junction pixels at its ends: the
+  other branches keep theirs and stay joined (`SkeletonTopology.own`,
+  `SkeletonCorrectionModel.erase_pixels`). A click on a junction now picks a branch, never
+  an edge between two junction pixels (it has no pixel of its own to erase). See
+  *Scientific output changes*.
+- **Correct, skeleton layer: a branch only picked is left alone by Enter, Finish line and a
+  double-click (S03-02, 2026-10-31, owner decision #2).** They used to commit the unchanged
+  pick: the branch was erased (the 9 px band above) and redrawn straight through its
+  simplified points, and a double-click with Select also drew a chord from the branch's end
+  back to the click. The layer then read as edited, so PgDn saved it as the image's GT
+  skeleton, which Measure reads first. Now an unchanged pick changes no pixel, makes no undo
+  step and leaves the layer clean: Enter and Finish line drop the pick, a double-click keeps
+  it open. With Smooth on, Enter and Finish line still apply the smoothed curve to a branch
+  of 3+ points (pick, S, Enter, as documented); a double-click keeps the pick open without
+  applying it. A changed pick (a point moved, added or bent) finished with a double-click
+  within a pick's reach of its line (12 screen px, kept between 1 and 48 image px),
+  segments the user added included, now commits as Enter does, with no chord to the click.
+  Farther off, the double-click's point is the line's new end, as before. The "Editing
+  branch" hint offers "Enter commits" only when Enter would commit. See *Scientific output
+  changes*.
+- **Correct, skeleton layer: Select picks a closed skeleton ring next to other branches
+  (S03-06, 2026-10-31, owner decision #5).** A ring (a loop with no tip or junction, for
+  example a polyline closed on itself, or Connect between the two tips of a C) was traced
+  only when the whole skeleton had no tip or junction. As soon as another branch existed,
+  Select could not pick, edit or Delete it; only the Eraser removed it. Rings are now traced
+  after the other branches, whose order is unchanged, so a click picks them and Delete
+  removes them whole. Display and pick only: no saved pixel changes until the user edits or
+  deletes the ring.
+- **Measure Length reads a skeleton whose `_fake.png` suffix is in another letter case
+  (C1-04, O6, 2026-10-31, owner decision #3).** A skeleton such as `B_fake.PNG` is now
+  measured for an image that has no GT skeleton file. Correct and the Library display
+  already showed such a file on Windows. Now Measure measures it, the Measure status line
+  counts it again (the redundancy pass had stopped counting it so that the count matched
+  Measure, C1-04), the Library badge marks it as a prediction, and Correct finds it on
+  case-sensitive disks too. An image with a GT skeleton file (`gt/skeletons/<stem>.png`,
+  valid or not) is measured as before: the variant is not read for it. Where a
+  case-sensitive disk holds several skeletons of one image, the file with the exact suffix
+  is measured, and Correct shows the file Measure measures. A suffix variant whose image is
+  gone gets no row and is counted under "without an image" in the provenance and in the
+  toast that names the skipped files, as any prediction is (O37). The metrics bar names the
+  file a value was measured from as it is on disk, and shows it as current right after
+  Measure. Before, a mask saved as `A.PNG` showed as `mask/A.png` and was marked outdated.
+  See *Scientific output changes*.
+- **Library: paging fast always shows the opened row; PgDn / PgUp after a click on a group
+  row go on from the image on screen (H1-01, X6-01, 2026-10-31, owner decisions #10 and
+  #11 (A)).** With PgDn / PgUp across collapsed groups, the opened image's row could stay
+  inside a closed group (the tree animates an opening for 250 ms, and Qt opens no group
+  during it), and the next arrow key jumped to the top of the tree. The groups above the row
+  are now opened first, innermost first. After a click on a tube, date or field row, PgDn
+  opened the first image of the library and PgUp did nothing; now both step from the image
+  on screen, as in Correct. With nothing on screen, PgDn still opens the first image.
+- **Canvas: the skeleton's halo on whole device pixels, and its edge tiles on the mask
+  layer's pixels (X2-07, 2026-10-31, owner decisions #15 and #40).** On raster canvases
+  (Remote Desktop, software OpenGL, Linux on Wayland while a dashboard lives and up to
+  5 min after it is left) at 125 / 150 / 175 % display scaling, the skeleton's dark halo
+  from 200 % zoom sat up to half a device pixel off and jumped along the brush ring. It is
+  now laid out on device pixels and drawn unscaled, and a frame is 0.56-0.85 ms faster at
+  those scalings (640 x 480, 339 segments). The skeleton's last partial tiles at the image's
+  right and bottom edges could sit 1 device pixel off the mask layer whenever the device
+  scale was between 1 and 2 (for example a fit zoom), at any display scaling and on OpenGL
+  too; they are now padded to 256 px as the mask layer's are. Display only.
+- **Enhance: each slider's label shows its number when the saved value is the slider's
+  minimum (S09-04, 2026-10-31, owner decision #6).** A slider starts at its minimum, so
+  setting it to that value sent no change, and all four labels stayed blank at their
+  minimums. Display only.
+- **The crash dialog's "Don't show error dialogs again this session" tick counts when the
+  dialog closes with the window it belongs to (S10-01, 2026-10-31, owner decision #26
+  (b)).** The tick was read only when the dialog finished, so a dialog deleted with its
+  parent lost it. The tick is now kept as it changes. Attaching the dialog to the main
+  window (#26 (a)) waits: the owner said "later".
+- **Dashboards: two hover texts (S14-06, S14-05, 2026-10-31, owner decisions #7 and #8).**
+  The area dashboard's Growth Over Time hover names a tube once ("Tube 12", not "Tube Tube
+  12"). The Depth Profile hover says an image exists when the side panel shows one for that
+  interval: it checked only the interval's last position and said "Image Not Available"
+  for 377 of 5,003 points (7.5 %) on the owner's 2024 data. No value changes.
+- **Generate stops at once when it cannot write the output folder (C6-01, 2026-10-31, owner
+  decision #20).** Permission denied, a read-only drive or a folder that is gone let the run
+  predict every image (about 1-1.5 h at 46k) and then list each one as failed. Now a save
+  that cannot create its temp file for a reason of the folder stops the run at the next
+  batch, as a full disk does, with one message that names the folder: "Cannot save files in
+  <folder>: <reason>. Check that the folder exists and that you may write to it, then try
+  again." The Generate box shows that message alone and the log gets no traceback
+  (`io_utils.FolderNotWritableError` is a user condition of
+  `app.workers.is_user_condition`). A file name the OS rejects (for example a path over the
+  Windows length limit) still fails only that image. A run in which many saves fail no
+  longer keeps each failed image in memory until it ends (about 0.3-0.8 MiB per image).
+- **A failed save names the file being saved, not the hidden temp file (C6-05, 2026-10-31,
+  owner decision #22).** The Measure retry box, the Correct save toasts and the generation
+  failure lists named SPROUTS's temp file (for example `.root_lengths.csv.8a0f8efd.tmp`, or
+  `'<temp>' -> '<target>'` for a failed swap); they now name the target, here
+  `root_lengths.csv`. The error keeps its type and codes, so every handler acts as before.
+- **Generate refuses at once when the skeleton model file is missing (S11-10, 2026-10-31,
+  owner decision #18).** Before, it ran the whole mask pass, and the skeleton pass then
+  failed in its worker. Now Generate checks both checkpoints before it starts. A missing
+  file gets one box that names it ("Skeleton model missing"; the mask model is named first
+  when both are missing). *Skeletons only* refuses the same way. A successful run writes
+  exactly what it wrote before.
+- ***Load skeleton file…* and *Export dataset…* read the file before they ask Save /
+  Discard (C6-03, 2026-10-31, owner decision #21).** Before, a Discard dropped the edits and
+  then the file turned out to be unreadable (or `gt/classes.json` invalid), so the edits
+  were lost for nothing. Now a bad file is refused with its message before any prompt, and
+  the edits stay. The file is read again after the prompt, because a Save there can rewrite
+  it.
+- **A failed dashboard export shows a warning toast (C6-06, 2026-10-31, owner decision
+  #23).** Before, only a successful export got a toast; a failure was only logged. Now a
+  plot or CSV download that does not complete shows "Could not save <name> in <folder>:
+  <reason>", and a CSV table the server cannot build shows "Could not export the <view>
+  view: …" (the server answered HTTP 500 before). The toast names the file (or the view)
+  and the reason.
+- **Correct, Classes layer: the brush ring now shows the active class's colour (2026-10-30,
+  owner bug report).** The ring took the layer's purple once, at build, so picking Root tip,
+  or a new class, left it looking the same as for Root; the paint itself was already in the
+  class colour. The ring now follows the active class, also when the class editor adds,
+  recolours or retires one; the eraser ring stays dashed. Display only: no CSV value or
+  output pixel changes.
+- **Correct, Classes layer: the default Root class is sky blue `#56b4e9`, no longer the mask
+  layer's green `#5fd6a0` (2026-10-30, owner decision "yes change").** Root strokes blended
+  into the mask under them. A test keeps every default class colour apart from the mask,
+  skeleton and Classes layer colours. A project that already has `gt/classes.json` keeps
+  its colours (recolour Root in Classes…). See *Scientific output changes*.
+- **Correct, Classes layer: each class is ticked "checked" by hand, one at a time
+  (2026-10-30, owner bug report).** Painting a class used to tick and lock its box, so
+  every painted class was checked at once. A box now ticks only when the annotator ticks
+  it, and can be unticked while the class has pixels: "checked" means the class is fully
+  annotated on the image. The locked-box tooltip and fill are gone. See *Scientific output
+  changes*. (Superseded 2026-11-01: the box now marks the active class, and there is no
+  "checked" state; see the first entry of *Fixed*.)
+- **Windows bundle: Generate failed in the app built on Python 3.14 (U2, 2026-10-29).**
+  torchvision 0.29 renamed its operator libraries to `_C_stable.pyd` / `image_stable.pyd`,
+  which PyInstaller's hook does not collect, so a frozen `import torchvision` raised
+  "operator torchvision::nms does not exist". The spec now bundles every compiled library
+  of the torchvision package (`scripts/build_support.py`). A GUI smoke test of the bundle
+  (start-up, open, GPU Generate, Measure Length and Area, both dashboards, Correct, close)
+  passed, with masks, skeletons and both CSVs identical to the source app's.
+- **Dashboard blink on Linux X11 (D8, 2026-10-29).** Each dashboard is a native child window
+  with an OpenGL surface on X11: the main window is no longer recreated (a blink) at the first
+  dashboard when the canvases draw without OpenGL, and OpenGL canvases keep their viewports
+  while a dashboard lives. Wayland and macOS are unchanged. CI: a non-blocking native-platform
+  dashboard probe on macOS and Linux (xvfb). README: two missing Linux packages
+  (`libxcb-randr0`, `libgbm1`) and the Ubuntu 24.04 sandbox advice corrected (the dashboards
+  open with the sandbox on; turning it off is not needed). No CSV value or output pixel
+  changes.
+- **Open-items pass (2026-10-29), the five guard-test offenders** (owner questions #4, #9, #13,
+  #14, #50; no CSV value or output pixel changes):
+  - The status line's Cancel button shows the keyboard focus ring when Tab reaches it (K1b-01).
+  - Classes… and Export dataset… on the Correct page leave the keyboard on the canvas after a
+    click (Space no longer opens the dialog again; Tab still reaches them) (C5-03).
+  - The Correct side card takes its new width as soon as a Layers row's label changes (a label
+    was cut, or the card stayed too wide, until the next change) (S02-01).
+  - With a measured image selected the window can be 834 px narrow (was 1,126 px): the
+    metrics bar's STATUS words elide, with the full text (and the GT note) in their tooltip,
+    only once ZOOM has gone and the name is at its shortest; wider windows look as before
+    (P1-03).
+  - At 125 / 150 % scaling the image name under the Library display shows the longest form
+    that fits whole (a form one pixel too wide was painted cut), and a cut class name always
+    has its tooltip (C5-02).
 - **Redundancy and speed pass (2026-10-26).** None of these changes a CSV value or an
   output pixel, except one corner case under *Scientific output changes* (S01-06).
   - Correct: undo across layers keeps each layer's newest 100 actions on the one timeline,
@@ -94,9 +305,11 @@ Seven passes, not yet released:
     projects with such names; the wording is the same (C1-04).
   - Measure clicked while a folder loads gives the loading refusal at once; it named the
     previous project's missing outputs, or listed its folders first (S11-01).
-  - Durable saves survive a power cut on Linux and macOS: after the swap, a durable save (GT
-    files, CSVs, records, sidecars) also syncs its folder (about 6 ms per file); a folder
-    that cannot be synced (CIFS, FUSE) never fails the save. Windows is unchanged (S16-09).
+  - Durable saves sync their folder on Linux and macOS: after the swap, a durable save (GT
+    files, CSVs, records, sidecars) also syncs its folder (about 6 ms per file), so on Linux
+    it survives a power cut (on macOS the last few seconds of saves can be lost, see X1-05);
+    a folder that cannot be synced (CIFS, FUSE) never fails the save. Windows is unchanged
+    (S16-09).
   - Metrics bar: a `root_lengths.csv` found in a legacy layout stays on the bar when a job
     ends (S06-01, C1-03); a legacy project opened while the previous project's CSV parse
     still ran shows its own length values (S06-04); a prediction whose name differs from the
@@ -413,6 +626,13 @@ Seven passes, not yet released:
     ... has been deleted", and the Measure Retry prompt is freed once answered.
 
 ### Performance
+- **Skeleton undo history at large sizes (P3, 2026-10-29).** Skeleton patches (0/255) are
+  stored as packed bits, deflated, as mask patches (0/1) already were, and the all-0 side of a
+  Clear stores nothing. On a dense 6000 x 4000 skeleton a Clear records in 21-22 ms instead of
+  32-37 and undoes in 15-16 instead of 19-25; a replaced skeleton records in 32-34 ms instead
+  of 46-55; 2048 x 1536 edits are 30-40 % faster; the history holds 20 % less. 640 x 480 edits
+  were under 0.5 ms and still are. Undo and redo give every pixel back exactly; saved masks
+  and skeletons are unchanged.
 - **Redundancy and speed pass (2026-10-26).** Outputs are unchanged by all of these.
   - Whole app (the pass's perf harness, `f392a85` against `ea205a9`, three interleaved runs
     each, medians): opening the 46k project 1222 -> 903 ms (GUI thread 359 -> 290 ms);
@@ -612,6 +832,27 @@ Seven passes, not yet released:
   3-7x faster; first GPU run no longer spends 40-70 s in cuDNN autotuning.
 
 ### Added
+- **Correct, Classes layer: Mark empty saves empty class labels (2026-11-02, owner decision
+  "yes empty label file is necessary").** Since the class tick became the active class
+  (2026-11-01, *Fixed*), an image nobody painted on had nothing unsaved, so it got no labels
+  file and Export dataset left it out: a negative example ("checked, none of the classes")
+  took painting, Clear and a second save. **Mark empty**, on the Correct page of the top bar
+  between Export dataset… and Remove GT…, saves `gt/<stem>.png` with every pixel background
+  (id 0), and `gt/classes.json` first when it is missing, through the normal save: the
+  toast, the "GT" state and the Library's labels mark follow. It saves only the class labels:
+  unsaved mask or skeleton edits stay unsaved and do not turn it off. It is on only while an
+  image is open, its class labels are untouched (nothing painted that Save would write),
+  `gt/classes.json` is valid and no labels file is saved or kept for the image (also none
+  that could not be read or has another size), so it never replaces saved labels; its tooltip
+  says why when it is off. No shortcut and no question: Remove GT… deletes the file again.
+  The label is short and has no icon so that the top bar keeps the window within its 900 px
+  minimum-width budget (879 px with it; "Save empty labels" with an icon needed 937 px). No
+  CSV value, mask or skeleton pixel or existing GT file changes: the files it writes are
+  ordinary empty labels files, exported like any other, so this is not listed under
+  *Scientific output changes*.
+- `scripts/build.ps1 -DistPath / -WorkPath` and, for both build scripts,
+  `SPROUTS_BUILD_DISTPATH` / `SPROUTS_BUILD_WORKPATH`: build outside the checkout
+  (2026-10-29).
 - **Owner-decisions build (2026-10-25).**
   - Key texts show Cmd / Option on macOS (F1 sheet, tooltips, hints); on macOS each stage
     also answers to Cmd+Option+N (Option+N types a character in a text field); the F1 sheet
@@ -681,6 +922,107 @@ Seven passes, not yet released:
   app version, commit, model SHA-256, calibration and runtime precision.
 
 ### Changed
+- **The area dashboard has the length dashboard's views and controls (2026-11-02).** One
+  class, `MetricDashApp` (`app/visualization/dash_metric_app.py`), now builds both
+  dashboards; `DashApp` and `DashAppArea` only set their page title, shell and file-name
+  slug. The area dashboard keeps *Totals by Tube* and gains the length views: *Growth Over
+  Time* with the Multi-Select, Range and Manual Entry tube tabs, Clear All / Select All,
+  Show Field Average, Show Field Variance Shading and Toggle Legend; *Depth Profile* with
+  one line per date over 10-position depth intervals and the photo on hover (the area
+  window now gets the image manager); and *Depth Profile Grid* (date rows by up to six tube
+  columns, the tube against the field average). The area view of grouped bars of mean area
+  per position, its all-tubes time view and its floating *Toggle Legend* button are gone.
+  *Export CSV* of the area dashboard now writes the length dashboard's tables for each view
+  (`root_area_<view>_<timestamp>.csv`): field average and per-tube totals for Growth Over
+  Time, depth-interval statistics for Depth Profile, tube and field interval means for the
+  grid. The modules `dash_length_layout.py`, `dash_length_views.py` and
+  `dash_length_callbacks.py` are now `dash_metric_layout.py`, `dash_metric_views.py` and
+  `dash_metric_callbacks.py`; `dash_export.position_means`,
+  `DashboardShell.register_legend_toggle` and `DashboardSpec.needs_image_manager` are
+  deleted. No value in `root_lengths.csv` / `root_areas.csv` and no pixel changes.
+- **Toasts are capsules (2026-10-31, owner choice from mockups that combined Sonner and the
+  Coloplast design system).** A toast is a pill instead of a card with a coloured stripe on
+  its left: a ring in the kind's colour around its glyph counts the lifetime down, a save's
+  "<what> · <file name>" shows its title and then the file name in mono on one line, and
+  every kind has a close button (success and info had none). A toast may carry one action
+  button (`NoticeAction` in `app/feedback.py`, the optional `action=` of `notify`); it
+  closes the toast. The done toast of mask and of skeleton generation has an "Open folder"
+  button that shows the output folder in the file manager (none when inputs failed:
+  `open_folder_action` in `app/handlers/generation_base.py`). The newest toast is in front
+  and the older ones tuck behind it until the pointer is over the stack, which fans it out;
+  a new toast slides up, the stack glides
+  and a dismissed toast sinks as it fades (placed at once on the offscreen platform).
+  Every countdown pauses while the pointer is over the stack and while SPROUTS is in the
+  background. Success and info toasts last 4 s instead of 3.2 s; warnings at least 6 s and
+  errors until closed, as before. Mockups: `.superpowers/brainstorm/` (local).
+- **Settings in one file, `settings.ini`, in the user config folder on every OS
+  (2026-10-31, owner decision #45).** Windows `%APPDATA%\SPROUTS`, Linux `~/.config/sprouts`
+  (`$XDG_CONFIG_HOME/sprouts` when set), macOS `~/Library/Application Support/SPROUTS`;
+  `SPROUTS_CONFIG_DIR` moves it. Before, the settings were in the Windows registry or the
+  system's own store; on Linux that was a second folder, `~/.config/LeakeyLab`. The first
+  start copies the old values once: window size and position, recent projects, the last
+  folder, the Correct layers' opacity and visibility, and the device-check switch. A value
+  already in the file wins. The import is recorded as `date` (with `source` and `keys`)
+  under `[native_import]`. The native store is only read, so an older version still finds
+  its values there; values it writes there later are not copied. Deleting `settings.ini`
+  copies the old values again on the next start; to reset the settings, keep only its
+  `[native_import]` section. The Enhance defaults were already in this folder
+  (`normalization_defaults.json`). Headless runs (the offscreen platform: tests, scripts)
+  never open the file. No CSV value or output pixel changes.
+- **Buttons are Tab-only across the app (2026-10-31, owner decision #44).** A click on a
+  button leaves the keyboard where it was, so Space and B keep working on the canvas. Tab
+  still reaches every button (on macOS only with Keyboard navigation on in System Settings:
+  `docs/KNOWN_ISSUES.md` #44 (b)). Sliders, combo boxes and text fields keep their focus. A
+  click on a push button, check box or radio button still takes the keyboard from a text
+  field of its window, so what was typed there is committed first (a class renamed in the
+  Classes editor and confirmed with a click on OK is kept). Tool buttons (the top bar's
+  stage buttons, Load) never took the keyboard on a click and still do not. Canvas overlay
+  controls never take the keyboard. Before, 50 buttons of the window and its dialogs took
+  the keyboard on a click; now none does. `app/gui/widgets/focus.py` `TabOnlyButtonStyle`,
+  installed by `main.main` and by the test suite (`tests/conftest.py`); no control looks
+  different.
+- **The desktop UI draws in IBM Plex Sans and IBM Plex Mono on every OS (2026-10-31, owner
+  decision #46 (iii)).** The fonts ship as TTF files in `resources/fonts/` (IBM Plex Sans
+  1.1.0 and IBM Plex Mono 2.5.0, the dashboards' versions; SIL OFL 1.1, listed with their
+  SHA-256 in `app/assets/THIRD_PARTY.md`) and are registered before the stylesheet loads
+  (`app/gui/widgets/fonts.py`). Before, Qt could not read the `.woff2` files and each OS
+  drew its own font. Text is a little wider: the window minimum is 774 px with nothing
+  selected (was 762 px) and 861 px with a measured image selected (was 834 px), within the
+  900 px budget. The wheel and the Windows bundle carry the fonts. The Fusion style on
+  Windows (#46 (i)) waits: the owner said "later".
+- **Dashboards: value labels inside bars take plotly.js 4's own colour (2026-10-31, owner
+  decision #51).** Labels on the date blue `#4f97d1` turn from dark grey (`#444`) to white:
+  date 2 of 5, date 3 of 8-10, date 4 of 12-13, and 1-4 dates next to that blue in trials of
+  14-67 dates (up to 18 in longer ones). Trials with 1-4, 6, 7 or 11 dates keep every label
+  colour (the owner's trial has 11). Only labels drawn inside a bar change, with 30 bars or
+  fewer side by side; on `#4f97d1` white contrasts at 3.14 and `#444` at 3.10.
+  `theme.inside_label_colour` and the `colour` parameter of `bar_labels` are gone. No value
+  changes.
+- **macOS: durable saves sync with `F_BARRIERFSYNC` (X1-05, 2026-10-31, owner decision #30
+  (b)).** Durable saves (GT files, CSVs, records, sidecars) sync the file and its folder
+  with `fcntl(F_BARRIERFSYNC)` (85, which Python's `fcntl` does not export). The drive keeps
+  the order of the writes, so a power cut leaves the previous file or the new complete one,
+  never a broken one; the last few seconds of saves can still be lost. Where the call fails
+  (SMB, FAT), the save falls back to `os.fsync`. Windows and Linux are unchanged. The texts
+  that promised a power-cut-safe save on macOS are corrected (`app/io_utils.py`, the S16-09
+  entry under *Fixed*). No CSV value or output pixel changes.
+- **Mask and skeleton generation end a failed run the same way (L2b, 2026-10-31, owner
+  decision #27).** Both refresh the window first, so the outputs written before the error
+  show behind the box, and then show the one error box. Both log "<Mask|Skeleton>
+  generation failed: …". Before, the skeleton log said "Skeleton generation error", and the
+  mask handler showed its box before the refresh.
+- **Qt's own wheels are pinned (2026-10-31, owner decision #53).** `requirements.txt` now
+  pins the wheels PyQt6 and PyQt6-WebEngine pull in: `PyQt6-Qt6` and `PyQt6-WebEngine-Qt6`
+  6.11.2 and `PyQt6-sip` 13.13.0, so a later install gets the Qt build the suite ran with.
+  `pyproject.toml` lists them with compatible ranges. `tests/test_fair_packaging.py` checks
+  that each Qt wheel matches its bindings' version and meets their requirements.
+- **A parallel local test run (T1-11, 2026-10-31, owner decision #36).**
+  `requirements-dev.txt` adds pytest-xdist. `pytest -n auto -m "not wallclock"` runs the
+  suite on every core (about 1 min on 16 cores), and `pytest -m wallclock` then runs the 37
+  wall-clock tests serially (24 always on, 13 opt-in). The new `wallclock` marker in
+  `pyproject.toml` tags every test that asserts a wall-clock time; under parallel load, a
+  15 ms undo test had failed in 4 of 6 audit runs. `--strict-markers` makes a mistyped
+  marker stop the run. CI stays serial.
 - **Python 3.14 and the newest dependencies (2026-10-27, owner decision).** Python 3.14
   (from 3.10: `requires-python >= 3.14`, CI on 3.14, ruff `py314`); PyTorch 2.14.1 and
   torchvision 0.29.1 from the CUDA 13.2 index (`cu132`, NVIDIA driver of the 580 series or
@@ -715,9 +1057,9 @@ Seven passes, not yet released:
     field mean, figure value and export value is unchanged.
   - plotly.js 4 defaults set back to plotly.js 3's: no "Upload to Cloud" modebar button (it
     would post a chart to cloud.plotly.com) and a 300 ms double-click (4.1 waits 500 ms)
-    (`dash_shell.graph_config`); bar value labels keep their colour where plotly.js 4's WCAG
-    rule picks white instead of dark grey (the fourth date-ramp blue `#4f97d1` and the
-    blends next to it: trials with 5, 8-10, 12 or more dates; `theme.inside_label_colour`).
+    (`dash_shell.graph_config`). Bar value labels kept plotly.js 3's dark grey where
+    plotly.js 4's WCAG rule picks white until owner decision #51 (2026-10-31) took plotly.js
+    4's colours (the 2026-10-31 entry on bar labels in this section).
   - Dash 4.4.1 dropped a zoom when Select All or Clear All redrew Growth Over Time with the
     same `uirevision` (plotly/dash#4093): `app/assets/sprouts-uirevision.js` keeps it. In a
     browser check (QtWebEngine) of 23 states over drag and wheel zoom, pan, double-click
@@ -895,15 +1237,16 @@ Seven passes, not yet released:
   - Correct, class labels (WG-T5, O23, O14, O24): the class labels are the third layer of
     Correct (row "Classes", purple), painted with Brush, Eraser and Fill in the active
     class's colour; the class panel (the classes, their "checked" boxes and the gear of the
-    class editor) and the layer's three rail tools show while they are edited. Keys:
+    class editor; since 2026-11-01 the box marks the active class, see *Fixed*) and the
+    layer's three rail tools show while they are edited. Keys:
     **M** / **L** / **G** edit the mask / the skeleton / the class labels (they were `1` /
     `2`), **X** goes back to the previous layer, `1`-`9` and `0` pick a class (class labels
     only); `B` and `F` stay on the class labels (from the skeleton they take the mask's), and
     `H` / `Shift+H` show or hide every layer / the other layers. A class-label save writes
     only `gt/<stem>.png` (`gt/classes.json` first when missing) and marks the Library row;
-    an untouched image is not saved (O2: tick the boxes to record "looked, nothing found";
-    Trace GT wrote an empty labels file). `PgDn` saves them without asking unless unknown
-    classes were mapped to Ignore (then it asks). While `gt/classes.json` is invalid only
+    an untouched image is not saved (O2: tick the boxes to record "looked, nothing found",
+    until 2026-11-01; Trace GT wrote an empty labels file). `PgDn` saves them without asking
+    unless unknown classes were mapped to Ignore (then it asks). While `gt/classes.json` is invalid only
     the class labels are read-only, with one danger notice per image (on the first refused
     edit). The top bar's Correct page holds **Classes…**, **Export dataset…** (it saves
     Correct's edits first) and the new **Remove GT…**, which, after asking, deletes the
@@ -1130,6 +1473,29 @@ Seven passes, not yet released:
   fallback; the mask model used to fail to load.
 
 ### Removed
+- **The older project layout (C1-03, 2026-10-31, owner decision #38, which replaces #37).**
+  The owner has no project of that layout left. It is no longer read: masks in
+  `output/mask/`, skeletons in `[output/]skeletonizer/test_latest/images/`, and a
+  `test_latest` folder found by searching the folders near the project. Measure reads and
+  writes only `mask/`, `skeletons/` and `gt/`. The metrics bar, the Measure status line and
+  Visualize look for the CSVs only in `skeletons/` (or the project folder, which is not part
+  of the older layout) and `mask/`. The warning about measuring the older `output/mask`
+  folder is gone. The sweep of stale temp files covers 5 folders instead of 8. The
+  dashboards' export looks for `sprouts_project.json` at most two folders above the CSV (was
+  five). Removed code: the old-layout constants, `mask_dir_candidates`,
+  `skeleton_dir_candidates`, `resolve_masks_dir`, `resolve_skeletons_dir` and
+  `find_test_latest_dir` of `app/project_layout.py`, and the legacy branches of
+  `measurement_index`, `visualization_manager`, `main_window`, `job_buttons`,
+  `skeleton_handler` and `stage_status`. Projects of the current layout measure, list and
+  chart as before.
+- **The length dashboard's compatibility layer (S15-07 tier 2, 2026-10-31, owner decision
+  #34).** The 15 underscore delegators on `DashApp`, the 7 module aliases in `dash_app.py`,
+  and the data-URL thumbnail path of `dash_image_utils` (`get_encoded_image`,
+  `ThumbnailCache.data_url`, `jpeg_data_url`, and the `app.visualization.get_encoded_image`
+  export). Nothing used them;
+  the served page and its callbacks are unchanged (`tests/test_viz_dash_split_golden.py`).
+- **The second success toast after a skeleton run, "Results loaded" (S11-09, 2026-10-31,
+  owner decision #19).** One run, one message: "Skeletons saved to the … folder".
 - **Redundancy and speed pass (2026-10-26).** Code with no caller in the app, the scripts or
   the documents (the tests that only covered it went with it):
   - `app.inference.root_length_inference_handler` and `root_area_inference_handler`
@@ -1203,6 +1569,125 @@ Seven passes, not yet released:
   as pre-commit already ran it.
 
 ### Scientific output changes
+- **The area dashboard's charts and Export CSV tables are the length dashboard's
+  (2026-11-02; see *Changed*).** No value in `root_lengths.csv` / `root_areas.csv` and no
+  pixel changes; only what the area dashboard shows and exports differs. Growth Over Time
+  draws the selected tubes and the field average (dates within 3 days merged, ±1 SD)
+  instead of every tube, and `root_area_time_*.csv` holds those rows. The Depth Profile is
+  one line per date over 10-position depth intervals: `root_area_profile_*.csv` (mean area
+  per position) is gone, and `root_area_lines_*.csv` holds the interval statistics. The
+  Depth Profile Grid (`root_area_faceted_*.csv`) is new. Totals by Tube is unchanged.
+- **Correct: a point clicked onto a picked skeleton branch joins the branch's end nearest
+  the click (2026-11-02, owner bug report).** The GT skeletons saved after one kind of
+  gesture change: a branch picked with Select, then a Polyline click or double-click that
+  adds a point to it, then Enter, Finish line, a double-click or Save. Before, the point was
+  joined to the branch's last traced end, which a Python set's order chose, often the far
+  end, and the saved skeleton had a chord across from that end to the point. Now the point
+  joins the end nearer the click. On a ring or loop, it joins the vertex nearest the click,
+  not the arbitrary pixel where the ring was traced from. A click undone with Ctrl+Z during
+  the polyline leaves the pick exactly as picked, so what is saved after it is unchanged.
+  New polylines, pick + Delete, pick + drag + Enter, pick + S + Enter, Connect and the
+  Eraser save the same pixels as before. Existing GT files, Measure and the goldens
+  (`tests/data/correct_goldens*.json`) are unchanged; only edits made from now on differ.
+- **Class labels: no `reviewed` list, and Export dataset exports every image with a GT file
+  (2026-11-01, owner decision "Tick = active class").** Class labels are never measured:
+  no value in `root_lengths.csv` / `root_areas.csv` and no mask or skeleton pixel changes.
+  Two ground-truth outputs change:
+  - A class-labels save no longer writes a `reviewed` list. The `sprouts_gt` text chunk of
+    `gt/<stem>.png` is now `{"v": 1, "classes": {"<id>": "<key>", ...}}`; its version stays
+    1 (`app/gt/store.py`). The `reviewed` list of a file saved before is read past and
+    ignored: the file opens as before and does not show as unsaved, and it keeps the list
+    until it is saved again. Class-id pixels and the palette do not change. Older app
+    versions still read the new files: they take the missing list as empty, so their
+    Export dataset skips such a file while "Only fully checked images" is on.
+  - Export dataset exports every image with a GT file (`app/gt/export.py`). Images it
+    skipped before as not fully checked (some active class not ticked; the option was on by
+    default) are now in the dataset: in `images/`, `masks/`, `manifest.csv` and the splits.
+    With more images, the same seed can give a different train / val split. The provenance
+    record `manifest.csv.provenance.json` no longer has `only_complete` (in `parameters`)
+    or `skipped_incomplete` (in `outputs`), and the export summary no longer says "N
+    skipped (incomplete)".
+
+  `tests/data/gt_goldens.json` was re-recorded with every class-id hash equal (94 planes
+  and 6 saved files: ids, counts, palette and id map unchanged). Only the `reviewed` lists,
+  the saved files' bytes (their chunk) and the unsaved flag after two box clicks changed (a
+  box click is no edit now). The mask and skeleton goldens are unchanged.
+- **Correct: Delete and edits of a picked skeleton branch erase only that branch's pixels
+  (S03-01, 2026-10-31, owner decision #1).** The GT skeletons these tools save change.
+  Before, a 9 px band along the branch also erased the first pixels of every other branch at
+  its junctions, and of an unconnected branch within about 4 px, so the saved skeleton was
+  shorter and in more pieces. On 6 dense skeletons predicted for the owner's 2024 photos
+  (640 x 480), 176 Deletes of a branch at a junction: the band left a median 0.30-0.56 mm
+  less root length per Delete (median per image; worst 0.93 mm) and more pieces in 138/176;
+  the new Delete keeps a median 8-17 px (max 27) of the neighbours that the band erased. Of
+  125 tip-to-tip Deletes on the same set, 20 also cut a nearby unconnected branch before
+  (37 px in all). A branch with no junction and no close neighbour gives the same pixels as
+  before. Existing GT files, Measure and the goldens (`tests/data/correct_goldens*.json`)
+  are unchanged; only edits made from now on differ.
+- **Correct: Enter, Finish line and a double-click no longer rewrite a skeleton branch that
+  was only picked (S03-02, 2026-10-31, owner decision #2).** Before, they erased and redrew
+  the unchanged branch, and PgDn then saved the result as GT. On 8 real predictions (264
+  branches picked at their middle point, audit S03-02), Enter changed 263/264 branches: a
+  median -0.376 mm of root length, at worst -1.082 mm. A Select double-click changed 263/264
+  and, through its chord, added up to 5.76 mm. Now these change nothing. Pick, S, Enter (or
+  Finish line) on a branch of 3+ points still applies the curve, unchanged. A changed pick
+  finished with a double-click within a pick's reach of its line now commits as Enter does,
+  without the chord to the click that it drew before. This includes a double-click just
+  past the end of a segment the user added: it adds no point there. The reach is 12 screen
+  px, kept between 1 and 48 image px: about 0.34 mm at 100 % zoom, never more than 1.35 mm.
+  Existing GT files, Measure and the goldens are unchanged.
+- **Measure Length: a skeleton whose `_fake.png` suffix is in another letter case gets a
+  row (C1-04, O6, 2026-10-31, owner decision #3).** In `root_lengths.csv`, a skeleton such
+  as `B_fake.PNG` now gets a row, measured like any prediction (`Source` `prediction`). This
+  happens only for an image that has no GT skeleton file and no skeleton with the exact
+  suffix; before, that image had no row. Every other row is unchanged. An image with a GT
+  skeleton file (`gt/skeletons/<stem>.png`, valid or not) is measured as before: the variant
+  is not read for it, not even as a duplicate, so its `Image` name, `Source` and value stay
+  the same, and where its GT file is not used and its only prediction is a variant it still
+  gets no row. Where a case-sensitive disk holds several skeletons of an image without a GT
+  file, the file with the exact suffix is measured as before, and a case variant is listed
+  under `duplicates` in the provenance. A variant whose image is gone gets no row and is
+  listed under `without_image`. The owner's 46,178-image project has no such file, so its
+  CSVs and every lookup match the previous version.
+- **Default Root class colour `#56b4e9` (was `#5fd6a0`, 2026-10-30).** In a project without
+  `gt/classes.json`, the next class-labels save writes the new colour into
+  `gt/classes.json` and into the palette entry of id 1 in `gt/<stem>.png`; Export dataset
+  lists it as Root's colour. The class ids (the pixel values) do not change, so no label,
+  CSV value, mask or skeleton pixel changes. Projects that already have `gt/classes.json`
+  are unchanged.
+- **Class labels: `reviewed` holds the hand ticks only (2026-10-30).** A class-labels save
+  no longer adds every class with pixels to the `reviewed` list of `gt/<stem>.png`.
+  Export dataset's "only fully checked images" (on by default) reads that list, so an image
+  saved from now on is exported only once every class is ticked by hand. Files saved before
+  keep their lists (painted classes included) until saved again. Class-id pixels are
+  unchanged; `tests/data/gt_goldens.json` was re-recorded with every class-id hash equal
+  (only the `reviewed` lists and the palette hash of the Root colour change). (Superseded
+  2026-11-01: no `reviewed` list is written and the export has no complete-only filter;
+  see the first entry of this section.)
+- **macOS and Linux on ARM (arm64): Correct opens and edits a skeleton as on x86
+  (2026-10-30).** OpenCV's arm64 wheels (carotene / KleidiCV HAL) rounded the bilinear
+  upscale of a prediction differently (`thin_raster`: 2-44 skeleton pixels of the three
+  `docs/examples` skeletons and the synthetic golden; L044 opened at 18.353 mm on arm64
+  against 18.343 mm on x86) and halved every neighbour count of the skeleton's degree map
+  (an integer `filter2D` kernel), so tips, Connect, Select / Delete branch and the
+  vectorization were wrong there. The upscale is now OpenCV's own integer bilinear algorithm
+  in numpy (`thinning.resize_linear_u8`, equal to `cv2.resize` on x86, pinned by a digest on
+  every platform) and the kernel is float32. Checked under QEMU aarch64: the patched code
+  gives x86's pixels exactly. A GT skeleton saved on a Mac before this change can differ
+  from one saved on Windows for the same edits. x86 output is unchanged (goldens
+  unchanged); Measure was never affected (same CSV values from the same files on arm64).
+  Cost: opening a 640 x 480 prediction thins in 3.5 ms instead of 1.5 ms.
+- **PyTorch 2.15.0 (cuDNN 9.26) changes no output (2026-10-29).** torch `2.15.0+cu132` /
+  torchvision `0.29.2+cu132` (cuDNN 9.26.0, CUDA 13.2) replace `2.14.1+cu132` /
+  `0.29.1+cu132` (cuDNN 9.24). On the science harness (40 Generate photos, the 123-image
+  Measure project with its GT cases, both fields of view) the GPU outputs, CSVs, provenance,
+  decisions and estimators are bit-identical to 2.14.1's, and the CPU outputs to the
+  published nightly's; on a 400-photo Generate job 0 of 400 masks and 0 of 400 raw skeleton
+  predictions differ from 2.14.1's. The GPU differences against the published results listed
+  below for 2.14.1 stand unchanged. The `cu134` build of 2.15.0 is not identical: against
+  `cu132` it moves 1 mask pixel (`24EFCAM1_T055_L066_2024.08.26_094641_003_SMM`, 799 -> 800
+  root pixels, CSV cell unchanged) and 6 raw skeleton predictions by one level in 1-8 pixels,
+  no CSV value; the recommended build is `cu132` (2.15.0 has no `cu130` build).
 - **GPU predictions: PyTorch 2.14.1 with cuDNN 9.24 (2026-10-27, accepted by the owner).**
   Generate on the GPU (RTX 5070 Ti, TF32, deterministic cuDNN, default batch policy) moves a
   few pixels. Before: torch `2.8.0.dev20250325+cu128` (cuDNN 9.7.1.26, CUDA 12.8); after:

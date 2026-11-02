@@ -270,6 +270,19 @@ class CorrectSession:
                 return SaveReport()
             return self._save(dirty, ask=True)
 
+    def save_layer(self, layer_id: str) -> SaveReport:
+        """Save ``layer_id`` alone, also while it is clean (the page's Mark empty saves the
+        untouched class labels this way); the other layers' edits stay unsaved. The gate comes
+        first, as for Ctrl+S. Nothing open: an empty report. It skips O2 (a clean layer is
+        never written), so its caller guards it: only Mark empty calls it, for the labels."""
+        if layer_id not in self.layers:
+            raise KeyError(layer_id)
+        if not self.image_path:
+            return SaveReport()
+        with self._batch:
+            self.finish_gestures()
+            return self._save([layer_id], ask=True)
+
     def save_dirty(self) -> SaveReport:
         """PgDn / PgUp: save the dirty layers only; an empty report (and no refresh of the
         page) when none is. Never asks: a save the gate would ask about is declined."""

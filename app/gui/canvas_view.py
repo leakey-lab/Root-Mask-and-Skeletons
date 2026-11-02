@@ -206,9 +206,10 @@ class CanvasViewMixin:
     def set_opengl_viewport_enabled(self, enabled: bool) -> None:
         """Use a ``QOpenGLWidget`` viewport when ``enabled`` and allowed, else a raster one.
 
-        MainWindow turns OpenGL off while a QtWebEngine dashboard is shown (the
-        two cannot share a window) and asks for it again afterwards. Asking is a
-        no-op when the env opt-out or the capability probe says no.
+        Where a dashboard is a native child window with its own surface (Windows, Linux on
+        X11: ``viz_window.native_child_surface``), OpenGL stays on. Elsewhere MainWindow turns it off while a dashboard
+        lives and asks for it again once the dashboard is released. Asking is a no-op
+        when the env opt-out or the capability probe says no.
         """
         want_gl = bool(enabled) and canvas_gl.opengl_viewports_allowed()
         if want_gl != self._opengl_viewport_enabled:

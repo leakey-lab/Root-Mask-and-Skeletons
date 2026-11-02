@@ -32,7 +32,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QLabel, QMainWindow, QStackedLayout, QWidget
 
 from app.design import tokens
-from app.qt_environment import windows_quick_uses_direct3d
+from app.qt_environment import linux_quick_uses_opengl, windows_quick_uses_direct3d
 from app.workers import GuardedThread, release_qthread
 
 from ._viz_server import DASH_HOST, _DashServerThreadBase, join_qthread
@@ -69,8 +69,17 @@ def native_child_surface(
     canvases' OpenGL viewports had to be off while it lived. In a native child window of its own
     the dashboard has its own Direct3D surface and the main window keeps the canvases' OpenGL
     surface: route (b) of the dashboard blink (``docs/KNOWN_ISSUES.md`` D8), measured at the RTX
-    5070 Ti's own screen on 2026-10-29. Linux and macOS were not checked, nor a browser on another
-    RHI or a Qt Quick backend other than the RHI one: they keep plain child widgets.
+    5070 Ti's own screen on 2026-10-29.
+
+    On Linux with X11 (``xcb``) the browser draws through OpenGL. A main window made for raster
+    canvases (software OpenGL, ``ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT=0``) was recreated once per
+    app start, at the first dashboard; as a native OpenGL child the dashboard never recreates it,
+    and OpenGL canvases keep their viewports (measured 2026-10-29 in WSL Ubuntu 24.04, XWayland
+    and Xvfb). Wayland keeps plain child widgets: native children are subsurfaces there, drawn
+    right by Weston but shown as separate desktop windows by WSLg; with OpenGL canvases nothing
+    is recreated there anyway. macOS was not checked (``tests/test_dashboard_native_platform.py``
+    asks on the CI's macOS runner), nor a browser on another RHI or a Qt Quick backend other
+    than the RHI one: they keep plain child widgets.
 
     Args:
         platform: A Qt platform plugin name; default ``QGuiApplication.platformName()``.
@@ -80,9 +89,11 @@ def native_child_surface(
         platform = QGuiApplication.platformName()
     if environ is None:
         environ = os.environ
-    if platform != "windows" or not windows_quick_uses_direct3d(environ):
-        return None
-    return QSurface.SurfaceType.Direct3DSurface
+    if platform == "windows" and windows_quick_uses_direct3d(environ):
+        return QSurface.SurfaceType.Direct3DSurface
+    if platform == "xcb" and linux_quick_uses_opengl(environ):
+        return QSurface.SurfaceType.OpenGLSurface
+    return None
 
 
 def require_rows(processor):
@@ -162,6 +173,9 @@ class DashVizWindow(QMainWindow):
     server_closed = pyqtSignal()
     #: Path of an export (Plotly camera button) saved next to the CSV.
     export_saved = pyqtSignal(str)
+    #: One-line message for an export that failed: its file could not be saved, or the
+    #: server could not build the "Export CSV" table.
+    export_failed = pyqtSignal(str)
 
     window_title = "Visualization"
     download_prefix = "plot"
@@ -194,8 +208,9 @@ class DashVizWindow(QMainWindow):
 
     def _embed_natively(self) -> None:
         """Give the dashboard a native window of its own where :func:`native_child_surface`
-        names a surface for it (Windows). It becomes a native child of the panel it is added to,
-        and Qt makes the panel's ancestors and their siblings native too (16-18 widgets)."""
+        names a surface for it (Windows, Linux on X11). It becomes a native child of the panel
+        it is added to, and Qt makes the panel's ancestors and their siblings native too
+        (16-18 widgets)."""
         surface = native_child_surface()
         if surface is None:
             return
@@ -292,6 +307,7 @@ class DashVizWindow(QMainWindow):
             return  # closed while the data was loading
         self.processor = processor
         self.dash_app = dash_app
+        self._hook_csv_export_failures(self.export_failed.emit)  # before the server serves
         self._stage = _Stage.STARTING
         self._set_status("Starting the dashboard server…")
         thread = self.server_thread_class(dash_app, self.port)
@@ -371,9 +387,18 @@ class DashVizWindow(QMainWindow):
         _disconnect(worker.failed)
         release_qthread(worker)  # never blocks: a build still running finishes on its own
 
+    def _hook_csv_export_failures(self, report: Callable[[str], None] | None) -> None:
+        """Point the page's "Export CSV" failure hook (``DashboardShell.on_export_failed``)
+        at *report*; None unhooks it. Dash runs the export on a server request thread:
+        a signal's emit is safe there and reaches the window's slots on the GUI thread."""
+        shell = getattr(self.dash_app, "shell", None)
+        if shell is not None and hasattr(shell, "on_export_failed"):
+            shell.on_export_failed = report
+
     def _stop_background_work(self) -> bool:
         """Release the init worker and stop the server; True if a server was stopped."""
         self._release_init_worker()
+        self._hook_csv_export_failures(None)
         thread, self.server_thread = self.server_thread, None
         if thread is None:
             return False
@@ -434,5 +459,12 @@ class DashVizWindow(QMainWindow):
             return
         if download.state() == QWebEngineDownloadRequest.DownloadState.DownloadCompleted:
             self.export_saved.emit(path)
-        else:
-            logger.warning("Export to %s failed: %s", path, download.interruptReasonString())
+            return
+        reason = download.interruptReasonString()
+        logger.warning("Export to %s failed: %s", path, reason)
+        name, folder = os.path.basename(path), os.path.dirname(path)
+        self.export_failed.emit(
+            f"Could not save {name} in {folder}: {reason}"
+            if reason
+            else f"Could not save {name} in {folder}"
+        )

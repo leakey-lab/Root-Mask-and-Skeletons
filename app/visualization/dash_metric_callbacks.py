@@ -1,13 +1,13 @@
 """
-Root-length dashboard: every callback, registered in one place.
+Metric dashboards (length and area): every callback, registered in one place.
 
 :func:`register_callbacks` wires the shell callbacks (strip, summary, per-tube
-selection, refit, export) and the length dashboard's own ones onto the
+selection, refit, export) and the metric dashboard's own ones onto the
 dashboard's Dash app. The order of registration is kept: it is the order of
 ``app.callback_map`` and of the callbacks Dash fires on page load.
 
-The callbacks call the layout builders (:mod:`.dash_length_layout`) and the view
-model (:mod:`.dash_length_views`) directly, so a callback costs no more calls
+The callbacks call the layout builders (:mod:`.dash_metric_layout`) and the view
+model (:mod:`.dash_metric_views`) directly, so a callback costs no more calls
 than when they were methods of the dashboard.
 """
 
@@ -19,7 +19,7 @@ import pandas as pd
 from dash import Input, Output, State, html
 from dash.exceptions import PreventUpdate
 
-from .dash_length_layout import (
+from .dash_metric_layout import (
     GRAPH_STYLE,
     HIDDEN,
     SHOWN,
@@ -27,7 +27,7 @@ from .dash_length_layout import (
     faceted_info,
     thumbnail,
 )
-from .dash_length_views import (
+from .dash_metric_views import (
     controls_summary,
     export_table,
     hover_date,
@@ -53,7 +53,7 @@ function(view) {
 
 
 def register_callbacks(dash_app) -> None:
-    """Register every callback of the length dashboard ``dash_app`` (a DashApp)."""
+    """Register every callback of the metric dashboard ``dash_app`` (a MetricDashApp)."""
     dash_app.shell.register_callbacks(
         dash_app.app,
         summary_inputs=[
@@ -76,7 +76,7 @@ def register_callbacks(dash_app) -> None:
         build_table=partial(export_table, dash_app),
         source_csv=dash_app.data_processor.csv_path,
         metric_column=dash_app.data_cache.value_column,
-        metric_slug="root_length",
+        metric_slug=dash_app.metric_slug,
     )
 
     # The control cards of the selected view, shown in the browser in the click's

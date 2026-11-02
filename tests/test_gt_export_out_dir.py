@@ -39,7 +39,7 @@ def test_a_drive_relative_folder_is_resolved_once_when_the_export_starts(tmp_pat
             moved.append(str(later))
             os.chdir(later)
 
-    options = ExportOptions(out_dir=f"{_drive(str(tmp_path))}out", only_complete=False)
+    options = ExportOptions(out_dir=f"{_drive(str(tmp_path))}out")
     result = export_dataset(project_dir, images, registry, options, progress)
 
     out = start / "out"

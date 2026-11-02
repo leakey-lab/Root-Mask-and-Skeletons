@@ -281,8 +281,8 @@ def test_status_chip_shows_the_file_and_its_state(host):
 
     chip.set_state("clean")
     assert "Saved" in chip.state_label.text() and tokens.OK in chip.state_label.text()
-    chip.set_state("clean", "Saved · 2/3 checked")
-    assert "Saved · 2/3 checked" in chip.state_label.text()
+    chip.set_state("clean", "GT")
+    assert "GT" in chip.state_label.text() and "Saved" not in chip.state_label.text()
     chip.set_state("error", "GT unreadable", tooltip="The GT file could not be used")
     assert tokens.DANGER in chip.state_label.text()
     assert chip.state_label.toolTip() == "The GT file could not be used"

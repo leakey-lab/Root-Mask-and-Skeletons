@@ -126,9 +126,15 @@ def test_main_window_contract(app):
         assert mw.gt_classes_button.text() == "Classes…"
         assert mw.gt_export_button.text() == "Export dataset…"
         assert mw.gt_remove_button.text() == "Remove GT…"
+        assert mw.gt_empty_button.text() == "Mark empty"
         # WG-T5: the GT actions are on the Correct page.
         correct_page = mw.action_bar_stack.widget(mw._action_bar_pages["Correct"])
-        for button in (mw.gt_classes_button, mw.gt_export_button, mw.gt_remove_button):
+        for button in (
+            mw.gt_classes_button,
+            mw.gt_export_button,
+            mw.gt_empty_button,
+            mw.gt_remove_button,
+        ):
             assert button.parentWidget() is correct_page
         assert mw.app_stack.count() >= 2
         # FIX2: the dialog-free loader entry point exists for recent rows.

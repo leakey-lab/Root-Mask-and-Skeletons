@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -65,11 +65,17 @@ _ROI_BAND = 2
 
 @dataclass(frozen=True)
 class SkeletonTopology:
-    """Derived topology information from a 1px skeleton mask."""
+    """Derived topology information from a 1px skeleton mask.
+
+    ``own[i]`` holds the pixels of ``polylines[i]``'s walk (not simplified) without the
+    junction pixels at its ends: what deleting that branch erases, so the other branches at
+    its junctions keep theirs (S03-01). It is empty for an edge between two junction pixels.
+    """
 
     endpoints: list[Point]
     junctions: list[Point]
     polylines: list[list[Point]]
+    own: list[list[Point]] = field(default_factory=list)
 
 
 def _neighbors8() -> list[tuple[int, int]]:
@@ -140,9 +146,13 @@ class _Step:
 # 3x3 kernel that sums all 8 neighbors (center weight = 0) -- used by
 # _compute_degree_map to count the 8-connected neighbor degree in one
 # filter pass instead of eight array-slicing iterations (F-096 / Perf).
+# float32, never an integer type: on arm64 (macOS, Linux aarch64) OpenCV hands an
+# integer kernel over a uint8 image 8 or more pixels wide to its carotene HAL, which
+# returns the sum shifted right by one (every degree halved). A float kernel takes
+# OpenCV's own path there, exact on every CPU (as metrics.py's _NEIGHBOUR_CODE).
 _NEIGHBOR_KERNEL = np.array(
     [[1, 1, 1], [1, 0, 1], [1, 1, 1]],
-    dtype=np.uint8,
+    dtype=np.float32,
 )
 
 
@@ -232,6 +242,24 @@ def _rdp_simplify(points: Sequence[Point], epsilon: float) -> list[Point]:
     return left[:-1] + right
 
 
+def _branch_pixels(path: list[Point], deg: np.ndarray) -> list[Point]:
+    """``path`` (a walk from node to node) without its end pixels that are junctions."""
+    (x0, y0), (x1, y1) = path[0], path[-1]
+    start = 1 if deg[y0, x0] >= 3 else 0
+    end = len(path) - 1 if deg[y1, x1] >= 3 else len(path)
+    return path[start:end]
+
+
+def _node_free(mask: np.ndarray, ys: np.ndarray, xs: np.ndarray) -> np.ndarray | None:
+    """The pixels of ``mask`` in 8-connected pieces that hold none of the nodes at ``ys``,
+    ``xs`` (rings: every pixel has two neighbours); None when there are none."""
+    count, labels = cv2.connectedComponents(mask, connectivity=8)
+    loose = np.ones(count, bool)
+    loose[0] = False  # the background
+    loose[labels[ys, xs]] = False
+    return loose[labels] if loose.any() else None
+
+
 def vectorize_skeleton(mask_1px: np.ndarray, *, simplify_epsilon: float = 1.5) -> SkeletonTopology:
     """
     Vectorize a *1px* skeleton mask into polylines and derive endpoints/junctions.
@@ -241,7 +269,9 @@ def vectorize_skeleton(mask_1px: np.ndarray, *, simplify_epsilon: float = 1.5) -
 
     Every polyline runs from one node (endpoint or junction) to the next. A loop
     attached to a single junction comes back as a closed polyline that starts and
-    ends at that junction.
+    ends at that junction. A ring with no node at all (every pixel has two neighbours)
+    comes back closed, after every node-to-node polyline (S03-06). ``own`` holds each
+    polyline's own pixels (see :class:`SkeletonTopology`).
     """
     mask_1px = _ensure_uint8_binary(mask_1px)
     skel_bool = mask_1px > 0
@@ -271,6 +301,7 @@ def vectorize_skeleton(mask_1px: np.ndarray, *, simplify_epsilon: float = 1.5) -
         visited_edges.add((b, a))
 
     polylines: list[list[Point]] = []
+    own: list[list[Point]] = []
     # No node-to-node chain can hold more points than the skeleton has pixels.
     max_path_len = int(skel_bool.sum()) + 1
 
@@ -300,13 +331,16 @@ def vectorize_skeleton(mask_1px: np.ndarray, *, simplify_epsilon: float = 1.5) -
                 mark_edge(cur, nxt)
                 prev, cur = cur, nxt
 
+            own.append(_branch_pixels(path, deg))
             if simplify_epsilon > 0:
                 path = _rdp_simplify(path, simplify_epsilon)
             polylines.append(path)
 
-    # Handle loops with no nodes (all degree==2)
-    if not nodes:
-        ys2, xs2 = np.where(skel_bool)
+    # Rings: pieces with no node (all degree == 2), which no walk from a node reaches.
+    # They come after the node walks, so those keep their indices (S03-06).
+    rings = _node_free(mask_1px, ys, xs) if nodes else skel_bool
+    if rings is not None:
+        ys2, xs2 = np.where(rings)
         remaining = {(int(x), int(y)) for x, y in zip(xs2, ys2, strict=True)}
         while remaining:
             start = next(iter(remaining))
@@ -331,11 +365,12 @@ def vectorize_skeleton(mask_1px: np.ndarray, *, simplify_epsilon: float = 1.5) -
                 path.append(nxt)
                 remaining.discard(nxt)
                 prev, cur = cur, nxt
+            own.append(path[:-1] if path[-1] == start else path[:])  # each pixel once
             if simplify_epsilon > 0:
                 path = _rdp_simplify(path, simplify_epsilon)
             polylines.append(path)
 
-    return SkeletonTopology(endpoints=endpoints, junctions=junctions, polylines=polylines)
+    return SkeletonTopology(endpoints, junctions, polylines, own)
 
 
 class SkeletonCorrectionModel:
@@ -725,6 +760,22 @@ class SkeletonCorrectionModel:
     def erase_polyline(self, points: Sequence[Point], thickness: int) -> None:
         """Erase a ``thickness``-px band along an open polyline (e.g. a branch being redrawn)."""
         self._stroke_polyline(points, thickness, 0)
+
+    def erase_pixels(self, points: Sequence[Point]) -> None:
+        """Erase exactly the pixels ``points`` ``(x, y)``, such as a picked branch's own
+        pixels (``SkeletonTopology.own``); points outside the mask are skipped."""
+        if self._mask is None or not len(points):
+            return
+        h, w = self._mask.shape
+        xy = np.asarray(points, dtype=np.intp).reshape(-1, 2)
+        xy = xy[(xy[:, 0] >= 0) & (xy[:, 0] < w) & (xy[:, 1] >= 0) & (xy[:, 1] < h)]
+        if not len(xy):
+            return
+        xs, ys = xy[:, 0], xy[:, 1]
+        self._mask[ys, xs] = 0
+        self._note_change(int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+        self._fixed_point = False
+        self._touch()
 
     def _stroke_polyline(self, points: Sequence[Point], thickness: int, value: int) -> None:
         if self._mask is None or len(points) < 2:

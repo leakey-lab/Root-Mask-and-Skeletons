@@ -12,10 +12,8 @@ A SPROUTS project is a folder of images. Every stage writes next to them::
     <root>/gt/mask/<stem>.png                       GT mask (a saved edit)
     <root>/gt/skeletons/<stem>.png                  GT skeleton (a saved edit)
 
-Older runs used ``output/mask`` and ``[output/]skeletonizer/test_latest/images``
-(plus a ``test_latest`` folder found by a bounded walk); the ``resolve_*`` and
-``find_*_csv`` methods keep today's search order for those. Only the walk lists folders:
-the fixed places are a few stats.
+The older layout (``output/mask``, ``[output/]skeletonizer/test_latest/images``) is not
+read since 2026-10-31 (#38): masks, skeletons and CSVs there are not found.
 
 Qt-free and side-effect free: nothing is created on disk, and each ``scan_*``
 method is a single ``os.scandir`` of one folder. The case-variant lookups remember, in
@@ -24,7 +22,6 @@ memory only, which stem keys a case-sensitive folder held while it is unchanged.
 
 from __future__ import annotations
 
-import logging
 import os
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
@@ -42,8 +39,6 @@ from app.config import (
 )
 from app.naming import LEGACY_IMAGE_EXTENSIONS, image_stem, stem_key
 
-logger = logging.getLogger(__name__)
-
 __all__ = [
     "MASK_EXTENSIONS",
     "SKELETON_SUFFIX",
@@ -52,10 +47,11 @@ __all__ = [
     "ProjectLayout",
     "few_keys",
     "find_by_stem",
-    "find_test_latest_dir",
+    "group_skeletons",
     "key_to_stems",
     "project_layout_of",
     "skeleton_stem",
+    "skip_gt_variants",
 ]
 
 #: File-name suffix of a generated skeleton (skeleton_inference output).
@@ -68,12 +64,6 @@ MASK_EXTENSIONS = IMAGE_EXTENSIONS
 # matter on case-sensitive file systems.
 _MASK_LOOKUP = tuple(v for ext in MASK_EXTENSIONS for v in (ext, ext.upper()))
 
-_TEST_LATEST = "test_latest"
-_LEGACY_MASK_DIR = ("output", MASK_DIRNAME)
-_LEGACY_SKELETON_DIRS = (
-    ("output", "skeletonizer", _TEST_LATEST, "images"),
-    ("skeletonizer", _TEST_LATEST, "images"),
-)
 # Before R8 the GT store and registry wrote "<path>.tmp" next to gt/<stem>.png and
 # gt/classes.json; a killed save left that file in gt/ for good.
 _LEGACY_GT_TEMP_SUFFIX = ".tmp"
@@ -96,9 +86,79 @@ def _scan[K](directory: str, key_of: Callable[[str], K | None]) -> Iterator[tupl
 
 def skeleton_stem(name: str) -> str | None:
     """The stem of a generated skeleton's file name, None for any other name: Measure
-    Length's name rule (the exact suffix; hidden names count; ``_fake.png`` alone has the
-    stem "")."""
-    return name[: -len(SKELETON_SUFFIX)] if name.endswith(SKELETON_SUFFIX) else None
+    Length's name rule (the suffix in any case of its ASCII letters, ``B_fake.PNG`` too, #3;
+    hidden names count; ``_fake.png`` alone has the stem "")."""
+    if name.endswith(SKELETON_SUFFIX):
+        return name[: -len(SKELETON_SUFFIX)]
+    tail = name[-len(SKELETON_SUFFIX) :]
+    # isascii: str.lower() maps U+212A KELVIN SIGN to "k", which no disk folds to a "k"
+    if tail.isascii() and tail.lower() == SKELETON_SUFFIX:
+        return name[: -len(SKELETON_SUFFIX)]
+    return None
+
+
+def _skeleton_rank(path: str) -> tuple[bool, str]:
+    """Order of the files of one skeleton stem: the exact suffix first, then the name that
+    sorts first."""
+    name = os.path.basename(path)
+    return not name.endswith(SKELETON_SUFFIX), name
+
+
+def group_skeletons(
+    files: Iterable[tuple[str, str]],
+) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """``(stem -> path, shadowed)`` of skeleton ``files`` (``(stem, path)`` pairs, stems by
+    :func:`skeleton_stem`).
+
+    Of several files with one stem (``a_fake.png`` and ``a_fake.PNG`` on a case-sensitive
+    disk) the one with the exact suffix is listed, else the name that sorts first (#3). A
+    suffix in another case is listed only for a stem key without an exact-suffix file
+    (``A_fake.png`` keeps image ``a``'s row from ``a_FAKE.png``), so it adds a row and never
+    changes one (beside a GT skeleton, :func:`skip_gt_variants` leaves it out first). The
+    others are ``shadowed``, for :func:`app.inference.input_split.split_inputs`, so none of
+    them vanishes unrecorded.
+    """
+    listed: dict[str, str] = {}
+    shadowed: list[tuple[str, str]] = []
+    for stem, path in files:
+        held = listed.get(stem)
+        if held is None:
+            listed[stem] = path
+        elif _skeleton_rank(path) < _skeleton_rank(held):
+            listed[stem] = path
+            shadowed.append((stem, held))
+        else:
+            shadowed.append((stem, path))
+    variants = [stem for stem, path in listed.items() if not path.endswith(SKELETON_SUFFIX)]
+    if variants:  # none in the usual folder: no stem key is computed then
+        exact = {stem_key(stem) for stem, path in listed.items() if path.endswith(SKELETON_SUFFIX)}
+        for stem in variants:
+            if stem_key(stem) in exact:
+                shadowed.append((stem, listed.pop(stem)))
+    return listed, shadowed
+
+
+def skip_gt_variants(
+    files: Iterable[tuple[str, str]], gt_stems: Iterable[str]
+) -> Iterator[tuple[str, str]]:
+    """The skeleton ``files`` (``(stem, path)`` pairs) Measure Length reads beside the GT
+    skeletons of ``gt_stems`` (the stems of the GT files that have an image).
+
+    A file whose suffix is in another case (``B_fake.PNG``) is left out for an image with a
+    GT skeleton file, used or not, and is not even a duplicate: Measure did not see such a
+    file before #3, so that image is measured as it was (its ``Image`` name, ``Source`` and
+    value, or no row). #3 adds rows only, for images without a GT skeleton (owner, #3).
+    Applied to the files before :func:`group_skeletons`, or to what it lists and to what it
+    shadows, it leaves the same files.
+    """
+    gt_keys: set[str] | None = None
+    for stem, path in files:
+        if not path.endswith(SKELETON_SUFFIX):
+            if gt_keys is None:  # only a variant needs them: none in the usual folder
+                gt_keys = {stem_key(gt_stem) for gt_stem in gt_stems}
+            if stem_key(stem) in gt_keys:
+                continue
+        yield stem, path
 
 
 @dataclass
@@ -198,11 +258,19 @@ _SETTLED_NS = 2_000_000_000
 
 
 def _find_without_case(
-    directory: str, stem: str, endings: tuple[str, ...], *, fold_endings: bool
+    directory: str,
+    stem: str,
+    endings: tuple[str, ...],
+    *,
+    fold_endings: bool,
+    measure_order: bool = False,
 ) -> str | None:
     """A file of ``directory`` named ``<stem'><ending>`` where ``stem'`` has ``stem``'s
     :func:`~app.naming.stem_key`; the lowest ``(ending rank, file name)`` wins, as in the
-    ranked scan. ``fold_endings`` matches the endings without case too (extensions).
+    ranked scan. ``fold_endings`` matches the endings without case too (extensions; their
+    ASCII letters only, as :func:`skeleton_stem`). ``measure_order`` ranks as Measure Length
+    keeps a skeleton (:func:`group_skeletons`, then ``split_inputs``): an ending in its exact
+    case first, then ``stem`` as given, then the name that sorts first.
 
     One ``os.scandir``, skipped where the file system ignores case: there the exact-name
     lookup has already found any case variant. Skipped too while the folder is unchanged
@@ -227,38 +295,45 @@ def _find_without_case(
     elif st.st_mtime_ns < started - _SETTLED_NS:
         keys = set()
     rank = {(e.lower() if fold_endings else e): i for i, e in enumerate(endings)}
-    best: tuple[int, str, str] | None = None
+    best: tuple[tuple[int, bool, bool, str], str] | None = None
     try:
         with os.scandir(directory) as entries:
             for entry in entries:
                 name = entry.name
                 for ending, r in rank.items():
                     tail = name[-len(ending) :]
-                    if (tail.lower() if fold_endings else tail) != ending:
+                    # isascii: str.lower() maps U+212A KELVIN SIGN to "k"
+                    if (tail.lower() if fold_endings and tail.isascii() else tail) != ending:
                         continue
-                    name_key = stem_key(name[: -len(ending)])
+                    name_stem = name[: -len(ending)]
+                    name_key = stem_key(name_stem)
                     if keys is not None:
                         keys.add(name_key)  # every name, file or not: a key it lacks has none
                     if name_key != key or not entry.is_file():
                         continue
-                    if best is None or (r, name) < best[:2]:
-                        best = (r, name, entry.path)
+                    if measure_order:
+                        order = (r, tail not in endings, name_stem != stem, name)
+                    else:
+                        order = (r, False, False, name)
+                    if best is None or order < best[0]:
+                        best = (order, entry.path)
     except FileNotFoundError, NotADirectoryError:
         return None
     if keys is not None:
         if len(_LISTED_KEYS) >= _LISTED_MAX:
             _LISTED_KEYS.clear()
         _LISTED_KEYS[memo] = (stamp, keys)
-    return best[2] if best is not None else None
+    return best[1] if best is not None else None
 
 
 def find_by_stem(directory: str, stem: str, suffix: str) -> str | None:
-    """The file ``<directory>/<stem><suffix>``, else one whose stem differs only in case
-    (O7; the exact name wins); None when there is neither."""
+    """The file ``<directory>/<stem><suffix>``, else one whose stem, or ``suffix``, differs
+    only in case (O7, #3), picked as Measure Length picks it (the exact suffix, then the
+    stem as given, then the name that sorts first); None when there is neither."""
     path = os.path.join(directory, stem + suffix)
     if os.path.isfile(path):
         return path
-    return _find_without_case(directory, stem, (suffix,), fold_endings=False)
+    return _find_without_case(directory, stem, (suffix,), fold_endings=True, measure_order=True)
 
 
 def few_keys(found: Sized, stems: Sized) -> bool:
@@ -373,27 +448,17 @@ class ProjectLayout:
         return self._path(GT_DIRNAME, SKELETONS_DIRNAME)
 
     @property
-    def mask_dir_candidates(self) -> tuple[str, str]:
-        """Mask folders in Measure-area priority: legacy ``output/mask`` first, as today."""
-        return self._path(*_LEGACY_MASK_DIR), self.mask_dir
-
-    @property
-    def skeleton_dir_candidates(self) -> tuple[str, ...]:
-        """Skeleton folders in Measure-length priority (``skeletons/``, then legacy)."""
-        return (self.skeletons_dir, *(self._path(*parts) for parts in _LEGACY_SKELETON_DIRS))
-
-    @property
     def output_dirs(self) -> tuple[str, ...]:
         """Every folder the app writes into: where killed writes leave temp files (R8).
 
-        The mask and skeleton candidates (generation writes there, and Measure writes
-        its CSV and ``.provenance.json`` into the folder it measured), ``gt/``, ``gt/mask/``
-        and ``gt/skeletons/``. Not the image folder (nothing writes there) and no legacy
-        ``test_latest`` walk: nothing is read from disk.
+        ``mask/`` and ``skeletons/`` (generation writes there, and Measure writes its CSV
+        and ``.provenance.json`` next to what it measured), ``gt/``, ``gt/mask/`` and
+        ``gt/skeletons/``. Not the image folder (nothing writes there); nothing is read
+        from disk.
         """
         return (
-            *self.mask_dir_candidates,
-            *self.skeleton_dir_candidates,
+            self.mask_dir,
+            self.skeletons_dir,
             self.gt_dir,
             self.gt_mask_dir,
             self.gt_skeletons_dir,
@@ -465,40 +530,31 @@ class ProjectLayout:
         """Stems that have a mask in ``mask/`` (one scandir)."""
         return set(self.scan_masks())
 
-    def resolve_masks_dir(self) -> str | None:
-        """First existing of :attr:`mask_dir_candidates` (the folder Measure reads)."""
-        return next((d for d in self.mask_dir_candidates if os.path.isdir(d)), None)
-
     # ------------------------------------------------------------------ skeletons
     def skeleton_path(self, stem: str) -> str:
         """Generated skeleton ``skeletons/<stem>_fake.png``."""
         return self._path(SKELETONS_DIRNAME, self.stem(stem) + SKELETON_SUFFIX)
 
     def find_skeleton(self, stem: str) -> str | None:
-        """Existing ``skeletons/<stem>_fake.png``, its stem compared without case (O7)."""
+        """Existing ``skeletons/<stem>_fake.png``, its stem and suffix compared without case
+        (O7, #3)."""
         return find_by_stem(self.skeletons_dir, self.stem(stem), SKELETON_SUFFIX)
 
+    def scan_skeleton_files(
+        self, directory: str | None = None
+    ) -> tuple[dict[str, str], list[tuple[str, str]]]:
+        """``(stem -> path, shadowed)`` of the skeletons in ``directory`` (default
+        ``skeletons/``): what Measure Length reads (:func:`skeleton_stem`,
+        :func:`group_skeletons`; one scandir)."""
+        return group_skeletons(_scan(directory or self.skeletons_dir, skeleton_stem))
+
     def scan_skeletons(self, directory: str | None = None) -> dict[str, str]:
-        """``stem -> path`` of ``*_fake.png`` in ``directory`` (default ``skeletons/``)."""
-        return dict(_scan(directory or self.skeletons_dir, skeleton_stem))
+        """``stem -> path`` of the skeletons in ``directory`` (default ``skeletons/``): the
+        ``_fake.png`` suffix in any letter case, one file per image (:meth:`scan_skeleton_files`)."""
+        return self.scan_skeleton_files(directory)[0]
 
     def scan_skeleton_stems(self) -> set[str]:
         return set(self.scan_skeletons())
-
-    def resolve_skeletons_dir(self, search_test_latest: bool = True) -> str | None:
-        """Folder Measure-length reads: ``skeletons/``, then the legacy layouts.
-
-        With ``search_test_latest`` a bounded walk for a ``test_latest`` folder
-        runs only when none of :attr:`skeleton_dir_candidates` exists.
-        """
-        for folder in self.skeleton_dir_candidates:
-            if os.path.isdir(folder):
-                return folder
-        if search_test_latest:
-            found = find_test_latest_dir(self.root)
-            if found and os.path.isdir(os.path.join(found, "images")):
-                return os.path.join(found, "images")
-        return None
 
     # ------------------------------------------------------------------ GT
     def gt_path(self, stem: str) -> str:
@@ -570,50 +626,17 @@ class ProjectLayout:
         )
 
     # ------------------------------------------------------------------ metric CSVs
-    def _lengths_csv_candidates(
-        self, search_test_latest: bool, walk: Callable[[str], str | None] | None
-    ) -> Iterator[str]:
-        yield self._path(SKELETONS_DIRNAME, ROOT_LENGTHS_CSV)
-        yield self._path(ROOT_LENGTHS_CSV)
-        for parts in _LEGACY_SKELETON_DIRS:  # where Measure writes for legacy layouts
-            yield self._path(*parts, ROOT_LENGTHS_CSV)
-        if search_test_latest:
-            found = (walk or find_test_latest_dir)(self.root)
-            if found:
-                # Measure writes into the images/ folder it read (resolve_skeletons_dir);
-                # before 2024-12 the CSV went into test_latest/ itself.
-                yield os.path.join(found, "images", ROOT_LENGTHS_CSV)
-                yield os.path.join(found, ROOT_LENGTHS_CSV)
-
-    def find_lengths_csv(
-        self,
-        search_test_latest: bool = True,
-        *,
-        walk: Callable[[str], str | None] | None = None,
-    ) -> str | None:
-        """Existing ``root_lengths.csv``: ``skeletons/``, the project folder, the legacy
-        folders of :attr:`skeleton_dir_candidates`, then a ``test_latest`` folder nearby.
-
-        Only that last place needs a walk of the folders: :func:`find_test_latest_dir`, or
-        ``walk`` called with the project folder (one that answers with an earlier walk's
-        result, say). It runs with ``search_test_latest`` and only when no other place has
-        the file; the other places are a few stats.
-        """
-        return next(
-            (
-                p
-                for p in self._lengths_csv_candidates(search_test_latest, walk)
-                if os.path.isfile(p)
-            ),
-            None,
-        )
+    def find_lengths_csv(self) -> str | None:
+        """Existing ``root_lengths.csv``: ``skeletons/`` (where Measure writes it), else the
+        project folder; None when neither has it (two stats at most)."""
+        for path in (self._path(SKELETONS_DIRNAME, ROOT_LENGTHS_CSV), self._path(ROOT_LENGTHS_CSV)):
+            if os.path.isfile(path):
+                return path
+        return None
 
     def find_areas_csv(self) -> str | None:
-        """Existing ``root_areas.csv`` in :meth:`resolve_masks_dir`, else None."""
-        masks_dir = self.resolve_masks_dir()
-        if masks_dir is None:
-            return None
-        path = os.path.join(masks_dir, ROOT_AREAS_CSV)
+        """Existing ``mask/root_areas.csv`` (where Measure writes it), else None."""
+        path = self._path(MASK_DIRNAME, ROOT_AREAS_CSV)
         return path if os.path.isfile(path) else None
 
 
@@ -632,62 +655,3 @@ def project_layout_of(manager: object) -> ProjectLayout | None:
     if images:
         return ProjectLayout.for_image(next(iter(images.values())))
     return None
-
-
-def find_test_latest_dir(start_path: str, max_depth: int = 3) -> str | None:
-    """Find a legacy ``test_latest`` folder near ``start_path``.
-
-    Searches down ``max_depth`` levels (likely names such as ``output`` first),
-    then walks up ``max_depth`` parents looking at promising siblings. Moved
-    unchanged from ``app.gui.visualization_manager`` so the writer and every
-    reader share one implementation; unreadable folders are skipped.
-    """
-    start_path = os.path.abspath(start_path)
-    priority = ("output", "results", "test", "latest", _TEST_LATEST)
-
-    def search_directory(root_path: str, depth: int = 0) -> str | None:
-        if depth > max_depth:
-            return None
-        if os.path.basename(root_path) == _TEST_LATEST:
-            return root_path
-        try:
-            subdirs: list[str] = []
-            with os.scandir(root_path) as entries:
-                for entry in entries:
-                    if entry.is_dir():
-                        if entry.name.lower() in priority:
-                            subdirs.insert(0, entry.path)
-                        else:
-                            subdirs.append(entry.path)
-            for subdir in subdirs:
-                result = search_directory(subdir, depth + 1)
-                if result:
-                    return result
-        except OSError as exc:
-            logger.debug("Skipping directory %s during search: %s", root_path, exc)
-        return None
-
-    def search_up(path: str, depth: int = 0) -> str | None:
-        if depth > max_depth:
-            return None
-        try:
-            if os.path.basename(path) == _TEST_LATEST:
-                return path
-            parent = os.path.dirname(path)
-            if parent == path:
-                return None
-            with os.scandir(parent) as entries:
-                for entry in entries:
-                    if entry.is_dir() and entry.path != path:
-                        if entry.name == _TEST_LATEST:
-                            return entry.path
-                        if entry.name.lower() in priority[:-1]:
-                            sibling_result = search_directory(entry.path, 0)
-                            if sibling_result:
-                                return sibling_result
-            return search_up(parent, depth + 1)
-        except OSError as exc:
-            logger.debug("Skipping parent %s during search: %s", path, exc)
-        return None
-
-    return search_directory(start_path) or search_up(start_path)

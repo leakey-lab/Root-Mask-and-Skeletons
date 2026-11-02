@@ -10,8 +10,9 @@
   given no settings object gets a memory store on the offscreen platform
   (``app.settings.app_settings``).
 - One QApplication, as in a full run: ``AA_ShareOpenGLContexts`` is set before it exists,
-  the canvases default to raster viewports (``ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT=0``), and
-  the session fixtures ``app`` and ``qapp`` make it on first use and keep it until exit.
+  the canvases default to raster viewports (``ROOT_VIEWER_ENABLE_OPENGL_VIEWPORT=0``), its
+  buttons are Tab-only as ``main.main`` makes them (``widgets.focus.use_tab_only_buttons``),
+  and the session fixtures ``app`` and ``qapp`` make it on first use and keep it until exit.
 - ``QtWebEngineWidgets`` is imported before any test can create the QApplication: Qt loads it
   only while no QCoreApplication exists, and ``app.gui.visualization_manager`` imports it.
   Without this, ``tests/test_import_smoke.py`` failed whenever an earlier file created the
@@ -168,7 +169,12 @@ def _own_config_dir():
 # ================================================================== the one QApplication
 def _session_app() -> QApplication:
     if not _SESSION_APP:
-        _SESSION_APP.append(QApplication.instance() or QApplication([]))
+        app = QApplication.instance() or QApplication([])
+        # Buttons are Tab-only, as main.main makes them (owner item #44).
+        from app.gui.widgets.focus import use_tab_only_buttons
+
+        use_tab_only_buttons(app)
+        _SESSION_APP.append(app)
     return _SESSION_APP[0]
 
 

@@ -26,7 +26,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-import app.project_layout as project_layout
 from app.gui import visualization_manager as vm
 from app.gui.panels import Panel
 from tests.qt_teardown import flush_deleted
@@ -43,6 +42,7 @@ class StubDashboard(QMainWindow):
 
     server_closed = pyqtSignal()
     export_saved = pyqtSignal(str)
+    export_failed = pyqtSignal(str)
     made: list = []
 
     def __init__(self, csv_path):
@@ -70,6 +70,10 @@ class StubLength(StubDashboard):
 
 class StubArea(StubDashboard):
     made: list = []
+
+    def __init__(self, csv_path, image_manager):
+        super().__init__(csv_path)
+        self.image_manager = image_manager
 
 
 class FakeImageManager:
@@ -247,6 +251,12 @@ def test_area_dashboard_reads_the_mask_csv(env):
     assert os.path.normcase(dashboard.csv_path) == os.path.normcase(str(expected))
 
 
+def test_area_dashboard_gets_the_image_manager(env):
+    vm.show_root_area_visualization(env.mw)
+
+    assert StubArea.made[0].image_manager is env.mw.image_manager
+
+
 def test_showing_one_dashboard_hides_the_other_without_closing_it(env):
     mw = env.mw
     vm.show_root_length_visualization(mw)
@@ -325,22 +335,6 @@ def test_missing_data_leaves_the_panels_and_opengl_alone(env):
     assert mw.gl_calls == []
     assert mw.right_panel.currentIndex() == 0
     assert [box[0] for box in env.boxes] == ["information"]
-
-
-def test_primary_csv_skips_the_legacy_folder_search(env, monkeypatch):
-    calls = []
-
-    def spy(*args, **kwargs):
-        calls.append(args)
-        return None
-
-    monkeypatch.setattr(project_layout, "find_test_latest_dir", spy)
-    monkeypatch.setattr(vm, "find_test_latest_dir", spy)
-
-    vm.show_root_length_visualization(env.mw)
-
-    assert len(StubLength.made) == 1
-    assert calls == []
 
 
 def test_show_waits_while_the_data_is_being_measured(env):
@@ -424,6 +418,16 @@ def test_exports_are_announced_in_the_main_window(env):
     mw.root_length_viz.export_saved.emit(str(env.project / "skeletons" / "plot.svg"))
 
     assert mw.notices and "plot.svg" in mw.notices[-1][0]
+
+
+def test_failed_exports_are_announced_as_warnings(env):
+    mw = env.mw
+    vm.show_root_area_visualization(mw)
+    message = f"Could not save plot.svg in {env.project / 'mask'}: Insufficient Permissions"
+
+    mw.root_area_viz.export_failed.emit(message)
+
+    assert mw.notices[-1] == (message, "warn")
 
 
 # --------------------------------------------------------------------------- #

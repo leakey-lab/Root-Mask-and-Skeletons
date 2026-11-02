@@ -193,9 +193,7 @@ def test_the_export_checks_no_file_of_an_image_without_labels(tmp_path, monkeypa
         return real_exists(path)
 
     monkeypatch.setattr(os.path, "exists", exists)
-    result = export_dataset(
-        project_dir, images, registry, ExportOptions(str(tmp_path / "out"), only_complete=False)
-    )
+    result = export_dataset(project_dir, images, registry, ExportOptions(str(tmp_path / "out")))
 
     assert result.exported == 6 and result.errors == []
     assert not untraced.intersection(checked)

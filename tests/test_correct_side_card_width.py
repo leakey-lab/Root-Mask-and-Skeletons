@@ -3,14 +3,12 @@ card takes its new width (LayerPanel's contract: it grows when a label needs mor
 narrows again). Guard of the overlay measuring patches (Qt toolkit items 4 and 7).
 
 Qt refreshes a nested layout's size hint one event-loop pass per level, and the card holds
-the Layers panel one level down, so a measure right after the change read the old hint.
-Today the card lags one change behind (S02-01, owner question #4): a label is cut, or the
-card stays too wide.
+the Layers panel one level down, so a measure right after the change read the old hint: the
+card lagged one change behind (S02-01, owner question #4), a label cut or the card too wide.
+The panel now tells the card at once (``LayerPanel.set_status``).
 """
 
 from __future__ import annotations
-
-import pytest
 
 from app.gui.correct.layer import CLASSES, SKELETON, LayerStatus
 from tests.correct_support import settle
@@ -23,7 +21,7 @@ LABELS = (
     (SKELETON, "error", "Skeleton not shown"),
     (SKELETON, "none", "Prediction"),
     (CLASSES, "dirty", "Unsaved · remapped"),
-    (CLASSES, "clean", "GT · 12/15 checked"),
+    (CLASSES, "clean", "GT"),
     (CLASSES, "none", "No class labels"),
 )
 
@@ -54,11 +52,6 @@ def test_the_card_is_measured_after_label_changes(make_editor, project, correct_
     assert all(width > 0 and hint > 0 for _text, width, hint, _cut in seen)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="S02-01 (owner question #4): the side card keeps a stale width when a Layers row "
-    "label changes (a label is cut, or the card stays too wide)",
-)
 def test_the_card_takes_its_rows_width_after_every_label_change(
     make_editor, project, correct_guards
 ):

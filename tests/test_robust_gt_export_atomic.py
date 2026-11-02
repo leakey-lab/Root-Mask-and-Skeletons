@@ -35,9 +35,7 @@ def _export_with_an_error(tmp_path, out_name="out"):
     with open(gt_path(images[_STEMS[2]]), "wb") as fh:
         fh.write(b"not a png\r\nsecond line")  # the message must stay one line
     out_dir = tmp_path / out_name
-    result = export_dataset(
-        project_dir, images, registry, ExportOptions(out_dir=str(out_dir), only_complete=False)
-    )
+    result = export_dataset(project_dir, images, registry, ExportOptions(out_dir=str(out_dir)))
     return out_dir, result, registry
 
 

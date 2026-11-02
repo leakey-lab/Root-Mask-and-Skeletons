@@ -50,8 +50,8 @@ def window(app, tmp_path):
     made = [build_window(tmp_path / "s.ini", show=False)]
     shown = made[0]
     real_show = shown.toasts.show
-    shown.toasts.show = lambda message, kind="success", timeout=None, *, key=None: real_show(
-        message, kind, LONG_TOAST_MS, key=key
+    shown.toasts.show = lambda message, kind="success", timeout=None, *, key=None, action=None: (
+        real_show(message, kind, LONG_TOAST_MS, key=key, action=action)
     )
     shown.show()
     settle()

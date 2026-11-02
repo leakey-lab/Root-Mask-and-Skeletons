@@ -261,28 +261,21 @@ def test_aspect_mismatches():
     assert aspect_mismatches(sizes, None) == 0
 
 
-def test_load_for_output_finds_a_legacy_skeleton_csv_and_takes_a_known_root(tmp_path):
+def test_load_for_output_takes_a_known_root_and_looks_two_folders_up(tmp_path):
     root = tmp_path / "project"
-    deep = [
-        root / "skeletonizer" / "test_latest" / "images",
-        root / "output" / "skeletonizer" / "test_latest" / "images",
-    ]
-    for folder in deep:
-        folder.mkdir(parents=True)
+    (root / "skeletons").mkdir(parents=True)
     _write_project(root, PROJECT)
-    for folder in deep:
-        found = load_for_output(str(folder / "root_lengths.csv"))
-        assert found.source == "project" and found.calibration == Calibration(18.0, 13.5)
     # The caller's project root wins over the folders above the CSV.
     elsewhere = tmp_path / "elsewhere" / "skeletons"
     elsewhere.mkdir(parents=True)
     known = load_for_output(str(elsewhere / "root_lengths.csv"), project_root=str(root))
-    assert known.source == "project"
-    # Six levels up is too far: the default.
-    six = tmp_path / "far" / "a" / "b" / "c" / "d" / "e" / "f"
-    six.mkdir(parents=True)
-    _write_project(tmp_path / "far", PROJECT)
-    assert load_for_output(str(six / "x.csv")).source == "default"
+    assert known.source == "project" and known.calibration == Calibration(18.0, 13.5)
+    # Two folders up is found; three (the older layout's depth, #38) is too far.
+    far = tmp_path / "far"
+    (far / "a" / "b" / "c").mkdir(parents=True)
+    _write_project(far, PROJECT)
+    assert load_for_output(str(far / "a" / "b" / "x.csv")).source == "project"
+    assert load_for_output(str(far / "a" / "b" / "c" / "x.csv")).source == "default"
 
 
 def test_the_sidecar_is_read_once_per_csv_load(tmp_path, monkeypatch):
@@ -347,16 +340,16 @@ def test_the_measure_status_line_carries_the_method_note(tmp_path, qapp):
     )
 
 
-def test_load_for_output_finds_the_project_two_or_three_levels_up(tmp_path):
+def test_load_for_output_finds_the_project_of_the_csvs_measure_writes(tmp_path):
     root = tmp_path / "project"
     (root / "skeletons").mkdir(parents=True)
-    (root / "output" / "mask").mkdir(parents=True)
+    (root / "mask").mkdir(parents=True)
     _write_project(root, PROJECT)
 
-    two = load_for_output(str(root / "skeletons" / "root_lengths.csv"))
-    three = load_for_output(str(root / "output" / "mask" / "root_areas.csv"))
-    assert two.source == three.source == "project"
-    assert two.calibration == three.calibration == Calibration(18.0, 13.5)
+    lengths = load_for_output(str(root / "skeletons" / "root_lengths.csv"))
+    areas = load_for_output(str(root / "mask" / "root_areas.csv"))
+    assert lengths.source == areas.source == "project"
+    assert lengths.calibration == areas.calibration == Calibration(18.0, 13.5)
 
     (tmp_path / "elsewhere" / "deep").mkdir(parents=True)
     assert load_for_output(str(tmp_path / "elsewhere" / "deep" / "x.csv")) == (

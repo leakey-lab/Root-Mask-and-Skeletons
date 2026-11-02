@@ -1,30 +1,24 @@
-"""The length dashboard's CSV lookup never walks the folders on the GUI thread (S08-01).
+"""The length dashboard's CSV lookup on the GUI thread: where Measure writes it, a few stats.
 
 Visualize looks for ``root_lengths.csv`` on the GUI thread: on entry (the stage button,
 Alt+5, the Length segment, the retry after a job end) in ``stages.missing_dashboard_data``,
-and in the dashboard controller's ``_show`` and ``_is_up_to_date``. Without the CSV in
-``skeletons/``, the project folder or the two fixed legacy folders, that lookup fell
-through to the legacy ``test_latest`` walk on every entry: the project folder, ``mask/``,
-``skeletons/``, ``gt/`` and the parents' siblings listed (about 100 ms at 46k photos). It
-now goes through the project's :class:`MeasurementIndex`, whose search in the pool walked
-when the project opened: the same CSV is found with a few stats. Before any search walked,
-or without an index of this project, it walks as before.
+and in the dashboard controller's ``_show`` and ``_is_up_to_date``. It looks in
+``skeletons/``, then the project folder (S08-01 kept a walk of the folders for the older
+layout off this thread; that layout is retired, #38, so there is no walk). A CSV in the
+older layout's folders (``[output/]skeletonizer/test_latest/images``, a ``test_latest``
+folder nearby) opens no dashboard.
 """
 
 from __future__ import annotations
 
 import os
-import threading
 import time
-from types import SimpleNamespace
 
 import pytest
 from PyQt6.QtCore import QThreadPool, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QMainWindow
 
-from app import project_layout
 from app.config import LENGTH_CSV_HEADERS, ROOT_LENGTHS_CSV
-from app.data_processing.measurement_index import MeasurementIndex
 from app.gui import visualization_manager as vm
 from app.inference.metrics import write_metric_csv
 from app.project_layout import ProjectLayout
@@ -33,29 +27,6 @@ from tests.qt_wait import settle as _settle
 from tests.window_support import build_window, write_photos
 
 STEM = "24EFCAM1_T001_L044_2024.07.18_111530_001_SMM"
-#: A test_latest folder that only the walk finds.
-WALKED = ("results", "run1", "test_latest")
-
-
-@pytest.fixture
-def walks(monkeypatch, tmp_path):
-    """Every legacy ``test_latest`` walk, as ``(start folder, on the GUI thread)``. What it
-    finds outside ``tmp_path`` is not reported (the walk also searches the parents)."""
-    seen: list[tuple[str, bool]] = []
-    real = project_layout.find_test_latest_dir
-
-    def spy(start, *args, **kwargs):
-        seen.append((start, threading.current_thread() is threading.main_thread()))
-        found = real(start, *args, **kwargs)
-        inside = found and os.path.commonpath([found, str(tmp_path)]) == str(tmp_path)
-        return found if inside else None
-
-    monkeypatch.setattr(project_layout, "find_test_latest_dir", spy)
-    return seen
-
-
-def _gui_walks(walks) -> list[str]:
-    return [start for start, on_gui in walks if on_gui]
 
 
 def _lengths(folder) -> str:
@@ -73,56 +44,29 @@ def _lengths(folder) -> str:
     return path
 
 
-# ------------------------------------------------------------------------ the index
-def test_the_lookup_uses_the_walk_of_the_pool_search(tmp_path, walks):
-    written = _lengths(tmp_path.joinpath(*WALKED, "images"))
-    index = MeasurementIndex(str(tmp_path))
-    index.prewarm()  # the pool's search when the project opens: it walks
-    assert len(walks) == 1
-    assert index.sources()["length"] == written
-    walks.clear()
+# ------------------------------------------------------------------------ the lookup
+def test_the_lookup_reads_skeletons_then_the_project_folder(tmp_path):
+    layout = ProjectLayout(str(tmp_path))
+    missing = vm.LENGTH.find_csv(layout)
+    assert missing.path is None and missing.title == "No root length data"
+    assert os.path.join(layout.skeletons_dir, ROOT_LENGTHS_CSV) in missing.message
 
-    assert index.find_lengths_csv() == written
-    index.invalidate()  # every Measure job end: the walk's folder is kept
-    assert index.find_lengths_csv() == written
-    assert walks == []
+    base = _lengths(tmp_path)
+    assert vm.LENGTH.find_csv(layout).path == base
+    primary = _lengths(tmp_path / "skeletons")
+    assert vm.LENGTH.find_csv(layout).path == primary
 
 
-def test_before_any_search_the_lookup_walks_once(tmp_path, walks):
-    index = MeasurementIndex(str(tmp_path))
-
-    assert index.find_lengths_csv() is None
-    assert index.find_lengths_csv() is None
-    assert len(walks) == 1  # its own walk is kept as well
-
-    written = _lengths(tmp_path / "skeletons")  # what Measure writes later: found at once
-    assert index.find_lengths_csv() == written
-    assert len(walks) == 1
-
-
-def test_a_test_latest_folder_made_later_is_found_by_the_next_pool_search(tmp_path, walks):
-    index = MeasurementIndex(str(tmp_path))
-    index.prewarm()  # walked: no test_latest folder
-    written = _lengths(tmp_path.joinpath(*WALKED, "images"))  # copied in by hand
-    assert index.find_lengths_csv() is None  # the app never makes such a folder
-
-    index.invalidate()
-    index.prewarm()  # the next search in the pool (a job end without a length CSV)
-
-    assert index.find_lengths_csv() == written
-
-
-def test_the_window_index_is_used_for_its_own_project_only(tmp_path):
-    layout = ProjectLayout(str(tmp_path / "a"))
-    index = MeasurementIndex(str(tmp_path / "a"))
-    window = SimpleNamespace(metrics=SimpleNamespace(index=index))
-
-    assert vm.measurement_index_of(window, layout) is index
-    assert vm.measurement_index_of(window, ProjectLayout(str(tmp_path / "b"))) is None
-    assert vm.measurement_index_of(window, None) is None
-    assert vm.measurement_index_of(SimpleNamespace(), layout) is None  # no metrics (stand-ins)
-    no_index = SimpleNamespace(metrics=SimpleNamespace(index=None))
-    assert vm.measurement_index_of(no_index, layout) is None
+def test_the_area_lookup_reads_mask(tmp_path):
+    layout = ProjectLayout(str(tmp_path))
+    assert vm.AREA.find_csv(layout).title == "No mask data"
+    (tmp_path / "output" / "mask").mkdir(parents=True)  # the older layout's folder: not read
+    (tmp_path / "output" / "mask" / "root_areas.csv").write_text("Image\n", encoding="utf-8")
+    assert vm.AREA.find_csv(layout).title == "No mask data"
+    (tmp_path / "mask").mkdir()
+    assert vm.AREA.find_csv(layout).title == "No root area data"
+    (tmp_path / "mask" / "root_areas.csv").write_text("Image\n", encoding="utf-8")
+    assert vm.AREA.find_csv(layout).path == str(tmp_path / "mask" / "root_areas.csv")
 
 
 # ------------------------------------------------------------------------ the window
@@ -147,7 +91,7 @@ _UNSET = object()
 
 
 @pytest.fixture
-def window(app, tmp_path, walks, no_prompts, no_temp_sweep):
+def window(app, tmp_path, no_prompts, no_temp_sweep):
     """A shown window whose length dashboard is :class:`StubLength` (set on the module itself:
     a monkeypatch would import the Dash stack to read the old value)."""
     saved = vm.__dict__.get("RootLengthVisualization", _UNSET)
@@ -200,25 +144,31 @@ def _enter(window, stage: str) -> None:
     _settle()
 
 
-def test_visualize_without_a_length_csv_walks_in_the_pool_only(window, tmp_path, walks):
+def _blocked_texts(window) -> tuple[str, str, str]:
+    page = window.visualization_widget
+    assert page.is_blocked()
+    return page.title_label.text(), page.body_label.text(), page.detail_label.text()
+
+
+def test_visualize_without_a_length_csv_says_why(window, tmp_path):
     root = _project(tmp_path / "proj", skeletons=True)
     _open(window, root)
-    assert walks and _gui_walks(walks) == []  # the open's search walked, in the pool
 
     _enter(window, "Visualize")
     window.action_bar_viz_seg.button("length").click()
     _settle()
-    page = window.visualization_widget
-    texts = (page.title_label.text(), page.body_label.text(), page.detail_label.text())
-    assert page.is_blocked()
+    texts = _blocked_texts(window)
     window._on_jobs_busy_changed(False)  # a job ended while the page waits: it looks again
     _idle()
 
-    assert _gui_walks(walks) == []
-    assert texts == (
-        "No root length measurements yet",
-        "Run Measure → Measure Length to chart the root length of this trial.",
-        f"Looked for {os.path.join(str(root), 'skeletons', ROOT_LENGTHS_CSV)}",
+    assert (
+        texts
+        == _blocked_texts(window)
+        == (
+            "No root length measurements yet",
+            "Run Measure → Measure Length to chart the root length of this trial.",
+            f"Looked for {os.path.join(str(root), 'skeletons', ROOT_LENGTHS_CSV)}",
+        )
     )
     assert StubLength.made == []
 
@@ -226,37 +176,27 @@ def test_visualize_without_a_length_csv_walks_in_the_pool_only(window, tmp_path,
 @pytest.mark.parametrize(
     "folder",
     [
-        (*WALKED, "images"),
-        WALKED,
+        ("results", "run1", "test_latest", "images"),
+        ("results", "run1", "test_latest"),
         ("output", "skeletonizer", "test_latest", "images"),
         ("skeletonizer", "test_latest", "images"),
     ],
-    ids=[
-        "walked, where Measure writes",
-        "walked, where it wrote before 2024-12",
-        "fixed output folder",
-        "fixed folder",
-    ],
+    ids=["walked images", "walked", "output folder", "skeletonizer folder"],
 )
-def test_a_legacy_csv_opens_the_dashboard(window, tmp_path, walks, folder):
+def test_a_csv_of_the_older_layout_opens_no_dashboard(window, tmp_path, folder):
     root = _project(tmp_path / "proj", skeletons=False)
-    written = _lengths(root.joinpath(*folder))
+    _lengths(root.joinpath(*folder))
     _open(window, root)
 
     _enter(window, "Visualize")
-    _enter(window, "Library")
-    _enter(window, "Visualize")  # the live dashboard is checked against its CSV
-    window._on_jobs_busy_changed(False)  # a job end: the pool searches again
-    _idle()
-    _enter(window, "Library")
-    _enter(window, "Visualize")
+    window.action_bar_viz_seg.button("length").click()
+    _settle()
 
-    assert [os.path.normcase(d.csv_path) for d in StubLength.made] == [os.path.normcase(written)]
-    assert window.right_panel.currentWidget() is StubLength.made[0]
-    assert _gui_walks(walks) == []
+    assert _blocked_texts(window)[0] == "No root length measurements yet"
+    assert StubLength.made == []
 
 
-def test_a_csv_measure_writes_later_opens_the_dashboard_at_once(window, tmp_path, walks):
+def test_a_csv_measure_writes_later_opens_the_dashboard_at_once(window, tmp_path):
     root = _project(tmp_path / "proj", skeletons=True)
     _open(window, root)
     _enter(window, "Visualize")
@@ -267,4 +207,4 @@ def test_a_csv_measure_writes_later_opens_the_dashboard_at_once(window, tmp_path
     _enter(window, "Visualize")
 
     assert [os.path.normcase(d.csv_path) for d in StubLength.made] == [os.path.normcase(written)]
-    assert _gui_walks(walks) == []
+    assert window.right_panel.currentWidget() is StubLength.made[0]

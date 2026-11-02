@@ -36,7 +36,7 @@ def host(app):
 
 
 def _text(toast) -> str:
-    return toast.findChild(QLabel, "toastText").text()
+    return toast.findChild(QLabel, "toastTitle").text()
 
 
 def test_a_burst_keeps_only_the_three_newest_toasts(host):
@@ -102,10 +102,9 @@ def test_warnings_last_longer_and_can_be_closed(host):
     assert warning.close_button is not None
 
 
-def test_success_toasts_have_no_close_button_but_a_click_dismisses_them(host):
+def test_a_click_on_a_toast_dismisses_it(host):
     manager = ToastManager(host)
     toast = manager.show("Loaded 40 images")
-    assert toast.close_button is None
     QTest.mouseClick(toast, Qt.MouseButton.LeftButton)
     assert toast not in manager.toasts()
 

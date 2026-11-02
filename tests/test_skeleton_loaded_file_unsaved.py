@@ -146,6 +146,22 @@ def test_an_unreadable_file_leaves_a_clean_skeleton_clean(folder):
     assert not doc.last_load_ok and not doc.is_dirty() and doc.source == PREDICTION
 
 
+def test_check_file_reads_without_changing_the_document(folder):
+    root, image = folder
+    _file(root / "skeletons" / "a_fake.png", row=30)
+    doc = _document(root, image)
+    opened = doc.model.mask.copy()
+    bad = root / "bad.png"
+    bad.write_bytes(b"not an image")
+
+    assert doc.check_file(_file(root / "elsewhere" / "x.png", row=90)) == []
+    assert [(n.message, n.kind) for n in doc.check_file(str(bad))] == [
+        ("Could not read skeleton bad.png", "danger")
+    ]
+    assert np.array_equal(doc.model.mask, opened) and not doc.is_dirty()
+    assert doc.source == PREDICTION
+
+
 # ----------------------------------------------------------------------------- the editor
 @pytest.fixture
 def guarded(monkeypatch, tmp_path):
@@ -287,3 +303,39 @@ def test_loading_again_asks_about_the_loaded_skeleton(make_editor, project, monk
     assert answers.seen == [("Unsaved skeleton", "Save changes to the skeleton for a.png?")]
     assert raster(editor)[60].any() and not raster(editor)[20].any()
     assert editor.has_unsaved_changes()
+
+
+def test_an_unreadable_file_is_refused_before_the_prompt_and_the_edits_stay(
+    make_editor, project, monkeypatch, answers
+):
+    # C6-03: the file is read before Save / Discard is asked, so a bad file costs no edits.
+    editor = make_editor(project.a, project.folder)
+    editor.set_active_layer(SKELETON)
+    _load(editor, monkeypatch, _other(project))  # an unsaved skeleton (row 20)
+    bad = os.path.join(project.folder, "elsewhere", "broken.png")
+    with open(bad, "wb") as fh:
+        fh.write(b"not an image")
+    answers.will(DISCARD)
+    notices = record(editor.notice)
+
+    _load(editor, monkeypatch, bad)
+
+    assert answers.seen == [] and notices == [("Could not read skeleton broken.png", "danger")]
+    assert raster(editor)[20].any() and editor.has_unsaved_changes()
+
+
+def test_a_save_at_the_prompt_is_read_back_when_the_gt_file_is_loaded(
+    make_editor, project, monkeypatch, answers
+):
+    # The file is read again after the prompt: a Save there rewrites the GT file.
+    gt_file = write_skeleton(project.correction(), row=60)
+    editor = make_editor(project.a, project.folder)  # opens the GT file (row 60)
+    editor.set_active_layer(SKELETON)
+    _load(editor, monkeypatch, _other(project))  # an unsaved skeleton (row 20)
+    answers.will(SAVE)
+
+    _load(editor, monkeypatch, gt_file)
+
+    assert len(answers.seen) == 1
+    assert raster(editor)[20].any() and not raster(editor)[60].any()  # what the Save wrote
+    assert not editor.has_unsaved_changes() and editor.layers[SKELETON].document.source == GT

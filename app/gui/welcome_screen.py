@@ -389,6 +389,7 @@ class WelcomeWidget(QWidget):
         col.addWidget(heading)
 
         self._recent_list = QWidget()
+        self._recent_list.installEventFilter(self)  # refits the scroll as the rows lay out
         self._recent_col = QVBoxLayout(self._recent_list)
         self._recent_col.setContentsMargins(0, 0, 0, 0)
         self._recent_col.setSpacing(4)
@@ -491,14 +492,26 @@ class WelcomeWidget(QWidget):
             QWidget.setTabOrder(first, second)
 
     def _fit_recent_scroll(self) -> None:
-        """Show up to VISIBLE_RECENT_ROWS rows; the scroll may shrink to one row."""
+        """Show up to VISIBLE_RECENT_ROWS rows whole; the scroll may shrink to one row.
+
+        Run again whenever the list lays its rows out (:meth:`eventFilter`): a row reaches
+        its height only once polished (the theme's fonts and minimum heights), and with
+        macOS's fonts the rows grew past the height fitted when they were built, which cut
+        the fourth row (CI run 40970595195)."""
         if not self._rows:
             return
-        row_h = self._rows[0].sizeHint().height()
+        heights = [
+            row.sizeHint().expandedTo(row.minimumSizeHint()).height()
+            for row in self._rows[:VISIBLE_RECENT_ROWS]
+        ]
         spacing = self._recent_col.spacing()
-        shown = min(len(self._rows), VISIBLE_RECENT_ROWS)
-        self._recent_scroll.setMaximumHeight(shown * row_h + (shown - 1) * spacing + 2)
-        self._recent_scroll.setMinimumHeight(row_h + 2)
+        self._recent_scroll.setMaximumHeight(sum(heights) + (len(heights) - 1) * spacing + 2)
+        self._recent_scroll.setMinimumHeight(heights[0] + 2)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 - Qt API
+        if watched is self._recent_list and event.type() == QEvent.Type.LayoutRequest:
+            self._fit_recent_scroll()
+        return super().eventFilter(watched, event)
 
     @pyqtSlot(str, bool)
     def _on_exists_checked(self, path: str, exists: bool) -> None:

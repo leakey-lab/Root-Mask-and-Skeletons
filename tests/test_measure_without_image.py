@@ -200,7 +200,9 @@ def test_several_files_for_one_image_are_measured_once(tmp_path, qapp, monkeypat
         "X_T1_L2_2024.01.02_010200_001": str(upper),
         "x_T1_L2_2024.01.02_010200_001": str(exact),
     }
-    monkeypatch.setattr(ProjectLayout, "scan_skeletons", lambda self, directory=None: listing)
+    monkeypatch.setattr(
+        ProjectLayout, "scan_skeleton_files", lambda self, directory=None: (listing, [])
+    )
     before = upper.read_bytes()
     handler, mw = _handler(tmp_path, qapp)
 
@@ -465,21 +467,21 @@ def test_the_status_lists_masks_and_gt_files_as_measure_lists_them(tmp_path):
 
 
 def test_the_status_lists_skeletons_as_measure_length_lists_them(tmp_path):
-    """Measure Length lists ``*_fake.png`` with that exact suffix, hidden names too
-    (``ProjectLayout.scan_skeletons``); the status count matched the suffix in any case and
-    skipped hidden names, so it counted skeletons Measure never reads and left out the
-    ones it does (C1-04)."""
+    """Measure Length lists ``*_fake.png`` with the suffix in any case (#3), hidden names
+    too (``ProjectLayout.scan_skeleton_files``); the status count lists them with the same
+    rule (C1-04), so it counts the skeletons Measure reads and no others."""
     for name in ("A.jpg", "B.jpg", "C.jpg", "._D.jpg"):
         (tmp_path / name).write_bytes(b"x")
     skeletons = tmp_path / "skeletons"
     skeletons.mkdir()
     names = ("A_fake.png", "B_fake.PNG", "C_FAKE.png", "._D_fake.png", ".h_fake.png", "_fake.png")
-    for name in (*names, ".A_fake.png.0123abcd.tmp"):
+    for name in (*names, ".A_fake.png.0123abcd.tmp", "E_fake.png.tmp", "F.png"):
         (skeletons / name).write_bytes(b"x")
     layout = ProjectLayout(str(tmp_path))
     images = layout.scan_images()
 
-    split = split_inputs(layout.scan_skeletons(layout.skeletons_dir), images)
+    listed, shadowed = layout.scan_skeleton_files(layout.skeletons_dir)
+    split = split_inputs(listed, images, shadowed)
     fresh = input_freshness(
         layout.skeletons_dir,
         SKELETON_SUFFIX,
@@ -488,6 +490,6 @@ def test_the_status_lists_skeletons_as_measure_length_lists_them(tmp_path):
         gt_folder=layout.gt_skeletons_dir,
     )
 
-    assert sorted(split.kept) == ["._D", "A"]
+    assert sorted(split.kept) == ["._D", "A", "B", "C"]
     assert split.without_image == [".h_fake.png", "_fake.png"]
-    assert fresh == Freshness(2, False, without_image=2)
+    assert fresh == Freshness(4, False, without_image=2)

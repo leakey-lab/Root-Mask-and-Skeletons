@@ -110,6 +110,7 @@ def test_the_correct_goldens_replay_identically_with_the_box_on(make_editor, tmp
     assert_skeleton_file(correction, golden["skeleton"]["saved"])
 
 
+@pytest.mark.wallclock
 @pytest.mark.skipif(os.environ.get("SPROUTS_PERF_TESTS") != "1", reason="wall-clock budget")
 def test_deblock_of_a_640x480_photo_takes_under_30_ms():
     img = (np.random.default_rng(1).random((480, 640, 3)) * 255).astype(np.uint8)

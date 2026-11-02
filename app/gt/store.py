@@ -4,10 +4,11 @@ Palette-PNG store for ground-truth (GT) tracings (``gt/<stem>.png``).
 Each tracing is an 8-bit palette PNG whose pixel value is the class id
 (0 = background, 1-254 = registry classes, 255 = Ignore). The palette gives
 every image viewer the tracing in class colours for free; a PNG text chunk
-(``app.config.GT_META_CHUNK``) records the file's own id-to-key map and which
-classes the annotator has reviewed, so a file is self-describing even before
-it is matched against the current registry (see
-``docs/superpowers/specs/2026-09-22-multiclass-labels-design.md`` §1).
+(``app.config.GT_META_CHUNK``) records the file's own id-to-key map, so a file
+is self-describing even before it is matched against the current registry (see
+``docs/superpowers/specs/2026-09-22-multiclass-labels-design.md`` §1). Files
+written before 2026-11-01 also carry a ``reviewed`` list in that chunk (the old
+"checked" boxes); it is read past and never written again.
 
 No Qt dependency: this module is pure I/O over Pillow + numpy (OpenCV only to count
 ids), read/written
@@ -46,17 +47,17 @@ class GtFileError(ValueError):
 
 @dataclass
 class Tracing:
-    """One image's GT: per-pixel class ids plus the annotator's review state.
+    """One image's GT: per-pixel class ids.
 
     ``ids`` is an ``(h, w)`` uint8 array (0 background, 1-254 class ids, 255
-    Ignore) at the source image's resolution. ``reviewed`` holds the keys of
-    classes checked on this image ("looked for it"), and ``file_classes`` the
-    id -> key map the file was written with.
+    Ignore) at the source image's resolution, and ``file_classes`` the id -> key
+    map the file was written with. ``file_classes`` is keyword-only: the second
+    positional field was the ``reviewed`` set until 2026-11-01, so an old call
+    fails at once instead of passing that set as the map.
     """
 
     ids: np.ndarray  # (h, w) uint8
-    reviewed: frozenset[str] = frozenset()
-    file_classes: dict[int, str] = field(default_factory=dict)  # id -> key from the file
+    file_classes: dict[int, str] = field(default_factory=dict, kw_only=True)  # id -> key
 
 
 def _present_ids(ids: np.ndarray) -> list[int]:
@@ -99,7 +100,7 @@ def gt_path(image_path: str) -> str:
 
 
 def empty_tracing(height: int, width: int) -> Tracing:
-    """An all-background (id 0) tracing of ``height`` x ``width`` pixels, nothing reviewed."""
+    """An all-background (id 0) tracing of ``height`` x ``width`` pixels."""
     return Tracing(ids=np.zeros((height, width), dtype=np.uint8))
 
 
@@ -109,7 +110,7 @@ def write_tracing(path: str, tracing: Tracing, registry: Registry) -> None:
     Pixel value = class id; the palette holds each registry class colour (ids
     painted but unknown to ``registry`` get ``GT_UNKNOWN_COLOR``); background
     (0) is the transparent entry. The ``GT_META_CHUNK`` text chunk records the
-    id -> key map and the reviewed keys. Raises ``GtFileError`` for non 2-D ids
+    id -> key map (no ``reviewed`` list since 2026-11-01). Raises ``GtFileError`` for non 2-D ids
     and ``OSError`` if the file cannot be written (any old file is kept), e.g.
     :class:`app.io_utils.FileLockedError` while another program holds it open.
     """
@@ -125,11 +126,7 @@ def write_tracing(path: str, tracing: Tracing, registry: Registry) -> None:
         palette[3 * c.id : 3 * c.id + 3] = _hex_to_rgb(c.color)
     image = Image.fromarray(ids, mode="P")
     image.putpalette(palette)
-    meta = {
-        "v": 1,
-        "classes": {str(c.id): c.key for c in registry.classes},
-        "reviewed": sorted(tracing.reviewed),
-    }
+    meta = {"v": 1, "classes": {str(c.id): c.key for c in registry.classes}}
     info = PngImagePlugin.PngInfo()
     info.add_text(GT_META_CHUNK, json.dumps(meta))
     buf = io.BytesIO()
@@ -141,7 +138,8 @@ def write_tracing(path: str, tracing: Tracing, registry: Registry) -> None:
 
 def read_tracing(path: str) -> Tracing | None:
     """Read a GT PNG. Returns ``None`` if missing; raises ``GtFileError`` if unreadable (a file
-    Pillow refuses as too large or broken included)."""
+    Pillow refuses as too large or broken included). The ``reviewed`` list of a file written
+    before 2026-11-01 is ignored."""
     if not os.path.exists(path):
         return None
     try:
@@ -161,18 +159,17 @@ def read_tracing(path: str) -> Tracing | None:
 
     raw_meta = text.get(GT_META_CHUNK)
     if raw_meta is None:
-        return Tracing(ids=ids, reviewed=frozenset(), file_classes={})
+        return Tracing(ids=ids, file_classes={})
 
     try:
         meta = json.loads(raw_meta)
         raw_classes = meta.get("classes", {})
         file_classes = {int(k): str(v) for k, v in raw_classes.items()}
-        reviewed = frozenset(str(k) for k in meta.get("reviewed", []))
     except (json.JSONDecodeError, ValueError, AttributeError, TypeError, RecursionError) as exc:
         # RecursionError: JSON nested deeper than the recursion limit (R4).
         raise GtFileError(f"Bad GT metadata chunk in {path}: {exc}") from exc
 
-    return Tracing(ids=ids, reviewed=reviewed, file_classes=file_classes)
+    return Tracing(ids=ids, file_classes=file_classes)
 
 
 def align_to_registry(tracing: Tracing, registry: Registry) -> tuple[Tracing, list[str], bool]:
@@ -210,21 +207,10 @@ def align_to_registry(tracing: Tracing, registry: Registry) -> tuple[Tracing, li
     changed = any(int(lut[i]) != i for i in present)
     ids = np.ascontiguousarray(tracing.ids, dtype=np.uint8)
     new_ids = cv2.LUT(ids, lut) if changed else ids.copy()
-    new_tracing = Tracing(
-        ids=new_ids,
-        reviewed=tracing.reviewed,
-        file_classes=tracing.file_classes,
-    )
-    return new_tracing, warnings, changed
+    return Tracing(ids=new_ids, file_classes=tracing.file_classes), warnings, changed
 
 
 def present_keys(tracing: Tracing, registry: Registry) -> set[str]:
     """Keys of classes that have at least one pixel, Ignore excluded."""
     present_ids = set(_present_ids(tracing.ids))
     return {c.key for c in registry.classes if not c.is_ignore and c.id in present_ids}
-
-
-def is_complete(tracing: Tracing, registry: Registry) -> bool:
-    """True once every active, non-Ignore class has been reviewed."""
-    required = {c.key for c in registry.labelled()}
-    return required.issubset(tracing.reviewed)

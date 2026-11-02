@@ -71,9 +71,7 @@ def test_a_broken_tracing_is_that_images_export_error(tmp_path):
     break_a_chunk(gt_path(images[broken]))
     out_dir = tmp_path / "out"
 
-    result = export_dataset(
-        project_dir, images, registry, ExportOptions(str(out_dir), only_complete=False)
-    )
+    result = export_dataset(project_dir, images, registry, ExportOptions(str(out_dir)))
 
     assert [stem for stem, _ in result.errors] == [broken]
     assert "broken PNG file" in result.errors[0][1]

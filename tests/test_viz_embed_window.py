@@ -454,6 +454,7 @@ def test_browser_that_cannot_start_is_reported_without_background_work(qapp, tmp
 # --------------------------------------------------------------------------- #
 #  Shutdown
 # --------------------------------------------------------------------------- #
+@pytest.mark.wallclock
 def test_cleanup_stops_the_server_and_emits_server_closed_once(make_window):
     window = make_window()
     assert wait_until(lambda: window.web_view.loads)
@@ -471,6 +472,7 @@ def test_cleanup_stops_the_server_and_emits_server_closed_once(make_window):
     assert window.web_view.url().toString() == "about:blank"
 
 
+@pytest.mark.wallclock
 def test_cleanup_while_data_loads_neither_blocks_nor_starts_a_server(make_window):
     release = threading.Event()
 
@@ -545,6 +547,54 @@ def test_only_completed_exports_are_announced(make_window, tmp_path):
     assert [os.path.normcase(p) for p in saved] == [os.path.normcase(str(tmp_path / "plot.svg"))]
 
 
+def test_a_failed_export_is_reported_with_its_file_and_reason(make_window, tmp_path):
+    window = make_window()
+    saved, failed = [], []
+    window.export_saved.connect(saved.append)
+    window.export_failed.connect(failed.append)
+    broken = FakeDownload(window.web_view.page(), suggested="other.svg")
+
+    window.handle_download(broken)
+    broken.finish(DownloadState.DownloadInterrupted)
+
+    assert saved == []
+    assert failed == [f"Could not save other.svg in {tmp_path}: Network failed"]
+
+
+class ShellDash(StubDash):
+    """A Dash app with the shell hook of DashboardShell (``on_export_failed``)."""
+
+    def __init__(self):
+        self.shell = SimpleNamespace(on_export_failed=None)
+
+
+def test_a_failed_csv_export_on_a_server_thread_reaches_the_window(make_window):
+    dash = ShellDash()
+    window = make_window(build=lambda: (object(), dash))
+    assert wait_until(lambda: dash.shell.on_export_failed is not None)
+    failed = []
+    window.export_failed.connect(failed.append)
+    message = "Could not export the Totals by Tube view: KeyError: 'Tube'"
+
+    # Dash runs callbacks on the server's request threads, never the GUI thread.
+    thread = threading.Thread(target=dash.shell.on_export_failed, args=(message,))
+    thread.start()
+    thread.join()
+
+    assert wait_until(lambda: failed)
+    assert failed == [message]
+
+
+def test_closing_unhooks_csv_export_failures(make_window):
+    dash = ShellDash()
+    window = make_window(build=lambda: (object(), dash))
+    assert wait_until(lambda: dash.shell.on_export_failed is not None)
+
+    window.cleanup_server()
+
+    assert dash.shell.on_export_failed is None
+
+
 # --------------------------------------------------------------------------- #
 #  Prewarm (PKG-VIZ, V2): what the first open of a session used to wait for
 # --------------------------------------------------------------------------- #
@@ -560,6 +610,7 @@ def test_prewarm_imports_loads_the_dashboard_stack():
         "plotly.graph_objects",
         "pandas",
         "app.visualization.dash_app",
+        "app.visualization.dash_metric_app",
         "app.visualization.dash_app_area",
         "app.data_processing.data_processor",
     ):
@@ -572,25 +623,27 @@ def test_prewarm_imports_loads_the_dashboard_stack():
 #  keeps the canvases' OpenGL surface and is never recreated.
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
-    ("platform", "environ", "native"),
+    ("platform", "environ", "surface"),
     [
-        ("windows", {}, True),
-        # the backend table: tests/test_startup_environment.py
-        ("windows", {"QSG_RHI_BACKEND": "opengl"}, False),  # the browser draws through OpenGL
-        ("windows", {"QT_QUICK_BACKEND": "software"}, False),  # no RHI at all
-        ("offscreen", {}, False),
-        ("minimal", {}, False),
-        ("xcb", {}, False),  # Linux and macOS were not checked: the canvases' swap stays
-        ("wayland", {}, False),
-        ("cocoa", {}, False),
+        ("windows", {}, "Direct3DSurface"),
+        # the backend tables: tests/test_startup_environment.py (Windows),
+        # tests/test_qt_environment_linux_quick.py (Linux)
+        ("windows", {"QSG_RHI_BACKEND": "opengl"}, None),  # the browser draws through OpenGL
+        ("windows", {"QT_QUICK_BACKEND": "software"}, None),  # no RHI at all
+        ("offscreen", {}, None),
+        ("minimal", {}, None),
+        ("xcb", {}, "OpenGLSurface"),  # Linux on X11, measured in WSL 2026-10-29
+        ("xcb", {"QSG_RHI_BACKEND": "vulkan"}, None),
+        ("wayland", {}, None),  # Wayland and macOS keep plain children and the canvases' swap
+        ("cocoa", {}, None),
     ],
 )
-def test_only_windows_with_the_d3d11_browser_gets_native_dashboards(platform, environ, native):
+def test_windows_and_x11_with_their_browser_rhi_get_native_dashboards(platform, environ, surface):
     from PyQt6.QtGui import QSurface
 
     import app.visualization.viz_window as vw
 
-    expected = QSurface.SurfaceType.Direct3DSurface if native else None
+    expected = getattr(QSurface.SurfaceType, surface) if surface else None
     assert vw.native_child_surface(platform, environ) == expected
 
 

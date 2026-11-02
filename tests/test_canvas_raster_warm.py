@@ -217,6 +217,7 @@ def test_the_warm_up_ends_and_asks_for_no_frame_on_a_raster_viewport(page):
     assert item.pending_uploads() > 0  # made ahead, left for a GL engine to upload
 
 
+@pytest.mark.wallclock
 def test_each_idle_slice_keeps_to_its_budget(app, monkeypatch):
     view, item, _canvas = _build(app, monkeypatch, _mask_image(3000, 2400), tile=16)
     try:

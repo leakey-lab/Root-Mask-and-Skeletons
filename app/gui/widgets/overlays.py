@@ -341,7 +341,7 @@ class StatusChip(CornerPanel):
     ``set_state`` takes ``"none"`` (faint; no text unless ``label`` is given),
     ``"clean"`` (Saved), ``"dirty"`` (Unsaved), ``"saving"`` or ``"error"``;
     ``label`` replaces the default text, e.g. ``set_state("none", "No mask")`` or
-    ``set_state("clean", "Saved · 2/3 checked")``. ``set_position(12, 40)`` shows
+    ``set_state("clean", "GT")``. ``set_position(12, 40)`` shows
     "Image 12 / 40". An :class:`OverlayLayout` narrows the chip with
     :meth:`fit_to_width`: a camera name then drops its least telling parts first
     (:func:`name_forms`: tube, L-number and date stay), the position shortens to

@@ -87,10 +87,15 @@ def _length_figures(tmp_path):
 
 def _area_figures(tmp_path):
     dashboard = build_area_app(tmp_path)
+    tubes = [int(t) for t in dashboard.data_cache.tubes]
+    dates = [pd.Timestamp(d) for d in dashboard.data_cache.dates]
     return [
         dashboard.create_stacked_bar_chart(),
-        dashboard.show_growth_over_time(),
-        dashboard.show_area_profile(int(dashboard.data_cache.tubes[0])),
+        dashboard.show_growth_over_time(tubes, True, True, True),
+        dashboard.show_growth_over_time([], True, False, False),
+        dashboard.show_growth_lines(tubes[0]),
+        dashboard.create_faceted_depth_profile(tubes[:2], dates),
+        dashboard.create_faceted_depth_profile([], None),  # message figure
     ]
 
 

@@ -1,8 +1,9 @@
 """Generate skeletons for the loaded image folder (thin Qt layer over skeleton_inference).
 
 The worker loads torch and the cached skeleton model only when a run starts
-(PG-04). Unreadable images are reported once, non-modally, and the run goes on
-(PI-03 / RB-10); out-of-memory batches are split (PI-07); Cancel stops at the
+(PG-04); a missing checkpoint is refused before anything starts, as the mask
+model's is (S11-10). Unreadable images are reported once, non-modally, and the
+run goes on (PI-03 / RB-10); out-of-memory batches are split (PI-07); Cancel stops at the
 next batch and keeps finished skeletons (PI-08); progress and results go
 through ``UiFeedback`` (PI-12 / AR-07). On success the results are loaded with
 ``main_window.load_results(<skeletons folder>)``; after a Cancel or a failure the
@@ -19,7 +20,13 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from app.handlers.deps import SAVED_PATH_STATUS_MS, folder_label
-from app.handlers.generation_base import GenerationHandlerBase, GenerationThread, thread_slot
+from app.handlers.generation_base import (
+    GenerationHandlerBase,
+    GenerationThread,
+    open_folder_action,
+    thread_slot,
+)
+from app.inference import runtime
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +70,11 @@ class GenerateSkeletonHandler(GenerationHandlerBase):
     job_label = "Generating skeletons"
     title = "Skeleton generation"
     noun = "skeletons"
+    model_label = "Skeleton model"
+
+    def weights_path(self) -> str:
+        """The skeleton checkpoint (``model_available`` and ``refuse_without_model`` ask it)."""
+        return runtime.skeleton_weights_path()
 
     def generate_skeleton(self, input_dir: str | None = None) -> bool:
         """Start skeleton generation on ``input_dir``; True if a run started.
@@ -71,6 +83,8 @@ class GenerateSkeletonHandler(GenerationHandlerBase):
         passes the mask pass's folder, so the chained pass stays with the project it
         started in even when another folder was opened meanwhile (R7).
         """
+        if self.refuse_without_model():  # S11-10: before the worker would fail on it
+            return False
         if self.refuse_while_loading():  # before the dialog and the skeletons/ folder
             return False
         input_dir = input_dir or self.project_folder()
@@ -117,15 +131,12 @@ class GenerateSkeletonHandler(GenerationHandlerBase):
             # (W13) The folder's name in the toast, its full path in the status line.
             self.feedback.status(f"Skeletons saved to {results_dir}", SAVED_PATH_STATUS_MS)
             folder = folder_label(results_dir, self.project_folder())
-            self.feedback.notify(f"Skeletons saved to the {folder} folder", "success")
+            self.feedback.notify(
+                f"Skeletons saved to the {folder} folder",
+                "success",
+                action=open_folder_action(results_dir),
+            )
         self.main_window.load_results(results_dir)
-
-    def _on_failed(self, thread: SkeletonGeneratorThread, message: str) -> None:
-        logger.error("Skeleton generation error: %s", message)
-        self.feedback.task_failed("Skeleton generation failed")
-        # Skeletons written before the error stay on disk (R7): show them.
-        self.outputs_changed()
-        QMessageBox.critical(self.parent_widget(), "Skeleton generation failed", message)
 
 
 __all__ = ["GenerateSkeletonHandler", "SkeletonGeneratorThread"]

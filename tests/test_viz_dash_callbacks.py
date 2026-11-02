@@ -28,11 +28,6 @@ def length_app(tmp_path):
     return build_length_app(tmp_path)
 
 
-@pytest.fixture
-def area_app(tmp_path):
-    return build_area_app(tmp_path)
-
-
 def _figure(dash, values, changed):
     status, out = call_callback(dash, FIGURE, values, changed)
     assert status == 200, "expected a figure"
@@ -82,7 +77,7 @@ def test_a_load_call_triggered_by_the_legend_store_alone_draws_the_chart(length_
         assert figure["layout"]["showlegend"] is True  # automatic for two tubes
 
 
-LENGTH_VIEWS = [
+VIEWS = [
     ("stacked", {}),
     ("time", {"selected-tubes-store.data": [1], "growth-viz-options.value": ["show_field_avg"]}),
     ("lines", {"tube-selector.value": 2}),
@@ -90,10 +85,11 @@ LENGTH_VIEWS = [
 ]
 
 
-@pytest.mark.parametrize("view, extra", LENGTH_VIEWS, ids=[v for v, _ in LENGTH_VIEWS])
-def test_every_length_view_keeps_ui_state_across_updates(length_app, view, extra):
+@pytest.mark.parametrize("view, extra", VIEWS, ids=[v for v, _ in VIEWS])
+@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
+def test_every_view_keeps_ui_state_across_updates(tmp_path, builder, view, extra):
     figure = _figure(
-        length_app.app, {"view-selector.value": view, **extra}, ["view-selector.value"]
+        builder(tmp_path).app, {"view-selector.value": view, **extra}, ["view-selector.value"]
     )
     assert figure["layout"].get("uirevision")
 
@@ -117,14 +113,6 @@ def test_lines_view_plots_the_tube_shown_in_the_dropdown(length_app):
         ["view-selector.value", "tube-selector.value"],
     )
     assert "Tube 2" in figure["layout"]["title"]["text"]
-
-
-@pytest.mark.parametrize(
-    "view, extra", [("stacked", {}), ("time", {}), ("profile", {"tube-selector.value": 1})]
-)
-def test_every_area_view_keeps_ui_state_across_updates(area_app, view, extra):
-    figure = _figure(area_app.app, {"view-selector.value": view, **extra}, ["view-selector.value"])
-    assert figure["layout"].get("uirevision")
 
 
 def test_legend_toggle_patches_the_figure_instead_of_rebuilding_it(length_app):
@@ -191,6 +179,33 @@ def test_hover_outside_the_lines_view_sends_nothing(app_with_images):
     assert status == 204
 
 
+@pytest.fixture
+def app_with_one_image(tmp_path):
+    """Tube 1 on 2024.07.18 is measured at L5 and L15; the one image is L15's, inside
+    the interval L11-L20 but not at its end."""
+    stem = "24EFCAM1_T001_L015_2024.07.18_111618_001_SMM"
+    path = tmp_path / f"{stem}.jpg"
+    Image.fromarray(np.full((48, 64, 3), 90, np.uint8)).save(path)
+    return build_length_app(tmp_path, FakeImageManager({stem: str(path)}))
+
+
+def _profile_hover(dashboard, end: int) -> str:
+    figure = dashboard.show_growth_lines(1)
+    trace = next(t for t in figure.data if t.name == "2024-07-18")
+    return trace.text[list(trace.y).index(end)]
+
+
+def test_depth_profile_hover_finds_an_image_anywhere_in_the_interval(app_with_one_image):
+    # S14-05: the hover checked only the interval's end (L20) and said "Not Available"
+    # while the side panel showed L15's image for the same point.
+    status, out = _hover(app_with_one_image.app, "lines", y=20)
+    sources = [n for n in _json_nodes(out["image-container"]["children"]) if n["type"] == "Img"]
+    assert status == 200 and len(sources) == 1  # the side panel shows the image
+
+    assert "Image  <b>Available</b>" in _profile_hover(app_with_one_image, 20)
+    assert "Image  <b>Not Available</b>" in _profile_hover(app_with_one_image, 10)
+
+
 def _json_nodes(node):
     if isinstance(node, list):
         for child in node:
@@ -235,13 +250,14 @@ def test_too_many_faceted_tubes_is_shown_as_an_error_in_theme_colours(length_app
     assert "7/6" in note["text"]
 
 
-def test_area_profile_bars_use_the_theme_palette(area_app):
+@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
+def test_depth_profile_lines_use_the_theme_palette(tmp_path, builder):
     figure = _figure(
-        area_app.app,
-        {"view-selector.value": "profile", "tube-selector.value": 1},
+        builder(tmp_path).app,
+        {"view-selector.value": "lines", "tube-selector.value": 1},
         ["view-selector.value"],
     )
-    colors = [trace["marker"]["color"] for trace in figure["data"]]
+    colors = [trace["line"]["color"] for trace in figure["data"]]
     assert colors == theme.date_colors(2)
 
 

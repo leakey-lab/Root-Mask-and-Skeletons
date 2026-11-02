@@ -280,11 +280,10 @@ class MetricsController:
     def prewarm(self, *, locate: bool = False) -> None:
         """Parse new / changed measurement CSVs in the thread pool (once at a time).
 
-        ``locate``: run even when no CSV is known yet: the pool job also looks in the
-        legacy folders, which the GUI thread never walks (when a project opens, and after a
-        Measure run). Asked for while a parse runs, it starts when that parse reports: the
-        parse may be the previous project's, or may have searched before a run's CSV was
-        written."""
+        ``locate``: run even when no CSV is known to need a parse (when a project opens: its
+        CSVs are found and parsed, and its GT folders listed, before a selection). Asked
+        for while a parse runs, it starts when that parse reports: the parse may be the
+        previous project's."""
         index = self.index
         if index is None:
             return

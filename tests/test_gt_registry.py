@@ -37,6 +37,18 @@ def test_default_registry_keys_and_order():
     assert active[-1].key == "ignore"
 
 
+def test_default_class_colours_differ_from_the_layer_colours():
+    """Class labels are painted over the mask and skeleton layers on one canvas: no default
+    class may share a layer's colour (bug 2026-10-30: Root was the mask's green and its
+    strokes blended into the mask)."""
+    from app.design import tokens
+
+    layer_colours = {tokens.MASK.lower(), tokens.SKEL.lower(), tokens.ACCENT.lower()}
+    class_colours = {c.key: c.color.lower() for c in default_registry().classes}
+    assert not layer_colours & set(class_colours.values()), class_colours
+    assert class_colours["root"] == "#56b4e9"
+
+
 def test_to_dict_from_dict_round_trip():
     reg = default_registry()
     data = reg.to_dict()

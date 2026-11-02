@@ -102,11 +102,13 @@ def _whole_plane_edit_2048():
     return canvas
 
 
+@pytest.mark.wallclock
 def test_undo_of_a_whole_plane_edit_at_2048_is_well_inside_a_frame(app):
     canvas = _whole_plane_edit_2048()
     assert _undo_redo_ms(canvas, 3) < 15.0
 
 
+@pytest.mark.wallclock
 @pytest.mark.skipif(not STRICT, reason="wall-clock budget: set SPROUTS_PERF_TESTS=1")
 def test_undo_of_a_whole_plane_edit_at_2048_budget(app):
     canvas = _whole_plane_edit_2048()

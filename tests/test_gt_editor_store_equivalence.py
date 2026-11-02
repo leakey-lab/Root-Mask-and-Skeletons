@@ -6,7 +6,8 @@ in ``tests/test_gt_export_equivalence.py``) and ``present_keys`` is the public "
 have pixels". At 2048 x 1536 their ``np.unique`` sorts cost about 20 ms each (PKG-GT,
 2026-09-30), so they may be replaced by histograms: these tests pin the results (ids,
 warnings, the changed flag, present keys and the written PNG bytes) against the original
-code, copied here verbatim.
+code, copied here verbatim (but for the ``reviewed`` list of the written chunk, which the
+store no longer writes since 2026-11-01).
 """
 
 import io
@@ -61,8 +62,7 @@ def _reference_png(tracing, registry):
     meta = {
         "v": 1,
         "classes": {str(c.id): c.key for c in registry.classes},
-        "reviewed": sorted(tracing.reviewed),
-    }
+    }  # the "reviewed" list it also wrote is gone (2026-11-01)
     info = PngImagePlugin.PngInfo()
     info.add_text(GT_META_CHUNK, json.dumps(meta))
     buf = io.BytesIO()
@@ -83,7 +83,7 @@ def _random_tracing(rng, h=41, w=57):
         key = keys[int(rng.integers(0, len(keys)))]
         if v and key is not None:
             file_classes[v] = key
-    return Tracing(ids, frozenset({"root"}), file_classes)
+    return Tracing(ids, file_classes=file_classes)
 
 
 @pytest.mark.parametrize("seed", range(12))
@@ -92,7 +92,7 @@ def test_align_to_registry_matches_the_original(seed):
     registry = _registry()
     tracing = _random_tracing(rng)
     if seed % 3 == 0:
-        tracing = Tracing(tracing.ids, tracing.reviewed, {})  # no id -> key map
+        tracing = Tracing(tracing.ids, file_classes={})  # no id -> key map
     before = tracing.ids.copy()
     expected_ids, expected_warnings, expected_changed = _reference_align(tracing, registry)
     aligned, warnings, changed = align_to_registry(tracing, registry)
@@ -108,7 +108,7 @@ def test_align_to_registry_of_an_aligned_tracing_changes_nothing():
     ids[5:9, 5:9] = 2
     ids[20:25, 3:30] = 255
     aligned, warnings, changed = align_to_registry(
-        Tracing(ids, frozenset(), {2: "nodule"}), registry
+        Tracing(ids, file_classes={2: "nodule"}), registry
     )
     assert not changed and warnings == [] and np.array_equal(aligned.ids, ids)
 

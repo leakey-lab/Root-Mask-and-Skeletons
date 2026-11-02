@@ -146,10 +146,7 @@ class StageStatus(QObject):
         sources = index.sources()
         length_csv, area_csv = sources.get("length"), sources.get("area")
         length_dir = os.path.dirname(length_csv) if length_csv else layout.skeletons_dir
-        if area_csv:
-            area_dir = os.path.dirname(area_csv)
-        else:
-            area_dir = layout.resolve_masks_dir() or layout.mask_dir
+        area_dir = os.path.dirname(area_csv) if area_csv else layout.mask_dir
         job = (layout, length_csv, area_csv, length_dir, area_dir)
         if self._token is not None:
             self._again = job

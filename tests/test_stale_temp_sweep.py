@@ -171,12 +171,10 @@ def test_what_a_killed_atomic_write_leaves_is_swept(tmp_path, monkeypatch, targe
 def test_output_dirs_are_the_folders_the_app_writes_into(tmp_path):
     root = str(tmp_path)
     join = os.path.join
+    # The older layout (output/mask, [output/]skeletonizer/test_latest/images) is retired (#38).
     assert ProjectLayout(root).output_dirs == (
-        join(root, "output", "mask"),
         join(root, "mask"),
         join(root, "skeletons"),
-        join(root, "output", "skeletonizer", "test_latest", "images"),
-        join(root, "skeletonizer", "test_latest", "images"),
         join(root, "gt"),
         join(root, "gt", "mask"),
         join(root, "gt", "skeletons"),
@@ -184,24 +182,14 @@ def test_output_dirs_are_the_folders_the_app_writes_into(tmp_path):
     assert os.listdir(tmp_path) == []  # describing the folders creates none
 
 
-@pytest.mark.parametrize(
-    ("mask_parts", "skeleton_parts"),
-    [
-        (("mask",), ("skeletons",)),
-        (("output", "mask"), ("output", "skeletonizer", "test_latest", "images")),
-        (("output", "mask"), ("skeletonizer", "test_latest", "images")),
-    ],
-)
-def test_output_dirs_hold_the_folders_measure_writes_its_csvs_into(
-    tmp_path, mask_parts, skeleton_parts
-):
-    # Measure writes root_areas.csv / root_lengths.csv (+ .provenance.json) into the
-    # folder it measured: skeleton_handler's resolve_masks_dir / resolve_skeletons_dir.
+def test_output_dirs_hold_the_folders_measure_writes_its_csvs_into(tmp_path):
+    # Measure writes root_areas.csv / root_lengths.csv (+ .provenance.json) next to the
+    # predictions it reads, in mask/ and skeletons/ (skeleton_handler).
     layout = ProjectLayout(str(tmp_path))
-    os.makedirs(os.path.join(str(tmp_path), *mask_parts))
-    os.makedirs(os.path.join(str(tmp_path), *skeleton_parts))
-    assert layout.resolve_masks_dir() in layout.output_dirs
-    assert layout.resolve_skeletons_dir(search_test_latest=False) in layout.output_dirs
+    _file(layout.mask_dir, "root_areas.csv")
+    _file(layout.skeletons_dir, "root_lengths.csv")
+    assert os.path.dirname(layout.find_areas_csv()) in layout.output_dirs
+    assert os.path.dirname(layout.find_lengths_csv()) in layout.output_dirs
 
 
 @pytest.mark.parametrize(
@@ -249,6 +237,7 @@ def test_the_project_sweep_covers_every_output_folder(tmp_path):
     assert all(os.path.exists(p) for p in kept)
 
 
+@pytest.mark.wallclock
 def test_a_loaded_project_is_swept_on_a_daemon_thread_after_its_scan(app, tmp_path, monkeypatch):
     import cv2
 
@@ -317,7 +306,8 @@ def _hex_to_rgb(color):
 
 
 def _pre_r8_write_tracing(path, tracing, registry):
-    """``app.gt.store.write_tracing`` before R8, verbatim: the golden for the saved bytes."""
+    """``app.gt.store.write_tracing`` before R8, verbatim but for the ``reviewed`` list it
+    wrote (gone since 2026-11-01): the golden for the saved bytes."""
     ids = np.ascontiguousarray(tracing.ids, dtype=np.uint8)
     palette = [0, 0, 0] * 256
     unknown = _hex_to_rgb(GT_UNKNOWN_COLOR)
@@ -331,7 +321,6 @@ def _pre_r8_write_tracing(path, tracing, registry):
     meta = {
         "v": 1,
         "classes": {str(c.id): c.key for c in registry.classes},
-        "reviewed": sorted(tracing.reviewed),
     }
     info = PngImagePlugin.PngInfo()
     info.add_text(GT_META_CHUNK, json.dumps(meta))
@@ -357,9 +346,9 @@ def _tracings():
     unknown = np.zeros((12, 9), np.uint8)
     unknown[2:5, 3:7] = 7  # an id no class owns: GT_UNKNOWN_COLOR
     return {
-        "classes": Tracing(cycle, frozenset({"root", "nodule"})),
+        "classes": Tracing(cycle),
         "empty": empty_tracing(6, 7),
-        "unknown_id": Tracing(unknown, frozenset({"root_tip"})),
+        "unknown_id": Tracing(unknown),
     }
 
 
@@ -386,7 +375,8 @@ def test_save_registry_bytes_are_unchanged(tmp_path):
 
 def test_gt_saves_are_durable(tmp_path, monkeypatch):
     synced = []
-    monkeypatch.setattr(io_utils.os, "fsync", lambda fd: synced.append(fd))
+    # The one sync point: os.fsync, or the F_BARRIERFSYNC of macOS (X1-05).
+    monkeypatch.setattr(io_utils, "_fsync", synced.append)
     monkeypatch.setattr(io_utils, "_sync_folder", lambda folder: None)  # file fsyncs only
     write_tracing(str(tmp_path / "gt" / "a.png"), empty_tracing(4, 4), default_registry())
     assert len(synced) == 1

@@ -134,6 +134,7 @@ def test_a_step_down_glides_down_without_undershooting(view):
     assert seen == sorted(seen, reverse=True) and min(seen) >= 0.8 - 1e-12
 
 
+@pytest.mark.wallclock
 def test_a_glide_lasts_about_the_animation_time(view):
     t0 = time.perf_counter()
     view.zoom_step(+1)

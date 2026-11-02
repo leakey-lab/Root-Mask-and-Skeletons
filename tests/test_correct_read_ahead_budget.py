@@ -11,7 +11,6 @@ end, so the nearest neighbour (the next image, which PgDn opens) stays. Qt-free.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from concurrent.futures import Executor, Future
@@ -19,7 +18,7 @@ from concurrent.futures import Executor, Future
 import numpy as np
 
 from app.gui.correct.read_ahead import AheadImage, ReadAhead
-from app.io_utils import file_stamp
+from app.io_utils import file_stamp, path_key
 from tests.test_correct_read_ahead import InlineExecutor, Payload, photo
 
 
@@ -52,7 +51,9 @@ def entry(path: str, nbytes: int) -> AheadImage:
 
 
 def key(path: str) -> str:
-    return os.path.normcase(os.path.abspath(path))
+    """The read-ahead's key of ``path``: ``path_key`` (on macOS NFC and case-folded, which
+    ``normcase`` is not)."""
+    return path_key(path)
 
 
 def test_reads_that_complete_over_the_budget_are_not_all_kept(tmp_path):

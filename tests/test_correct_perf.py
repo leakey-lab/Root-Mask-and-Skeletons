@@ -288,52 +288,63 @@ def page(make_editor, tmp_path):
     return make_editor(image, folder, size=PAGE)
 
 
+@pytest.mark.wallclock
 def test_open_smoke(make_editor, tmp_path):
     assert opens(make_editor, [like_the_data(tmp_path, "a"), like_the_data(tmp_path, "b")]) < 150
 
 
+@pytest.mark.wallclock
 def test_layer_switch_smoke(page):
     assert switches(page) < 20
 
 
+@pytest.mark.wallclock
 def test_stroke_segment_smoke(page):
     assert stroke_segments(page) < 1
 
 
+@pytest.mark.wallclock
 def test_polyline_commit_smoke(page):
     assert polyline_commits(page) < 60
 
 
+@pytest.mark.wallclock
 def test_save_both_smoke(page):
     assert saves_of_both(page) < 100
 
 
+@pytest.mark.wallclock
 @strict
 def test_open_640_within_10_ms(make_editor, tmp_path):
     assert opens(make_editor, [like_the_data(tmp_path, "a"), like_the_data(tmp_path, "b")]) <= 10
 
 
+@pytest.mark.wallclock
 @strict
 def test_open_2048_within_90_ms(make_editor, tmp_path):
     big = [like_the_data(tmp_path, name, (2048, 1536)) for name in ("a", "b")]
     assert opens(make_editor, big) <= 90
 
 
+@pytest.mark.wallclock
 @strict
 def test_layer_switch_within_5_ms(page):
     assert switches(page) <= 5
 
 
+@pytest.mark.wallclock
 @strict
 def test_stroke_segment_within_0_05_ms(page):
     assert stroke_segments(page) <= 0.05
 
 
+@pytest.mark.wallclock
 @strict
 def test_polyline_commit_within_6_ms(page):
     assert polyline_commits(page) <= 6
 
 
+@pytest.mark.wallclock
 @strict
 def test_save_both_within_25_ms(page):
     assert saves_of_both(page) <= 25
@@ -368,6 +379,7 @@ QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 """
 
 
+@pytest.mark.wallclock
 @strict
 def test_the_first_open_in_a_fresh_process_after_the_prewarm_within_100_ms(tmp_path):
     folder, image = like_the_data(tmp_path, "a")

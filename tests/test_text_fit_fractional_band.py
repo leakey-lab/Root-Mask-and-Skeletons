@@ -7,8 +7,8 @@ compares the fractional width, so a form chosen by the rounded width can be cut 
 half a pixel: "T1 · L44 · 2024.07.…" painted where "T1 · L44" fits. That band exists where
 glyph advances are fractional: Windows at 125 / 150 % scaling (laptops), DejaVu on Linux,
 CoreText on macOS. ``text_fit.label_advance`` (the fractional width, rounded up) is the
-rule; the metrics bar's name cell and the class panel's names still use the rounded one
-(C5-02, owner question #14).
+rule; the metrics bar's name cell and the class panel's names used the rounded one until
+C5-02 (owner question #14) was fixed.
 
 The band needs the native font engine: a child process on the Windows platform at 125 %
 (``QT_SCALE_FACTOR``) measures the labels; no window is shown. Skipped off Windows.
@@ -35,13 +35,26 @@ NAMES = (
 )
 CLASS_NAMES = ("Ignore", "Nodule", "Coarse roots", "Mycorrhizal hyphae", "Dead root")
 CHILD_TIMEOUT_S = 120
+DUMP_MARGIN_S = 20  # the child dumps its stacks this long before the test gives up
+STDERR_TAIL = 6000  # characters of the child's stderr a failure shows
 
 pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="the native Windows platform")
 
 
 # --------------------------------------------------------------------------- the child
+def _stage(text: str) -> None:
+    """Say on stderr how far the child got (the test shows it when the child hangs)."""
+    print(f"stage: {text}", file=sys.stderr, flush=True)
+
+
 def run_child(out: str) -> None:
     """Sweep the labels' widths; write the forms that broke the rule to ``out`` (JSON)."""
+    import faulthandler
+
+    # A hang dumps every thread's stack to stderr and ends the child before the test's
+    # timeout, so the test can show where it hung (Windows CI hung here on 2026-11-02).
+    faulthandler.dump_traceback_later(CHILD_TIMEOUT_S - DUMP_MARGIN_S, exit=True)
+    _stage("start")
     sys.path.insert(0, str(ROOT))
     # First: the app's environment and logging, before Qt loads.
     import main as app_main
@@ -51,18 +64,23 @@ def run_child(out: str) -> None:
 
     record: dict = {}
     try:
+        _stage("main imported")
         app = QApplication.instance() or QApplication(["sprouts-text-fit"])
+        _stage("application made")
         app_main.apply_stylesheet(app)
+        _stage("stylesheet applied")
         from app.gui.class_panel import _NameLabel
         from app.gui.metrics_bar import MetricsBar
         from app.gui.widgets.text_fit import fit_forms, label_advance
 
         record["device_pixel_ratio"] = app.devicePixelRatio()
         bar = MetricsBar()
+        _stage("metrics bar made")
         cell = bar._name_value
         cell.ensurePolished()
         cut_cell, cut_shared = [], []
         for name in NAMES:
+            _stage(f"name cell: {name}")
             cell.setText(name)
             forms = cell._text_forms()
             for width in range(20, 500):
@@ -80,6 +98,7 @@ def run_child(out: str) -> None:
         label.ensurePolished()
         untipped = []
         for name in CLASS_NAMES:
+            _stage(f"class name: {name}")
             label.setText(name)
             for width in range(10, 200):
                 label.resize(width, 20)
@@ -93,6 +112,7 @@ def run_child(out: str) -> None:
     finally:
         with open(out, "w", encoding="utf-8") as f:
             json.dump(record, f, indent=1)
+        _stage("record written")
         sys.stdout.flush()
         os._exit(0)
 
@@ -114,18 +134,32 @@ def band(tmp_path_factory) -> dict:
         "import sys; sys.path.insert(0, sys.argv[1]); "
         "from tests.test_text_fit_fractional_band import run_child; run_child(sys.argv[2])"
     )
-    done = subprocess.run(
-        [sys.executable, "-c", code, str(ROOT), str(out)],
-        cwd=str(tmp_path),
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=CHILD_TIMEOUT_S,
-    )
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", code, str(ROOT), str(out)],
+            cwd=str(tmp_path),
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=CHILD_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # The child's own stack dump comes first; this is a hang outside Python (e.g. at
+        # its exit, after the record: then the record exists).
+        stderr = exc.stderr if isinstance(exc.stderr, str) else (exc.stderr or b"").decode()
+        pytest.fail(
+            f"the child hung for {CHILD_TIMEOUT_S} s (record written: {out.exists()}); "
+            f"its stderr:\n{stderr[-STDERR_TAIL:]}"
+        )
     if not out.exists():
-        pytest.skip(f"the native platform could not start (exit {done.returncode})")
+        stderr = done.stderr or ""
+        if "Timeout (" in stderr:  # faulthandler's dump: the child hung, here is where
+            pytest.fail(f"the child hung; its stderr:\n{stderr[-STDERR_TAIL:]}")
+        pytest.skip(
+            f"the native platform could not start (exit {done.returncode}): {stderr[-STDERR_TAIL:]}"
+        )
     record = json.loads(out.read_text(encoding="utf-8"))
     assert "error" not in record, record["error"]
     return record
@@ -136,19 +170,9 @@ def test_the_shared_rule_paints_the_first_form_that_fits_whole(band):
     assert band["cut_shared"] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C5-02 (owner question #14): the metrics bar's name cell chooses its form by the "
-    "rounded advance; at 125 % a form one pixel too wide is chosen and cut",
-)
 def test_the_name_cell_paints_the_first_form_that_fits_whole(band):
     assert band["cut_cell"] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C5-02 (owner question #14): a class name is elided by the fractional width but "
-    "its tooltip follows the rounded one, so a cut name can have no tooltip",
-)
 def test_an_elided_class_name_always_has_its_tooltip(band):
     assert band["untipped"] == []

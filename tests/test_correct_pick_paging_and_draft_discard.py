@@ -17,7 +17,8 @@ import os
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QPoint
+from PyQt6.QtCore import QEvent, QPoint, Qt
+from PyQt6.QtGui import QKeyEvent
 
 import app.gui.correct.skeleton_document as skeleton_document
 from app.gui.correct.layer import MASK, SKELETON
@@ -129,6 +130,26 @@ def test_paging_with_a_new_two_point_line_still_stays(make_editor, project):
 
     assert moved == [] and notices == [(editor.FINISH_LINE_FIRST, "warn")]
     assert editor.layers[SKELETON].draft_state().points == 2
+
+
+# ------------------------------------- Enter or Finish on a plain pick, then PgDn (S03-02)
+@pytest.mark.parametrize("finish", ["enter", "finish button"])
+def test_enter_or_finish_on_a_plain_pick_then_paging_saves_no_gt(make_editor, project, finish):
+    editor = make_editor(project.a, project.folder)
+    before = raster(editor).copy()
+    pick(editor)
+
+    if finish == "enter":
+        enter = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Return, Qt.KeyboardModifier.NoModifier)
+        assert editor.router.canvas_key_press(enter) is True
+    else:
+        editor.controls.finish_button.click()
+
+    assert np.array_equal(raster(editor), before) and not editor.has_unsaved_changes()
+    moved = record(editor.navigate_requested)
+    editor.navigate(1)
+    assert moved == [1]
+    assert not os.path.exists(project.correction())  # the pick wrote no GT skeleton
 
 
 # ------------------------------------------------- a smoothed pick that is dropped (O20)

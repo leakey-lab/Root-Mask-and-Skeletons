@@ -2,6 +2,12 @@
 
 **Status:** design v3 approved in chat 2026-09-22 (replaces the bit-packed `labels/` drafts);
 written spec pending user review.
+**Amended 2026-11-01:** the per-class "checked" (`reviewed`) state and the complete-only
+export filter are superseded (owner decision "Tick = active class"); see the dated notes in
+§1.2, §1.3, §3.2-§3.4, §4, §5.3, §5.4 and §6.
+**Amended 2026-11-02:** **Mark empty** on the Correct page saves an empty labels file for an
+image with none of the classes (owner decision "yes empty label file is necessary"); see the
+notes in §1.3 and §3.4.
 **Branch:** `feat/multiclass-labels`, rebased on `1fb1b13` (tracing-editor overhaul, skeleton dock fix, opaque canvas background).
 **Worktree:** `D:\Root-Mask-and-Skeletons-gt`.
 
@@ -54,11 +60,28 @@ convention as `mask/`).
   `classes` makes each file self-describing (id → key at save time). `reviewed` lists the
   class keys the annotator has checked on this image (§3.4).
 
+> **Superseded 2026-11-01 (owner decision "Tick = active class"):** the class panel's box
+> marks the active class, and no `reviewed` list is written. The chunk is now
+> `{"v": 1, "classes": {...}}` (version still 1). An older file's `reviewed` list is read
+> past and ignored. See §3.4.
+
 ### 1.3 Semantics
 
 - **File exists ⇔ image annotated.** Saving an image with no painted pixels still writes the
   file: "checked, nothing present" is a valid negative example. There is no "empty = delete"
   rule (unlike `mask/`). Deleting a GT file is not a v1 feature.
+
+> **Note 2026-11-01:** there is no "checked" state any more (see §3.4). A saved file with
+> nothing painted is still a negative example, and Export dataset exports every image with a
+> GT file.
+
+> **Note 2026-11-02 (owner decision "yes empty label file is necessary"):** since 2026-11-01
+> an image nobody painted on has nothing unsaved, so Save wrote no file for it. **Mark empty**
+> (the Correct page's top bar, next to Remove GT…) saves `gt/<stem>.png` with every pixel
+> background (id 0): "checked, none of the classes". It saves only the class labels, through
+> the normal save, and it is on only while the class labels are untouched, `gt/classes.json`
+> is valid and no labels file is saved or kept for the image, so it never replaces saved labels.
+> Remove GT… deletes the file again.
 - Read/write with **Pillow** (mode `P`, text chunk via `PngInfo`) through Python file handles
   (non-ASCII Windows paths work). Writes are atomic: `<path>.tmp` then `os.replace`.
 - Verified in the venv: a palette PNG round-trips exact class ids and the text chunk.
@@ -148,6 +171,10 @@ behaviour must not change (`tests/test_mask_tracing_interface_smoke.py` stays gr
   `reviewed = ticked ∪ keys of classes with pixels` (Ignore excluded), then writes
   `gt/classes.json` if missing. Emits `gt_saved(image_path)`. Status chip:
   `name ● Saved · 2/3 checked` / `● Unsaved` / `● No GT` / `● GT unreadable`.
+
+  > **Superseded 2026-11-01 (owner decision "Tick = active class"):** a save writes no
+  > `reviewed` list, and the status chip of saved class labels reads "GT" (as the mask and
+  > skeleton layers do), with no "n/m checked". See §3.4.
 - **Failed save never loses edits:** if a save fails (invalid registry, locked or read-only
   file, full disk), the unsaved-changes prompt offers Discard / Keep editing; choosing Keep
   editing cancels the action that asked (image switch, stage switch, folder open, window
@@ -162,6 +189,9 @@ number key hint, colour swatch, name, **checked ✓** checkbox. Active row highl
 `#b794f6`. More than 10 rows scroll inside the panel (max height 60% of the canvas). Gear button → class editor. Signals: `active_changed(str key)`,
 `reviewed_changed(str key, bool)`, `edit_requested()`.
 
+> **Superseded 2026-11-01 (owner decision "Tick = active class"):** the box is no longer a
+> "checked" box. It marks the active class: one tick, always on the highlighted row. See §3.4.
+
 ### 3.4 Checked (reviewed) per class
 
 - A class's ✓ ticks automatically when it has pixels on the image (and cannot be unticked
@@ -170,6 +200,19 @@ number key hint, colour swatch, name, **checked ✓** checkbox. Active row highl
 - Ticking/unticking marks the tracing dirty. Saved in the chunk's `reviewed` list.
 - Why: an image traced for roots but never checked for nodules would teach a model "no
   nodules here". Export skips incomplete images by default (§4).
+
+> **Superseded 2026-11-01 (owner decision "Tick = active class"):** this section no longer
+> applies. The owner read the tick as the active class, and with Nodule ticked and Root tip
+> highlighted the brush painted Root tip. Now each row, Ignore included, has a box, and
+> exactly one box is ticked: the active class. A click on a row or its box, or `1`-`9` /
+> `0`, moves the tick and the highlight together; a click on the ticked box keeps it ticked.
+> There is no "checked" / reviewed state: no `reviewed` list is written (an older file's
+> list is ignored), the status chip shows no "n/m checked", and Export dataset has no
+> complete-only filter (§4). (From 2026-10-30 to 2026-11-01 the box was ticked by hand
+> only: painting did not tick it.)
+>
+> **Note 2026-11-02:** "checked, none present" is now an action of its own: **Mark empty**
+> saves an empty labels file (see the note in §1.3).
 
 ### 3.5 Keys
 
@@ -209,6 +252,9 @@ fully checked images" (default on), seed (default 0). Runs `export_dataset` on a
 with progress, then shows a summary (exported, train/val counts, skipped incomplete,
 errors).
 
+> **Superseded 2026-11-01 (owner decision "Tick = active class"):** the "only fully checked
+> images" option is gone, and the summary no longer counts skipped incomplete images.
+
 Output layout:
 
 ```
@@ -226,6 +272,9 @@ Output layout:
   retired and unknown ids → 255. The export's `classes.json` documents the mapping.
 - **Selection:** images with a GT file; with "only fully checked", an image is included only
   if every active non-Ignore class is in its `reviewed` list.
+  > **Superseded 2026-11-01 (owner decision "Tick = active class"):** no complete-only
+  > filter. Every image with a GT file is exported; the `reviewed` list is neither written
+  > nor read.
 - **Split:** group key = tube number from `parse_image_name` when "keep each tube in one
   split" is on and the tube parses, else the stem. Groups are sorted, shuffled with
   `random.Random(seed)`, and assigned to val until val holds ≥ `val_fraction` of the images;
@@ -316,6 +365,11 @@ def present_keys(tracing: Tracing, registry: Registry) -> set[str]   # classes w
 def is_complete(tracing: Tracing, registry: Registry) -> bool
 ```
 
+> **Superseded 2026-11-01 (owner decision "Tick = active class"):** `Tracing` has no
+> `reviewed` field (`file_classes` is keyword-only, so an old positional call fails at
+> once), and `is_complete` is gone. `write_tracing` writes no `reviewed` list;
+> `read_tracing` ignores the list of an older file.
+
 ### 5.4 `app/gt/export.py`
 
 ```python
@@ -349,6 +403,10 @@ def export_dataset(project_dir: str, images: dict[str, str], registry: Registry,
 `images` is `image_manager.images` (stem → image path). One bad file adds an `errors` entry
 and the export continues.
 
+> **Superseded 2026-11-01 (owner decision "Tick = active class"):** `ExportOptions` has no
+> `only_complete` and `ExportResult` no `skipped_incomplete`. Every image with a GT file is
+> exported, and the provenance record lists neither name.
+
 ---
 
 ## 6. Testing
@@ -374,6 +432,10 @@ and the export continues.
   retired-class pixels survive a load→save round-trip with their id; mask-mode smoke test
   unchanged.
 - **Shell:** 7 stages, Trace GT after Library.
+
+> **Superseded 2026-11-01 (owner decision "Tick = active class"):** the tests of
+> `is_complete`, of the only-complete filter, of `reviewed` in a save and of the ✓ rules
+> above no longer apply: there is no reviewed state, and the box marks the active class.
 - Full suite green: `$env:QT_QPA_PLATFORM='offscreen'; ./venv/Scripts/python.exe -m pytest`.
 
 ---

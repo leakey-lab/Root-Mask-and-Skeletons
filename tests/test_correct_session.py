@@ -295,6 +295,29 @@ def test_nothing_written_and_nothing_to_say_shows_no_toast():
 
 
 # ---------------------------------------------------------------- PgDn: save_dirty
+def test_save_layer_saves_that_layer_alone_also_while_it_is_clean():
+    """The page's Mark empty saves the untouched class labels this way (2026-11-02)."""
+    rig = _Rig().opened()
+    rig.skeleton.dirty = True  # another layer's edits stay unsaved
+
+    report = rig.session.save_layer(MASK)
+
+    assert [outcome.layer_id for outcome in report.outcomes] == [MASK] and report.ok
+    assert "save" in rig.mask.names() and "save" not in rig.skeleton.names()
+    assert [outcome.layer_id for outcome in rig.saved()] == [MASK]
+    assert rig.session.dirty_layers() == [SKELETON]
+    assert ("history",) in rig.events  # the page refreshes once the save is done
+
+
+def test_save_layer_with_nothing_open_or_an_unknown_layer_saves_nothing():
+    rig = _Rig()
+
+    assert rig.session.save_layer(MASK) == SaveReport()
+    assert rig.mask.calls == [] and rig.events == []
+    with pytest.raises(KeyError):
+        rig.opened().session.save_layer(CLASSES)  # the rig has no class labels
+
+
 def test_save_dirty_saves_only_the_dirty_layers():
     rig = _Rig().opened()
     rig.skeleton.dirty = True

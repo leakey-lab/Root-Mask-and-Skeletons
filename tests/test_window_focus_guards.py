@@ -1,17 +1,21 @@
 """Focus guards of the window (Qt toolkit item 4): the click-focus audit of the Correct page
-and the focus-ring rule of widget stylesheets. Today's offenders are listed by issue id.
+and of every button, and the focus-ring rule of widget stylesheets. Allowed offenders are
+listed by issue id (none since C5-03 and K1b-01 were fixed; their tests stay as regression
+guards).
 
 Click focus (UXE-03). The canvas holds the hold keys (Space pans, B sizes the brush) and the
 gesture keys; a control with click focus takes them, and Space then clicks it again. Qt gives
 each control its own focus policy (buttons, sliders and combo boxes default to StrongFocus)
-and has no focus scope, so every control over the canvas and on the top bar's Correct page
-must be Tab-only (``widgets.keep_canvas_focus``). Allowed: the Enhance popover's content
-(its combo box and sliders keep click focus on purpose) and text fields.
+and has no focus scope. Every button of the app is Tab-only (owner item #44,
+``widgets.focus.use_tab_only_buttons``, installed by ``main.main`` and the suite's
+QApplication), and every other control over the canvas and on the top bar's Correct page must
+be Tab-only too (``widgets.keep_canvas_focus``). Allowed: the Enhance popover's content (its
+combo box and sliders keep click focus on purpose) and text fields.
 
 Focus rings (UXS-08). A widget's own stylesheet beats the application's whatever the
 specificity, so a widget stylesheet that sets ``border`` on a focusable control hides the
 app's ``:focus`` ring unless it carries its own ``:focus`` rule (``tokens.focus_rule``, added
-by hand in 11 stylesheets). Every widget stylesheet of the window and its dialogs is read:
+by hand in 12 stylesheets). Every widget stylesheet of the window and its dialogs is read:
 each border rule that reaches a focusable control needs a ``:focus`` rule for that control.
 
 The window has the first example open on the Correct page, with every layer made active and
@@ -26,7 +30,14 @@ from pathlib import Path
 
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QAbstractSpinBox, QLineEdit, QPlainTextEdit, QTextEdit, QWidget
+from PyQt6.QtWidgets import (
+    QAbstractButton,
+    QAbstractSpinBox,
+    QLineEdit,
+    QPlainTextEdit,
+    QTextEdit,
+    QWidget,
+)
 
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
@@ -34,15 +45,12 @@ from tests.window_support import build_window, open_folder, quiet_window
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "docs" / "examples"
 TEXT_FIELDS = (QLineEdit, QAbstractSpinBox, QTextEdit, QPlainTextEdit)
-#: Top-bar controls of the Correct page that take click focus today, by issue.
-KNOWN_CLICK_FOCUS = {
-    "gt_classes_button": "C5-03",
-    "gt_export_button": "C5-03",
-}
-#: Focusable controls whose widget stylesheet sets a border without a ``:focus`` rule today.
-KNOWN_NO_RING = {
-    "TaskProgressWidget > QToolButton 'Cancel'": "K1b-01",
-}
+#: Top-bar controls of the Correct page allowed to take click focus, by issue (none today).
+KNOWN_CLICK_FOCUS: dict[str, str] = {}
+#: Focusable controls allowed a widget-stylesheet border without a ``:focus`` rule (none today).
+KNOWN_NO_RING: dict[str, str] = {}
+#: The status line's Cancel button as the ring rule names it (K1b-01).
+CANCEL_BUTTON = "TaskProgressWidget > QToolButton 'Cancel'"
 
 
 @pytest.fixture(scope="module")
@@ -80,7 +88,7 @@ def _takes_click_focus(widget: QWidget) -> bool:
 
 def _attr_name(window, widget: QWidget) -> str:
     """The window attribute naming ``widget``, else its class, object name and text."""
-    for attr in ("gt_classes_button", "gt_export_button", "gt_remove_button"):
+    for attr in ("gt_classes_button", "gt_export_button", "gt_empty_button", "gt_remove_button"):
         if getattr(window, attr, None) is widget:
             return attr
     text = getattr(widget, "text", lambda: "")()
@@ -137,15 +145,37 @@ def test_no_new_correct_top_bar_control_takes_the_keyboard_on_a_click(window):
     offenders = _topbar_click_focus(window)
     assert set(offenders) - set(KNOWN_CLICK_FOCUS) == set()
     assert "gt_remove_button" not in offenders  # Remove GT… leaves the keys on the canvas
+    assert "gt_empty_button" not in offenders  # and so does Mark empty
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="C5-03 (owner question #9): Classes… and Export dataset… are StrongFocus buttons; "
-    "after a click Space re-opens the dialog and the canvas keys stop working",
-)
 def test_classes_and_export_dataset_leave_the_keyboard_on_the_canvas(window):
+    # C5-03 (owner question #9): after a click, Space must not open the dialog again.
     assert _topbar_click_focus(window) == []
+    for button in (window.gt_classes_button, window.gt_export_button):
+        assert button.focusPolicy() == Qt.FocusPolicy.TabFocus  # Tab still reaches it
+
+
+def _buttons_with_click_focus(root: QWidget) -> list[str]:
+    """Buttons under ``root`` that take click focus once polished (as before they are first
+    shown; buttons on pages never shown are not polished yet)."""
+    offenders = []
+    for button in root.findChildren(QAbstractButton):
+        if not button.isWidgetType():  # a stale wrapper (see widgets.focus.keep_canvas_focus)
+            continue
+        button.ensurePolished()
+        if _takes_click_focus(button):
+            offenders.append(_described(button))
+    return offenders
+
+
+def test_no_button_of_the_window_or_its_dialogs_takes_the_keyboard_on_a_click(window, dialogs):
+    # Owner item #44: every button is Tab-only, not only those over the canvas.
+    buttons = window.findChildren(QAbstractButton)
+    assert len(buttons) > 50  # the audit sees the whole window
+    offenders = _buttons_with_click_focus(window)
+    for dialog in dialogs:
+        offenders += _buttons_with_click_focus(dialog)
+    assert offenders == []
 
 
 # --------------------------------------------------------------------------- focus rings
@@ -254,10 +284,7 @@ def test_every_focusable_control_with_a_widget_border_keeps_a_focus_ring(window,
     assert missing - set(KNOWN_NO_RING) == set()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="K1b-01 (new owner question): the status line's Cancel button sets its border in "
-    "its own stylesheet without a :focus rule, so Tab shows no ring on it",
-)
 def test_the_status_line_cancel_button_keeps_a_focus_ring(window):
-    assert set(_rings_missing(window)) & set(KNOWN_NO_RING) == set()
+    # K1b-01 (owner question #50): its stylesheet sets a border, so it carries the ring too.
+    assert window.task_progress.cancel_button.focusPolicy() & Qt.FocusPolicy.TabFocus
+    assert CANCEL_BUTTON not in _rings_missing(window)

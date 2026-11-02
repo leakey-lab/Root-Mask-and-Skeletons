@@ -2,8 +2,9 @@
 
 One floating card at the right edge (the ``EditorChrome``'s ``side_panel`` role): the Layers
 panel (``LayerPanel``, a row per layer) above the class panel (``app.gui.class_panel.
-ClassPanel``: the classes, their "checked" boxes and the gear of the class editor), which
-shows only while the class labels are the edited layer (:meth:`SidePanels.set_active_layer`).
+ClassPanel``: the classes, the box ticked on the active class and the gear of the class
+editor), which shows only while the class labels are the edited layer
+(:meth:`SidePanels.set_active_layer`).
 Both keep their parts and focus rules; inside the card they lose their own frame and shadow
 (Qt draws no nested graphics effect, and a child's shadow would be clipped at the card's
 edge). The card sizes itself by summing its shown parts (``preferred_height`` /
@@ -11,13 +12,12 @@ edge). The card sizes itself by summing its shown parts (``preferred_height`` /
 for a new place (``reposition``) when its rows change.
 
 It also keeps the class panel in step with the class labels (:meth:`SidePanels.bind_classes`):
-a row click, a tick and the gear go to the layer and the page; the layer's
-``on_classes_changed`` (an open, a save, Discard, a new registry, a tick, the active class,
-every committed plane change, never a mouse move) puts its registry, active class and ticks
-on the panel, each only when it changed (a stroke costs two small set compares). A click on
-the panel hands the keys back to the canvas; a box ticked from the keyboard keeps them for
-the next box; a box that locks under the focus (its class got pixels) hands them to the
-canvas first, so a Space never ticks the box after it.
+a click on a row or a box picks its class on the layer, and the gear goes to the page; the
+layer's ``on_classes_changed`` (an open, a save, Discard, a new registry, the active class,
+every committed plane change, never a mouse move) puts its registry (only when it changed)
+and its active class on the panel, which highlights that row and ticks its box alone (owner
+decision 2026-11-01: the tick is the class you paint with). A click on the panel hands the
+keys back to the canvas; a box picked from the keyboard (Space) keeps them for the next box.
 """
 
 from __future__ import annotations
@@ -77,7 +77,6 @@ class SidePanels(_FloatingPanel):
         self._layer: ClassesLayer | None = None
         self._canvas: QWidget | None = None
         self._registry: Registry | None = None  # what the class panel shows
-        self._reviewed: tuple | None = None  # (hand ticks, classes with pixels) it shows
 
     # ------------------------------------------------------------------ the card
     def set_active_layer(self, layer_id: str) -> None:
@@ -127,13 +126,12 @@ class SidePanels(_FloatingPanel):
     def bind_classes(
         self, layer: ClassesLayer, canvas: QWidget, on_edit: Callable[[], object]
     ) -> None:
-        """Keep the class panel showing ``layer`` (Design 3.5): a row click picks the class,
-        a tick goes to the layer, the gear calls ``on_edit`` (the page's Classes…);
-        ``canvas`` takes the keys back after a click."""
+        """Keep the class panel showing ``layer`` (Design 3.5): a click on a row or a box
+        picks the class, the gear calls ``on_edit`` (the page's Classes…); ``canvas`` takes
+        the keys back after a click."""
         self._layer, self._canvas = layer, canvas
         panel = self.class_panel
         panel.active_changed.connect(self._pick)
-        panel.reviewed_changed.connect(self._tick)
         panel.edit_requested.connect(on_edit)
         layer.on_classes_changed = self.sync_classes
         self.sync_classes()
@@ -145,36 +143,22 @@ class SidePanels(_FloatingPanel):
             self._layer.set_active_class(key)
 
     def sync_classes(self) -> None:
-        """Show the layer's registry, active class and ticks on the class panel (only what
-        changed: it runs once per committed stroke)."""
+        """Show the layer's registry (only when it changed: this runs once per committed
+        stroke) and its active class on the class panel: that row highlighted, its box the
+        only one ticked."""
         layer, panel = self._layer, self.class_panel
         registry = layer.registry()
         if registry != self._registry:
-            self._registry, self._reviewed = registry, None
+            self._registry = registry
             panel.set_registry(registry)
             self.reposition()
             QTimer.singleShot(0, self.reposition)  # the new rows count once they are shown
-        panel.set_active(layer.active_class())  # it does nothing when the class is shown
-        document = layer.document
-        reviewed = (document.ticked(), frozenset(document.present_keys()))
-        if reviewed == self._reviewed:
-            return
-        self._reviewed = reviewed
-        focused = panel.focused_key()
-        if focused is not None and focused in reviewed[1]:
-            self._canvas.setFocus()  # the box locks under the focus: Space must not move on
-        panel.set_reviewed(set(reviewed[0]), set(reviewed[1]))
+        panel.set_active(layer.active_class())
 
     def _pick(self, key: str) -> None:
-        """A row was clicked: paint with its class; the keys go back to the canvas."""
+        """A row or a box was clicked (or Space on a box): paint with its class. A click
+        hands the keys back to the canvas; Space on a focused box keeps them there."""
         self._layer.set_active_class(key)
         self.sync_classes()  # a class the layer refused: the panel shows the active one
-        self._canvas.setFocus()
-
-    def _tick(self, key: str, on: bool) -> None:
-        """A "checked" box changed: the layer ticks it, or refuses and the box goes back. A
-        click hands the keys back to the canvas; Space on a focused box keeps them there."""
-        self._reviewed = None  # the box shows the click: show the layer's answer either way
-        self._layer.set_ticked(key, on)
-        if self.class_panel.focused_key() != key:
+        if not self.class_panel.picked_by_key():
             self._canvas.setFocus()

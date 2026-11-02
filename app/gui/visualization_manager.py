@@ -12,13 +12,13 @@ runs their shared lifecycle:
 * ``close`` removes a dashboard exactly once, and ``toggle`` keeps the legacy
   open/close meaning for the old buttons. ``release_all`` closes both when
   another project is opened (they chart the previous project's CSVs).
-* On Windows each dashboard is a native child window with its own Direct3D
-  surface (:func:`dashboards_embed_natively`): the canvases keep OpenGL and the
-  main window is never recreated (``docs/KNOWN_ISSUES.md`` D8). Elsewhere
-  (Linux, macOS: not checked) OpenGL canvas viewports stay off while any
-  dashboard embeds a browser (Qt6 cannot composite a QWebEngineView in a window
-  holding a QOpenGLWidget) and come back when the last one closes, but only if
-  they were on before.
+* On Windows and on Linux with X11 each dashboard is a native child window with
+  its own Direct3D / OpenGL surface (:func:`dashboards_embed_natively`): the
+  canvases keep OpenGL and the main window is never recreated
+  (``docs/KNOWN_ISSUES.md`` D8). Elsewhere (Wayland; macOS, not checked) OpenGL
+  canvas viewports stay off while any dashboard embeds a browser (on Windows Qt6
+  could not composite a QWebEngineView in a window holding a QOpenGLWidget) and
+  come back when the last one closes, but only if they were on before.
 * Dashboards outlive a visit to the Visualize stage, so a revisit is instant.
   ``stage_changed`` (called by MainWindow on every stage change) closes them
   :data:`IDLE_RELEASE_MS` after the stage was left: each dashboard's browser
@@ -38,7 +38,6 @@ import sys
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 # Qt6 only lets QtWebEngineWidgets load before the QApplication exists. The
 # dashboard modules that use it are imported lazily, so import it here.
@@ -48,10 +47,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from app.config import ROOT_AREAS_CSV, ROOT_LENGTHS_CSV
 from app.io_utils import path_key
-from app.project_layout import ProjectLayout, find_test_latest_dir, project_layout_of
-
-if TYPE_CHECKING:
-    from app.data_processing.measurement_index import MeasurementIndex
+from app.project_layout import ProjectLayout, project_layout_of
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +74,6 @@ __all__ = [
     "close_visualization",
     "controller_for",
     "dashboards_embed_natively",
-    "find_test_latest_dir",
-    "measurement_index_of",
     "release_all_visualizations",
     "show_root_area_visualization",
     "show_root_length_visualization",
@@ -119,9 +113,8 @@ class CsvLookup:
     message: str = ""
 
 
-def _find_lengths_csv(layout: ProjectLayout, index: MeasurementIndex | None = None) -> CsvLookup:
-    # The project's index uses the legacy test_latest walk its pool search made: a few stats.
-    path = layout.find_lengths_csv() if index is None else index.find_lengths_csv()
+def _find_lengths_csv(layout: ProjectLayout) -> CsvLookup:
+    path = layout.find_lengths_csv()  # a few stats
     if path:
         return CsvLookup(path)
     return CsvLookup(
@@ -135,10 +128,9 @@ def _find_lengths_csv(layout: ProjectLayout, index: MeasurementIndex | None = No
     )
 
 
-def _find_areas_csv(layout: ProjectLayout, index: MeasurementIndex | None = None) -> CsvLookup:
-    # ``index`` is not needed: the area CSV is found with stats only.
-    masks_dir = layout.resolve_masks_dir()
-    if masks_dir is None:
+def _find_areas_csv(layout: ProjectLayout) -> CsvLookup:
+    masks_dir = layout.mask_dir
+    if not os.path.isdir(masks_dir):
         return CsvLookup(
             None,
             "No mask data",
@@ -164,13 +156,12 @@ class DashboardSpec:
     noun: str  # for messages
     attr: str  # MainWindow attribute holding the live dashboard (public contract)
     class_name: str  # dashboard class, resolved on this module
-    needs_image_manager: bool  # constructor takes (csv_path, image_manager)
     closed_slot: str  # MainWindow slot connected to the dashboard's server_closed
     button_attr: str  # legacy button whose text follows open / closed
     open_text: str
     close_text: str
-    #: ``find_csv(layout, index=None)``: ``index`` is the project's MeasurementIndex, if any.
-    find_csv: Callable[..., CsvLookup]
+    #: ``find_csv(layout)``: the dashboard's CSV in the project of ``layout`` (a few stats).
+    find_csv: Callable[[ProjectLayout], CsvLookup]
 
 
 LENGTH = DashboardSpec(
@@ -178,7 +169,6 @@ LENGTH = DashboardSpec(
     noun="root length",
     attr="root_length_viz",
     class_name="RootLengthVisualization",
-    needs_image_manager=True,
     closed_slot="on_visualization_server_closed",
     button_attr="visualize_root_length_button",
     open_text="📊 Visualize Root Length",
@@ -191,7 +181,6 @@ AREA = DashboardSpec(
     noun="root area",
     attr="root_area_viz",
     class_name="RootAreaVisualization",
-    needs_image_manager=False,
     closed_slot="on_area_visualization_server_closed",
     button_attr="visualize_root_area_button",
     open_text="📈 Visualize Root Area",
@@ -212,16 +201,6 @@ def _spec(kind: str) -> DashboardSpec:
 # --------------------------------------------------------------------------- #
 #  Helpers
 # --------------------------------------------------------------------------- #
-def measurement_index_of(window, layout: ProjectLayout | None) -> MeasurementIndex | None:
-    """The window's measurement index (``window.metrics.index``) when it reads ``layout``'s
-    project, else None. Its pool search walks for a legacy ``test_latest`` folder when the
-    project opens, so a length lookup through it does not walk the folders again."""
-    index = getattr(getattr(window, "metrics", None), "index", None)
-    if index is None or layout is None or path_key(index.root) != path_key(layout.root):
-        return None
-    return index
-
-
 def _source_signature(path: str | None) -> tuple | None:
     """Identity of a CSV's content on disk (path, size, mtime), or None if unreadable."""
     if not path:
@@ -246,7 +225,7 @@ def _opengl_viewports_in_use(window) -> bool:
 
 
 def dashboards_embed_natively() -> bool:
-    """True where each dashboard is a native child window with its own surface (Windows).
+    """True where each dashboard is a native child window with its own surface (Windows, X11).
 
     Its browser then composites next to the OpenGL canvases, which keep their viewports;
     see ``viz_window.native_child_surface``.
@@ -461,7 +440,7 @@ class DashboardController:
         if layout is None:
             QMessageBox.warning(mw, "Warning", "The folder of the loaded images was not found.")
             return
-        lookup = self._find_csv(spec, layout)
+        lookup = spec.find_csv(layout)
         if lookup.path is None:
             QMessageBox.information(mw, lookup.title, lookup.message)
             return
@@ -482,7 +461,7 @@ class DashboardController:
         layout = self._project_layout()
         if layout is None:
             return False
-        signature = _source_signature(self._find_csv(spec, layout).path)
+        signature = _source_signature(spec.find_csv(layout).path)
         return signature == self._sources.get(spec.kind)
 
     def _bring_forward(self, dashboard) -> None:
@@ -499,10 +478,7 @@ class DashboardController:
             self._gl.acquire(spec.kind)  # before the dashboard creates its browser widget
         try:
             cls = getattr(sys.modules[__name__], spec.class_name)
-            if spec.needs_image_manager:
-                dashboard = cls(csv_path, mw.image_manager)
-            else:
-                dashboard = cls(csv_path)
+            dashboard = cls(csv_path, mw.image_manager)
         except Exception:
             if self.dashboard(spec) is None:
                 self._gl.release(spec.kind)
@@ -517,6 +493,8 @@ class DashboardController:
                     f"Saved {os.path.basename(path)} in {os.path.dirname(path)}", "success"
                 )
             )
+        if notify is not None and hasattr(dashboard, "export_failed"):
+            dashboard.export_failed.connect(lambda message: notify(message, "warn"))
         self._sources[spec.kind] = _source_signature(csv_path)
         # Set the attribute before the page switch: MainWindow collapses the
         # library when the current page is one of its dashboards.
@@ -552,11 +530,6 @@ class DashboardController:
     def _project_layout(self) -> ProjectLayout | None:
         """Layout of the loaded project (``ImageManager.project_layout``)."""
         return project_layout_of(self._mw.image_manager)
-
-    def _find_csv(self, spec: DashboardSpec, layout: ProjectLayout) -> CsvLookup:
-        """``spec``'s CSV in ``layout``, looked for through the window's measurement index
-        when it has one (:func:`measurement_index_of`)."""
-        return spec.find_csv(layout, measurement_index_of(self._mw, layout))
 
     def _is_busy(self, spec: DashboardSpec) -> bool:
         """True while a run that writes (or invalidates) the dashboard's CSV is going."""

@@ -16,7 +16,11 @@ only: no Qt, no model code.
 - **Linux (OpenGL RHI, Qt default).** Nothing is set: a D3D11 backend cannot exist
   there, Qt then fails "Failed to create QRhi" and the dashboards render black.
   Chromium refuses to start as root unless its sandbox is off, so
-  ``QTWEBENGINE_DISABLE_SANDBOX=1`` is set only when the effective user id is 0.
+  ``QTWEBENGINE_DISABLE_SANDBOX=1`` is set only when the effective user id is 0. A
+  normal user keeps the sandbox. Where user namespaces are unusable (Ubuntu 24.04's
+  AppArmor restriction, ``kernel.apparmor_restrict_unprivileged_userns=1``, emulated in
+  WSL on 2026-10-29) Qt WebEngine still starts and the dashboards still show: it drops the
+  namespace layer silently and keeps the seccomp-bpf filter.
 - **macOS (Metal RHI, Qt default).** No backend is set. ``QT_FONT_DPI=96`` keeps
   text at its designed size: Qt maps 1 pt to 1 px on macOS and the theme sizes
   text in ``pt``. Unverified without a Mac; if Cocoa ignores it, convert ``pt`` to
@@ -78,6 +82,14 @@ def configure_qt_environment(
     return applied
 
 
+def _quick_uses_rhi(environ: Mapping[str, str], default: str, names: tuple[str, ...]) -> bool:
+    """True when Qt Quick draws through the RHI backend known by ``names``: ``QSG_RHI_BACKEND``
+    (``default`` when unset) is one of them and the Qt Quick backend is the RHI one."""
+    if environ.get("QSG_RHI_BACKEND", default).strip().lower() not in names:
+        return False
+    return environ.get("QT_QUICK_BACKEND", "").strip().lower() in ("", "rhi")
+
+
 def windows_quick_uses_direct3d(environ: Mapping[str, str]) -> bool:
     """True when Qt Quick (a dashboard's ``QQuickWidget``) draws through Direct3D 11 on Windows.
 
@@ -86,9 +98,18 @@ def windows_quick_uses_direct3d(environ: Mapping[str, str]) -> bool:
     backend other than the RHI one (``QT_QUICK_BACKEND=software``). ``viz_window`` then gives
     each dashboard a native child window with a Direct3D surface (``docs/KNOWN_ISSUES.md`` D8).
     """
-    if environ.get("QSG_RHI_BACKEND", "d3d11").strip().lower() != "d3d11":
-        return False
-    return environ.get("QT_QUICK_BACKEND", "").strip().lower() in ("", "rhi")
+    return _quick_uses_rhi(environ, "d3d11", ("d3d11",))
+
+
+def linux_quick_uses_opengl(environ: Mapping[str, str]) -> bool:
+    """True when Qt Quick (a dashboard's ``QQuickWidget``) draws through OpenGL on Linux.
+
+    That is Qt's default there (nothing is set at start-up), unless the user exported another
+    ``QSG_RHI_BACKEND`` (``vulkan``) or a Qt Quick backend other than the RHI one. On X11
+    ``viz_window`` then gives each dashboard a native child window with an OpenGL surface
+    (``docs/KNOWN_ISSUES.md`` D8).
+    """
+    return _quick_uses_rhi(environ, "opengl", ("opengl", "gl"))
 
 
 def qt_style_for(platform: str = sys.platform) -> str | None:

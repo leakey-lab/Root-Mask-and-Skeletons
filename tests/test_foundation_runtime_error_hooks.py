@@ -304,6 +304,54 @@ def test_a_dialog_deleted_with_its_parent_counts_as_closed(qapp, monkeypatch):
         _pump()
 
 
+def test_a_tick_on_a_dialog_deleted_with_its_parent_still_mutes(qapp, monkeypatch):
+    """Ticking "Don't show error dialogs again" and then closing the window the box is
+    parented to deletes the box without finished(): the tick still counts (S10-01 b)."""
+    parent = QDialog()
+    parent.show()
+    monkeypatch.setattr(QApplication, "activeWindow", staticmethod(lambda: parent))
+    presenter = CrashDialogPresenter(log_file=None)
+    try:
+        presenter.report("ValueError: first", "tb1")
+        _pump()
+        first = presenter.dialog
+        assert first is not None and first.parent() is parent
+        first.checkBox().setChecked(True)
+        delete_widgets([parent])  # the crash box goes with it, ticked
+        assert sip.isdeleted(first)
+        monkeypatch.setattr(QApplication, "activeWindow", staticmethod(lambda: None))
+        presenter.report("OSError: second", "tb2")
+        _pump()
+        assert presenter.muted is True
+        assert presenter.dialog is None
+    finally:
+        if presenter.dialog is not None and not sip.isdeleted(presenter.dialog):
+            presenter.dialog.close()
+        _pump()
+
+
+def test_an_unticked_box_ticked_then_unticked_does_not_mute(qapp, monkeypatch):
+    """Only the tick the box shows when it goes counts: one taken back does not mute."""
+    monkeypatch.setattr(QApplication, "activeWindow", staticmethod(lambda: None))
+    presenter = CrashDialogPresenter(log_file=None)
+    try:
+        presenter.report("ValueError: first", "tb1")
+        _pump()
+        presenter.dialog.checkBox().setChecked(True)
+        presenter.dialog.checkBox().setChecked(False)
+        presenter.dialog.close()
+        _pump()
+        presenter.report("OSError: second", "tb2")
+        _pump()
+        assert presenter.muted is False
+        assert presenter.dialog is not None and "OSError: second" in presenter.dialog.text()
+        assert not presenter.dialog.checkBox().isChecked()  # a new box starts unticked
+    finally:
+        if presenter.dialog is not None and not sip.isdeleted(presenter.dialog):
+            presenter.dialog.close()
+        _pump()
+
+
 def test_an_error_queued_while_the_box_closes_keeps_one_dialog(qapp, monkeypatch):
     """A report queued before the user's OK builds the next box before the first one's
     deferred delete runs; that delete must not orphan it (at most one dialog)."""

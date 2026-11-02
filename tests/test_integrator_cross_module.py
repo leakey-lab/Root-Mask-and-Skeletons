@@ -143,6 +143,18 @@ def test_file_locked_error_is_logged_without_a_traceback(app, caplog, tmp_path):
     assert records[0].exc_info is None
 
 
+def test_an_unwritable_output_folder_is_a_user_condition(tmp_path):
+    """Generate's stop for a folder that takes no new files (C6-01) shows its own message,
+    without the exception type and without a traceback in the log."""
+    from app.io_utils import FolderNotWritableError
+    from app.workers import describe_error, is_user_condition
+
+    exc = FolderNotWritableError(tmp_path / "mask", "access denied", 13)
+    assert is_user_condition(exc)
+    assert describe_error(exc) == exc.message
+    assert describe_error(exc).startswith(f"Cannot save files in {tmp_path / 'mask'}")
+
+
 def test_unexpected_worker_errors_keep_their_traceback(app, caplog):
     from app.workers import GuardedThread
 
@@ -172,7 +184,7 @@ def _find(component, component_id):
 
 def test_dashboard_page_shows_the_exclusions_notice_only_when_rows_were_left_out():
     from app.data_processing.data_processor import RowExclusions
-    from app.visualization.dash_app import LENGTH_SHELL
+    from app.visualization.dash_metric_layout import LENGTH_SHELL
     from app.visualization.dash_shell import DashboardShell, exclusions_note
 
     class Processor:

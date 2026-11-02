@@ -24,9 +24,7 @@ def test_a_tracing_of_another_size_is_an_export_error(tmp_path):
     Image.new("RGB", (40, 30), color=(10, 20, 30)).save(images[resized])  # GT is 20 x 20
     out_dir = tmp_path / "out"
 
-    result = export_dataset(
-        project_dir, images, registry, ExportOptions(out_dir=str(out_dir), only_complete=False)
-    )
+    result = export_dataset(project_dir, images, registry, ExportOptions(out_dir=str(out_dir)))
 
     assert [stem for stem, _ in result.errors] == [resized]
     message = result.errors[0][1]
@@ -43,9 +41,7 @@ def test_every_exported_image_matches_its_mask(tmp_path):
     project_dir, images, _write_registry, registry = _build_project(tmp_path)
     out_dir = tmp_path / "out"
 
-    result = export_dataset(
-        project_dir, images, registry, ExportOptions(out_dir=str(out_dir), only_complete=False)
-    )
+    result = export_dataset(project_dir, images, registry, ExportOptions(out_dir=str(out_dir)))
 
     assert result.errors == [] and result.exported == len(_STEMS)
     for stem in _STEMS:

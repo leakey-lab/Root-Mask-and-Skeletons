@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import partial
@@ -31,7 +30,12 @@ from PyQt6.QtWidgets import QApplication, QMessageBox, QWidget
 from app.dialogs import run_modal
 from app.feedback import UiFeedback
 from app.handlers.deps import SAVED_PATH_STATUS_MS, folder_label
-from app.handlers.generation_base import GenerationHandlerBase, GenerationThread, thread_slot
+from app.handlers.generation_base import (
+    GenerationHandlerBase,
+    GenerationThread,
+    open_folder_action,
+    thread_slot,
+)
 from app.handlers.job_registry import JobRegistry
 from app.inference import runtime
 from app.inference.mask_origin import OverwritePolicy, scan_existing_masks
@@ -146,6 +150,7 @@ class MaskGenerationHandler(GenerationHandlerBase):
     job_label = "Generating masks"
     title = "Mask generation"
     noun = "masks"
+    model_label = "Mask model"
 
     def __init__(
         self,
@@ -169,10 +174,9 @@ class MaskGenerationHandler(GenerationHandlerBase):
         """
         return self._started
 
-    @property
-    def model_available(self) -> bool:
-        """True when the mask checkpoint exists (the model itself loads on first use)."""
-        return os.path.isfile(runtime.mask_weights_path())
+    def weights_path(self) -> str:
+        """The mask checkpoint (``model_available`` and ``refuse_without_model`` ask it)."""
+        return runtime.mask_weights_path()
 
     def generate_masks(self, on_success: Callable[[], None] | None = None) -> bool:
         """Ask about existing masks, then start generation. True if a run started.
@@ -182,13 +186,7 @@ class MaskGenerationHandler(GenerationHandlerBase):
         """
         self._started = None
         parent = self.parent_widget()
-        if not self.model_available:
-            QMessageBox.warning(
-                parent,
-                "Mask model missing",
-                "Mask generation is unavailable: the model weights were not found at\n"
-                f"{runtime.mask_weights_path()}",
-            )
+        if self.refuse_without_model():
             return False
         if self.refuse_while_loading():  # R7: before the scan and the overwrite prompt
             return False
@@ -253,13 +251,11 @@ class MaskGenerationHandler(GenerationHandlerBase):
             # (W13) The folder's name in the toast, its full path in the status line.
             self.feedback.status(f"Saved to {output_dir}", SAVED_PATH_STATUS_MS)
             folder = folder_label(output_dir, self.project_folder())
-            self.feedback.notify(f"{message}. Saved to the {folder} folder", "success")
-        self.outputs_changed()
-
-    def _on_failed(self, thread: MaskGenerationThread, message: str) -> None:
-        logger.error("Mask generation failed: %s", message)
-        self.feedback.task_failed("Mask generation failed")
-        QMessageBox.critical(self.parent_widget(), "Mask generation failed", message)
+            self.feedback.notify(
+                f"{message}. Saved to the {folder} folder",
+                "success",
+                action=open_folder_action(output_dir),
+            )
         self.outputs_changed()
 
 

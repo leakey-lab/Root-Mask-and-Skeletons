@@ -77,19 +77,19 @@ def test_exists_reports_missing_folders(tmp_path):
     assert RecentProject(str(tmp_path / "gone"), "x").exists() is False
 
 
-def test_default_store_uses_the_app_qsettings_scope(monkeypatch):
+def test_default_store_uses_the_app_settings_file(monkeypatch, tmp_path):
     """Without settings the store is the app's (``app.settings.app_settings``): the user's
-    ``QSettings("LeakeyLab", "SPROUTS")`` on a screen, memory when headless (C5-04). The
-    user's registry is never opened here."""
+    settings file on a screen, memory when headless (C5-04). The user's settings are never
+    opened here."""
     import app.settings as factory
-    from app import APP_NAME, ORGANIZATION_NAME
 
     assert isinstance(RecentProjectsStore().settings, MemorySettings)  # the suite is headless
     made = []
+    monkeypatch.setenv("SPROUTS_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(factory, "headless", lambda: False)
-    monkeypatch.setattr(factory, "QSettings", lambda *args: made.append(args) or "the user's")
+    monkeypatch.setattr(factory, "ini_settings", lambda path: made.append(path) or "the user's")
     assert RecentProjectsStore().settings == "the user's"
-    assert made == [(ORGANIZATION_NAME, APP_NAME)]
+    assert made == [os.path.join(str(tmp_path), "settings.ini")]
 
 
 def test_memory_settings_keep_the_list_for_this_object_only(tmp_path):

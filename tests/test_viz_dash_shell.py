@@ -24,7 +24,9 @@ from tests.viz_dash_helpers import (
 
 # Component ids and callback outputs that existed before the shell refactor. They
 # are a public contract (other modules, saved browser state, the Dash renderer):
-# the refactor may add ids / callbacks but must keep every one of these.
+# the refactor may add ids / callbacks but must keep every one of these. The area
+# dashboard has the length page (it charts area in the length views), so it keeps
+# them too; the ids it had before are among them.
 LENGTH_IDS = {
     "add-range-btn", "cached-data", "clear-all-btn", "click-data", "faceted-date-selector",
     "faceted-dates-store", "faceted-options-card", "faceted-selection-info",
@@ -34,10 +36,6 @@ LENGTH_IDS = {
     "tube-multiselect", "tube-range-from", "tube-range-to", "tube-selection-card",
     "tube-selection-tabs", "tube-selector", "view-selector", "viz-controls",
     "viz-controls-collapse", "viz-controls-toggle", "viz-options-card", "viz-resize-dummy",
-}  # fmt: skip
-AREA_IDS = {
-    "cached-data", "click-data", "main-graph", "tube-selector", "view-selector",
-    "viz-controls", "viz-controls-collapse", "viz-controls-toggle", "viz-resize-dummy",
 }  # fmt: skip
 LENGTH_CALLBACKS = {
     "viz-controls-collapse.is_open": ({"viz-controls-toggle.n_clicks"}, {"viz-controls-collapse.is_open"}),
@@ -66,12 +64,6 @@ LENGTH_CALLBACKS = {
         {"main-graph.hoverData"}, {"tube-selector.value", "view-selector.value"}
     ),
 }  # fmt: skip
-AREA_CALLBACKS = {
-    "viz-controls-collapse.is_open": ({"viz-controls-toggle.n_clicks"}, {"viz-controls-collapse.is_open"}),
-    "viz-resize-dummy.data": ({"view-selector.value", "viz-controls-collapse.is_open"}, set()),
-    "..main-graph.figure...click-data.children...tube-selector.style...tube-selector.options..."
-    "main-graph.style..": ({"tube-selector.value", "view-selector.value"}, set()),
-}  # fmt: skip
 
 
 @pytest.fixture
@@ -79,24 +71,15 @@ def length_app(tmp_path):
     return build_length_app(tmp_path)
 
 
-@pytest.fixture
-def area_app(tmp_path):
-    return build_area_app(tmp_path)
-
-
 def _specs(items) -> set[str]:
     return {f"{i['id']}.{i['property']}" for i in items}
 
 
-@pytest.mark.parametrize(
-    "builder, ids, callbacks",
-    [(build_length_app, LENGTH_IDS, LENGTH_CALLBACKS), (build_area_app, AREA_IDS, AREA_CALLBACKS)],
-    ids=["length", "area"],
-)
-def test_refactor_keeps_every_component_id_and_callback(tmp_path, builder, ids, callbacks):
+@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
+def test_refactor_keeps_every_component_id_and_callback(tmp_path, builder):
     dash = builder(tmp_path).app
-    assert ids <= component_ids(dash.layout)
-    for output, (inputs, state) in callbacks.items():
+    assert LENGTH_IDS <= component_ids(dash.layout)
+    for output, (inputs, state) in LENGTH_CALLBACKS.items():
         assert output in dash.callback_map, f"callback writing {output} disappeared"
         spec = dash.callback_map[output]
         assert inputs <= _specs(spec["inputs"]), output
@@ -186,28 +169,17 @@ def test_the_strip_changes_in_the_browser_not_after_a_server_round_trip(tmp_path
     assert clientside_function(builder(tmp_path).app, output)["clientside_function"]
 
 
+@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
 @pytest.mark.parametrize("was_open", [True, False])
 @pytest.mark.parametrize(
     "view, expected",
     [("time", True), ("lines", True), ("faceted", True), ("stacked", False)],
 )
 def test_switching_view_opens_the_strip_only_when_the_view_has_controls(
-    length_app, view, expected, was_open
+    tmp_path, builder, view, expected, was_open
 ):
     out, _ = call_clientside(
-        length_app.app,
-        "viz-controls-collapse.is_open",
-        {"view-selector.value": view, "viz-controls-collapse.is_open": was_open},
-        changed=["view-selector.value"],
-    )
-    assert out["viz-controls-collapse"]["is_open"] is expected
-
-
-@pytest.mark.parametrize("was_open", [True, False])
-@pytest.mark.parametrize("view, expected", [("profile", True), ("time", False), ("stacked", False)])
-def test_area_profile_view_opens_the_strip(area_app, view, expected, was_open):
-    out, _ = call_clientside(
-        area_app.app,
+        builder(tmp_path).app,
         "viz-controls-collapse.is_open",
         {"view-selector.value": view, "viz-controls-collapse.is_open": was_open},
         changed=["view-selector.value"],
@@ -241,18 +213,12 @@ def test_caret_reflects_the_strip_state(length_app, is_open, caret):
 # ---- W19: a view without settings shows no strip at all -------------------------
 
 
-@pytest.mark.parametrize(
-    "builder, views",
-    [
-        (build_length_app, {"stacked": False, "time": True, "lines": True, "faceted": True}),
-        (build_area_app, {"stacked": False, "time": False, "profile": True}),
-    ],
-    ids=["length", "area"],
-)
-def test_views_without_settings_hide_the_whole_strip(tmp_path, builder, views):
+@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
+def test_views_without_settings_hide_the_whole_strip(tmp_path, builder):
     # Before, the stacked view showed "▸ Tube & date range ... No options for this
     # view", a disclosure that opened onto an empty strip.
     dash = builder(tmp_path).app
+    views = {"stacked": False, "time": True, "lines": True, "faceted": True}
     for view, shown in views.items():
         out, _ = call_clientside(
             dash, "viz-controls.style", {"view-selector.value": view}, ["view-selector.value"]
@@ -362,20 +328,12 @@ def test_the_refit_does_nothing_before_the_first_chart(length_app):
         ),
     ],
 )  # fmt: skip
-def test_summary_describes_the_active_selection(length_app, values, expected):
+@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
+def test_summary_describes_the_active_selection(tmp_path, builder, values, expected):
     changed = [k for k in values]
-    _, out = call_callback(length_app.app, "viz-controls-summary.children", values, changed)
+    dash = builder(tmp_path).app
+    _, out = call_callback(dash, "viz-controls-summary.children", values, changed)
     assert out["viz-controls-summary"]["children"] == expected
-
-
-def test_area_summary_names_the_profile_tube(area_app):
-    _, out = call_callback(
-        area_app.app,
-        "viz-controls-summary.children",
-        {"view-selector.value": "profile", "tube-selector.value": 3},
-        changed=["tube-selector.value"],
-    )
-    assert out["viz-controls-summary"]["children"] == "Tube 3"
 
 
 def _select_plotted_tube(dash, view, current, options=None):
@@ -401,20 +359,12 @@ def test_the_per_tube_selection_runs_in_the_browser(tmp_path, builder):
     assert clientside_function(builder(tmp_path).app, "tube-selector.value")["clientside_function"]
 
 
-@pytest.mark.parametrize(
-    "builder, view, current, expected",
-    [
-        (build_length_app, "lines", None, 1),
-        (build_length_app, "lines", 99, 1),
-        (build_area_app, "profile", None, 1),
-    ],
-)
-def test_entering_a_per_tube_view_selects_the_plotted_tube(
-    tmp_path, builder, view, current, expected
-):
+@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
+@pytest.mark.parametrize("current", [None, 99])
+def test_entering_a_per_tube_view_selects_the_plotted_tube(tmp_path, builder, current):
     """The chart shows the first tube; the dropdown must say so (it showed its
     placeholder while the chart already plotted Tube 1)."""
-    assert _select_plotted_tube(builder(tmp_path).app, view, current) == expected
+    assert _select_plotted_tube(builder(tmp_path).app, "lines", current) == 1
 
 
 def test_a_valid_tube_choice_is_kept_when_returning_to_lines(length_app):
@@ -469,8 +419,7 @@ def test_a_view_that_cannot_be_drawn_shows_why_in_either_dashboard(tmp_path, bui
     assert out["click-data"]["children"] == "An error occurred while rendering this view."
     assert out["tube-selector"] == {"style": {"display": "none"}}  # its options are kept
     assert out["main-graph"]["style"] == {"height": "100%", "width": "100%", "overflow": "hidden"}
-    if builder is build_length_app:
-        assert out["image-container"]["style"] == {"display": "none"}
+    assert out["image-container"]["style"] == {"display": "none"}
 
 
 @pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
@@ -580,36 +529,31 @@ def _raw_response(dash, values, changed) -> bytes:
 
 
 SHOWN_AGAIN = [
-    ("length", {"view-selector.value": "time", "selected-tubes-store.data": [1, 2, 3],
-                "growth-viz-options.value": ["show_field_avg", "show_field_var"]}),
-    ("length", {"view-selector.value": "faceted", "faceted-tubes-store.data": [1, 2],
-                "faceted-dates-store.data": []}),
-    ("length", {"view-selector.value": "lines", "tube-selector.value": 1}),
-    ("length", {"view-selector.value": "stacked"}),
-    ("area", {"view-selector.value": "time"}),
-    ("area", {"view-selector.value": "profile", "tube-selector.value": 1}),
-    ("area", {"view-selector.value": "stacked"}),
+    {"view-selector.value": "time", "selected-tubes-store.data": [1, 2, 3],
+     "growth-viz-options.value": ["show_field_avg", "show_field_var"]},
+    {"view-selector.value": "faceted", "faceted-tubes-store.data": [1, 2],
+     "faceted-dates-store.data": []},
+    {"view-selector.value": "lines", "tube-selector.value": 1},
+    {"view-selector.value": "stacked"},
 ]  # fmt: skip
 
 
 @pytest.mark.parametrize(
-    "dashboard, values",
-    SHOWN_AGAIN,
-    ids=[f"{d}-{v['view-selector.value']}" for d, v in SHOWN_AGAIN],
+    "values", SHOWN_AGAIN, ids=[values["view-selector.value"] for values in SHOWN_AGAIN]
 )
-def test_a_view_shown_again_sends_the_same_figure(tmp_path, monkeypatch, dashboard, values):
+@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
+def test_a_view_shown_again_sends_the_same_figure(tmp_path, monkeypatch, builder, values):
     # The second request is a FigureMemo hit served from the kept browser JSON: it must
     # send the bytes of the first, and both what Dash makes of the figure itself.
-    from app.visualization import dash_app_area, dash_length_callbacks
+    # Both dashboards answer through the one metric callback module.
+    from app.visualization import dash_metric_callbacks
 
-    builder = build_length_app if dashboard == "length" else build_area_app
     built = builder(tmp_path)
     view = ["view-selector.value"]
 
     first = _raw_response(built.app, values, view)
     again = _raw_response(built.app, values, view)
-    for module in (dash_length_callbacks, dash_app_area):
-        monkeypatch.setattr(module, "browser_figure", lambda figure: figure)
+    monkeypatch.setattr(dash_metric_callbacks, "browser_figure", lambda figure: figure)
     (tmp_path / "plain").mkdir()
     plain = _raw_response(builder(tmp_path / "plain").app, values, view)
 

@@ -1,6 +1,6 @@
-"""Length dashboard view model and layout builders, called without a Dash server (CQ-07).
+"""Metric dashboard view model and layout builders, called without a Dash server (CQ-07).
 
-``dash_length_views`` turns the callback Inputs into outputs and ``dash_length_layout``
+``dash_metric_views`` turns the callback Inputs into outputs and ``dash_metric_layout``
 builds the page; both are plain functions since the split of ``dash_app.py``. The
 callbacks call them directly, so a callback makes no extra call through ``DashApp``.
 """
@@ -16,8 +16,8 @@ import pytest
 from dash import no_update
 from dash.exceptions import PreventUpdate
 
-from app.visualization import dash_length_layout as layout
-from app.visualization import dash_length_views as views
+from app.visualization import dash_metric_layout as layout
+from app.visualization import dash_metric_views as views
 from app.visualization import theme
 from app.visualization.dash_shell import NO_OPTIONS_SUMMARY
 from app.visualization.faceted_profile import MAX_TUBES
@@ -37,6 +37,7 @@ def _dashboard(tubes=(1, 2, 3)):
 
     return SimpleNamespace(
         data_cache=SimpleNamespace(tubes=tuple(tubes)),
+        data_processor=SimpleNamespace(metric_label="Length"),
         show_growth_over_time=builder("time"),
         show_growth_lines=builder("lines"),
         create_stacked_bar_chart=builder("stacked"),
@@ -269,38 +270,19 @@ def test_page_holds_the_chart_row_and_the_stores():
     } <= component_ids(page)  # fmt: skip
 
 
-# ---- DashApp keeps its names; the callbacks do not go through them -------------------
+# ---- the callbacks call the modules directly ----------------------------------------
 
 
-def test_dash_app_methods_return_what_the_modules_return(tmp_path):
+def test_every_length_callback_runs_without_dash_app_delegators(tmp_path):
+    """The callbacks call the view model and layout modules directly: DashApp has no
+    delegators to them any more (S15-07 tier 2), and every callback still answers."""
     dashboard = build_length_app(tmp_path)
-    tubes = dashboard.data_cache.tubes
-    assert dashboard._lines_tube(2) == views.lines_tube(tubes, 2)
-    assert dashboard._controls_summary("lines", 2, None, None, None) == "Tube 2"
-    assert type(dashboard)._faceted_info is layout.faceted_info
-    assert type(dashboard)._hover_date is views.hover_date
-    assert dashboard._thumbnail(1, 11, "2024.07.18").children[0].src == (
-        dashboard.thumbnail_server.url(1, 11, "2024.07.18")
-    )
-    assert dashboard._export_table("lines", 99, None, None, None, None).filters == {
-        "tube": "1",
-        "dates": "all",
-    }
-
-
-def test_callbacks_call_the_view_model_directly(tmp_path, monkeypatch):
-    """A callback makes no extra call through the DashApp delegators (the latency contract)."""
-    dashboard = build_length_app(tmp_path)
-
-    def delegator(*_args, **_kwargs):
-        raise AssertionError("a callback went through a DashApp delegator")
-
     for name in (
         "_lines_tube", "_controls_summary", "_render_view", "_faceted_outputs",
         "_faceted_styles", "_legend_patch", "_export_table", "_hover_date", "_faceted_info",
         "_availability_view", "_thumbnail",
     ):  # fmt: skip
-        monkeypatch.setattr(type(dashboard), name, delegator)
+        assert not hasattr(dashboard, name), name
     dash = dashboard.app
 
     for view, extra in (("stacked", {}), ("time", {"selected-tubes-store.data": [1]}),

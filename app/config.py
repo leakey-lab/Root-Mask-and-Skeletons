@@ -227,7 +227,7 @@ GT_BACKGROUND_ID = 0
 GT_IGNORE_ID = 255
 GT_UNKNOWN_COLOR = "#808080"
 DEFAULT_GT_CLASSES = (
-    {"id": 1, "key": "root", "name": "Root", "color": "#5fd6a0", "retired": False},
+    {"id": 1, "key": "root", "name": "Root", "color": "#56b4e9", "retired": False},
     {"id": 2, "key": "nodule", "name": "Nodule", "color": "#ff7eb6", "retired": False},
     {"id": 3, "key": "root_tip", "name": "Root tip", "color": "#ffd166", "retired": False},
     {"id": 255, "key": "ignore", "name": "Ignore", "color": "#8a8f98", "retired": False},

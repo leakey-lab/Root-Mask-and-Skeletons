@@ -2,18 +2,21 @@
 
 :class:`ClassesDocument` is the class labels of one image (``gt/<stem>.png``) and the
 registry ``gt/classes.json``, through :mod:`app.gt` only (never ``mask/`` or ``skeletons/``):
-the id plane with its patch history, the "checked" ticks, the pixels per id and all three as
-last saved; the former Trace GT editor's storage half without Qt (colours: ``classes_paint``; the
-files read: ``classes_files``).
+the id plane with its patch history, the pixels per id and both as last saved, and the
+active class; the former Trace GT editor's storage half without Qt (colours: ``classes_paint``;
+the files read: ``classes_files``).
 
-The rules (the GT goldens pin them): reviewed (what Save writes) = the hand ticks + the
-classes with pixels, whose boxes are locked; a save makes the reviewed set the ticks. Dirty
-= the ticks or a class count differ from the saved ones, else a pixel does, or the open
-remapped ids (until saved or discarded; a lossy remap asks until saved). Save always writes
+The rules (the GT goldens pin them): there is no "checked" state (owner decision 2026-11-01:
+the class panel's tick is the active class; Save writes no ``reviewed`` list, and the list
+of a file written before is ignored). Dirty = a class count differs from the saved one, else
+a pixel does, or the open remapped ids (until saved or discarded; a lossy remap asks until
+saved). Save always writes
 the file, ``gt/classes.json`` first when missing (its failure keeps the file). An invalid
 registry makes it read-only (its status says so; the open sends no notice: the layer's first
 refused edit does, once per image); a file that cannot be read or has another size opens empty, is
-not shown and is kept unless a save replaces it. The owner changes the plane only through
+not shown and is kept unless a save replaces it. The page's Mark empty saves an empty file
+("checked, none of the classes"), offered only while :meth:`empty_save_refusal` is ""
+(2026-11-02). The owner changes the plane only through
 ``history``, then calls ``count_patch`` and ``touch``. The revision, the baseline, the save
 error and Discard are :class:`app.editing.planes.PlaneDocument`'s.
 """
@@ -44,6 +47,7 @@ __all__ = ["DEFAULT_BRUSH_SIZE", "ClassesDocument", "ClassesRead", "ClassesSaveR
 
 DEFAULT_BRUSH_SIZE = 8  # a class's brush until it is sized (the raster layers' default)
 REGISTRY_LABEL = f"{GT_DIRNAME}/{GT_CLASSES_FILENAME}"
+EMPTY_CLOSED = "Open an image to mark it empty"  # why no empty save: nothing open
 _KEPT = "they are not shown and are kept unless you save over them"
 _NOT_SHOWN = {  # ClassesRead.error -> the open notice and the status tooltip
     "size": f"Saved class labels do not match the image size: {_KEPT}",
@@ -84,9 +88,7 @@ class ClassesDocument(PlaneDocument):
         self._size = (0, 0)
         self._project_dir = self._registry_path = ""
         self._brush_sizes: dict[str, int] = {}
-        self._ticked: set[str] = set()
         self._counts = np.zeros(N_IDS, np.int64)
-        self._saved_ticked: frozenset[str] = frozenset()
         self._saved_counts = self._counts.copy()
         self._remapped = False  # the open remapped the file's ids: they differ on disk
         self._opened_unsaved = False  # that remap is unsaved (until saved or discarded)
@@ -96,7 +98,7 @@ class ClassesDocument(PlaneDocument):
         """True while a save would write something new (see the module docstring)."""
         if not self.is_open():
             return False
-        if self._opened_unsaved or self._ticked != self._saved_ticked:
+        if self._opened_unsaved:
             return True
         if not np.array_equal(self._counts, self._saved_counts):
             return True  # other ids: no pixel compare needed
@@ -109,6 +111,22 @@ class ClassesDocument(PlaneDocument):
     def lossy_remap(self) -> bool:
         """True from an open that sent unknown classes to Ignore until a save writes it."""
         return bool(self.warnings)
+
+    def empty_save_refusal(self) -> str:
+        """Why a save now would not write an empty file where there is none ("" when it would:
+        the registry is valid, no file is saved or kept for the image and nothing is unsaved,
+        so the plane is all background). The page's Mark empty asks it."""
+        if not self.is_open():
+            return EMPTY_CLOSED
+        if self.registry_error:
+            return f"{REGISTRY_LABEL} is invalid: fix the file, then reopen the image"
+        if self._not_loaded:
+            return "Saved class labels could not be shown: an empty save would replace them"
+        if self.has_saved_file:
+            return "This image already has class labels"
+        if self.is_dirty() or self._counts[GT_BACKGROUND_ID] != self.history.plane.size:
+            return "Save or discard your painted class labels first"
+        return ""
 
     def status(self) -> LayerStatus:
         """Read-only > not saved (to the next edit) > unsaved > not shown > GT > none."""
@@ -128,9 +146,7 @@ class ClassesDocument(PlaneDocument):
             return LayerStatus("error", "Class labels not shown", _NOT_SHOWN[self._not_loaded])
         if not self.has_saved_file:
             return LayerStatus("none", "No class labels")
-        labelled = {c.key for c in self.registry.labelled()}
-        label = f"GT · {len(labelled & self.reviewed())}/{len(labelled)} checked"
-        return LayerStatus("clean", label, project_label(self.gt_path, self._root))
+        return LayerStatus("clean", "GT", project_label(self.gt_path, self._root))
 
     # ------------------------------------------------------------------ classes
     def lut(self) -> np.ndarray:
@@ -182,26 +198,6 @@ class ClassesDocument(PlaneDocument):
         counts = self._counts
         return {c.key for c in self.registry.classes if not c.is_ignore and counts[c.id] > 0}
 
-    def ticked(self) -> frozenset[str]:
-        """The classes ticked "checked" by hand (or by a save)."""
-        return frozenset(self._ticked)
-
-    def reviewed(self) -> frozenset[str]:
-        """What Save writes as checked: the ticks and the classes with pixels."""
-        return frozenset(self._ticked | self.present_keys())
-
-    def set_ticked(self, key: str, on: bool) -> bool:
-        """Tick ``key`` by hand; False (no change): it has pixels, Ignore, unknown, locked."""
-        known = {c.key for c in self.registry.classes if not c.is_ignore}
-        if not self.is_open() or self.registry_error or key not in known:
-            return False
-        if key in self.present_keys():
-            return False
-        if on != (key in self._ticked):
-            (self._ticked.add if on else self._ticked.discard)(key)
-            self.touch()
-        return True
-
     def apply_registry(self, registry: Registry) -> None:
         """The class editor saved ``registry``: new colours, same ids (not read-only)."""
         if not self.registry_error:
@@ -226,8 +222,7 @@ class ClassesDocument(PlaneDocument):
             return False
         tracing = read.tracing
         plane = np.zeros_like(baseline) if tracing is None else tracing.ids
-        ticks = frozenset() if tracing is None else tracing.reviewed
-        return ticks == self._saved_ticked and planes_equal(plane, baseline)
+        return planes_equal(plane, baseline)
 
     def read_back(self, stamps: tuple) -> ClassesRead | None:
         """The labels as :meth:`read` would read them (the plane not copied), with the
@@ -236,7 +231,7 @@ class ClassesDocument(PlaneDocument):
             return None
         if self._remapped or (not self.has_saved_file and stamps and stamps[0][1:] != (None,)):
             return None  # the file holds other ids, or one appeared: read it again
-        tracing = Tracing(self.history.plane, self._saved_ticked) if self.has_saved_file else None
+        tracing = Tracing(self.history.plane) if self.has_saved_file else None
         common = (self.image_path, self._size, tuple(stamps), self.registry, "")
         return ClassesRead(*common, tracing, (), False, "")
 
@@ -270,7 +265,6 @@ class ClassesDocument(PlaneDocument):
         self.has_saved_file, self._not_loaded = tracing is not None, read.error
         self._remapped = read.changed and not read.registry_error  # read-only: nothing to save
         self.warnings = read.warnings if self._remapped else ()
-        self._ticked = set() if tracing is None else set(tracing.reviewed)
         plane = np.zeros((height, width), np.uint8) if tracing is None else tracing.ids
         self.history.reset(np.ascontiguousarray(plane, dtype=np.uint8))
         self._counts = histogram(self.history.plane)
@@ -284,7 +278,7 @@ class ClassesDocument(PlaneDocument):
         """Forget the document: no plane, no history, no file (the registry stays)."""
         self.image_path = self.gt_path = self._registry_path = self._root = ""
         self.has_saved_file, self.registry_error, self.warnings = False, "", ()
-        self._not_loaded, self._remapped, self._ticked = "", False, set()
+        self._not_loaded, self._remapped = "", False
         self.history.reset(None)
         self._counts = np.zeros(N_IDS, np.int64)
         self._restart()
@@ -298,15 +292,14 @@ class ClassesDocument(PlaneDocument):
         if self.registry_error:
             return ClassesSaveResult(False, None, self.registry_error)
         self._counts = histogram(plane)  # a fresh count: the classes with pixels
-        reviewed = self.reviewed()
         try:
             if not os.path.exists(self._registry_path):  # first: its failure keeps the file
                 gt.save_registry(self._project_dir, self.registry)
-            gt.write_tracing(self.gt_path, Tracing(plane, reviewed), self.registry)
+            gt.write_tracing(self.gt_path, Tracing(plane), self.registry)
         except (OSError, gt.GtFileError) as exc:
             logger.warning("Could not save the class labels to %s: %s", self.gt_path, exc)
             return ClassesSaveResult(False, self.gt_path, self._save_failed(exc))
-        self._ticked, self.has_saved_file, self.warnings = set(reviewed), True, ()
+        self.has_saved_file, self.warnings = True, ()
         self._not_loaded, self._remapped, self._opened_unsaved = "", False, False
         self._save_error = ""
         self._remember()
@@ -330,8 +323,8 @@ class ClassesDocument(PlaneDocument):
             self.active_key = _default_key(registry)
 
     def _reverted(self) -> None:
-        """Discard: the ticks and the counts go back to the saved ones too."""
-        self._ticked, self._counts = set(self._saved_ticked), self._saved_counts.copy()
+        """Discard: the counts go back to the saved ones too."""
+        self._counts = self._saved_counts.copy()
 
     def _restart(self) -> None:
         """A new plane was adopted (open, revert, close): the remap is no longer unsaved."""
@@ -339,6 +332,6 @@ class ClassesDocument(PlaneDocument):
         super()._restart()
 
     def _remember(self) -> None:
-        """The plane, the ticks and the counts now are the saved state (clean, no compare)."""
+        """The plane and the counts now are the saved state (clean, no compare)."""
         super()._remember()
-        self._saved_ticked, self._saved_counts = frozenset(self._ticked), self._counts.copy()
+        self._saved_counts = self._counts.copy()

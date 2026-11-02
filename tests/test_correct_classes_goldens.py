@@ -2,11 +2,12 @@
 through the Correct page (WG-T5).
 
 ``tests/data/gt_goldens.json`` holds what ``GtTracingInterface`` did for the scripted sessions
-of ``tests/gt_goldens_support.GT_OPS`` (WG-T0): the class-id plane, the ``reviewed`` ticks
-and the unsaved flag after every op, and the saved ``gt/<stem>.png``. ``LayerDriver`` runs the
+of ``tests/gt_goldens_support.GT_OPS`` (WG-T0): the class-id plane and the unsaved flag
+after every op, and the saved ``gt/<stem>.png`` (re-recorded 2026-11-01: no ``reviewed``
+ticks; a box click picks its class). ``LayerDriver`` runs the
 very same scripts through the new ``ClassesLayer`` with a recording ``FakeHost`` and must
 reproduce every case. ``PageDriver`` runs them through the page as the user does: the class
-panel's requests, the dock's size, the canvas input (the ``ToolRouter``), Clear, Undo, Redo
+panel's requests (a click on a class's box is a real click), the dock's size, the canvas input (the ``ToolRouter``), Clear, Undo, Redo
 and Save of the page. The saved file's raw bytes hash is informational: a Pillow / zlib
 upgrade may change the bytes with identical pixels, so it does not gate.
 
@@ -96,18 +97,15 @@ class LayerDriver:
     def redo(self) -> None:
         self.layer.redo()
 
-    def tick(self, key: str, checked: bool) -> None:
-        self.layer.set_ticked(key, checked)
+    def box(self, key: str) -> None:
+        """A click on the class's box picks the class (the layer has no panel)."""
+        self.layer.set_active_class(key)
 
     def save(self) -> bool:
         return self.layer.save().ok
 
     def ids(self) -> np.ndarray:
         return self.layer.document.history.plane
-
-    def reviewed(self) -> set[str]:
-        """What Save writes: the hand ticks and the classes with pixels."""
-        return set(self.layer.document.reviewed())
 
     def dirty(self) -> bool:
         return self.layer.is_dirty()
@@ -173,17 +171,18 @@ class PageDriver:
     def redo(self) -> None:
         self.editor.redo()
 
-    def tick(self, key: str, checked: bool) -> None:
-        self.editor.class_panel.reviewed_changed.emit(key, checked)  # its "checked" box
+    def box(self, key: str) -> None:
+        """A click on the class's box on the class panel: its class is the active one and
+        its box the only one ticked."""
+        panel = self.editor.class_panel
+        panel._rows[key].checkbox.click()
+        assert panel.ticked_keys() == [key] == [self.layer.active_class()]
 
     def save(self) -> bool:
         return self.editor.save()
 
     def ids(self) -> np.ndarray:
         return self.layer.document.history.plane
-
-    def reviewed(self) -> set[str]:
-        return set(self.layer.document.reviewed())
 
     def dirty(self) -> bool:
         return self.layer.is_dirty()

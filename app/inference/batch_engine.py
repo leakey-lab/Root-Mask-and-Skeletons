@@ -19,6 +19,10 @@ One loop for both models, so their failure, memory and cancel policies cannot dr
 * R7 -- a save that finds the disk full ends the run with that error at the next
   batch boundary (every later save would fail too); other save errors stay
   per-image failures.
+* C6-01 -- so does a save into an output folder that takes no new files (permission
+  denied, a read-only drive, a folder that is gone): the run ends with one
+  ``FolderNotWritableError`` that names the folder, instead of running the model over
+  every image (about 1-1.5 h at 46k) to list each one as failed.
 * R1 (O4) -- ``run_batches(..., fixed=True)``: every forward gets exactly
   ``batch_size`` rows, so an image's output no longer depends on how many images
   share its batch. A short last batch is padded with zero rows whose outputs are
@@ -55,6 +59,7 @@ from app.inference.batch_pipeline import (
     default_io_threads,
     progress_percent,
 )
+from app.io_utils import folder_not_writable
 
 logger = logging.getLogger(__name__)
 
@@ -450,7 +455,9 @@ def run_batches(
     written: list[str] = []
     written_lock = threading.Lock()
     writer: AsyncWriter | None = None
-    disk_full: list[BaseException] = []  # (R7) the first save that found no space left
+    # (R7, C6-01) The error of the first save after which every save fails: no space left,
+    # or an output folder that takes no new files.
+    stop_error: list[BaseException] = []
 
     def save_one(arr: Any, path: str) -> None:
         try:
@@ -458,16 +465,18 @@ def run_batches(
             with written_lock:
                 written.append(os.path.basename(path))
         except OSError as exc:
-            if is_disk_full(exc) and not disk_full:
-                disk_full.append(exc)
+            if not stop_error:
+                stop = exc if is_disk_full(exc) else folder_not_writable(exc)
+                if stop is not None:
+                    stop_error.append(stop)
             raise  # still this input's recorded failure (AsyncWriter.errors)
         finally:
             ticks.add()  # progress counts outputs once they are on disk (or failed)
 
-    def stop_if_disk_full() -> None:
-        if disk_full:
-            logger.error("The disk is full; stopping the run: %s", disk_full[0])
-            raise disk_full[0]
+    def stop_if_saves_cannot_go_on() -> None:
+        if stop_error:
+            logger.error("Saving cannot go on; stopping the run: %s", stop_error[0])
+            raise stop_error[0]
 
     current_paths: list[str] = []  # the batch whose forwards are running
 
@@ -518,7 +527,7 @@ def run_batches(
                 for batch_paths, (x, bad) in zip(
                     batches, prefetched, strict=False
                 ):  # cancel ends early
-                    stop_if_disk_full()  # (R7) at a batch boundary, as Cancel
+                    stop_if_saves_cannot_go_on()  # (R7, C6-01) at a batch boundary, as Cancel
                     for i, reason in bad.items():
                         record_failure(batch_paths[i], reason)
                     if x is None:
@@ -541,7 +550,7 @@ def run_batches(
                                 record_failure(batch_paths[i], _describe(result))
                                 continue
                             writer.submit(batch_paths[i], save_one, result[offset], batch_paths[i])
-            stop_if_disk_full()  # (R7) also when the last batch's saves found it full
+            stop_if_saves_cannot_go_on()  # (R7) also when it was the last batch's saves
         finally:
             # (R7) Leaving the ``with`` drained the writer (``AsyncWriter.close`` waits
             # for every queued save), so this is what is on disk even if a step raised.

@@ -93,7 +93,6 @@ SIGNATURES = {
     "close_root_area_visualization": "()",
     "close_root_length_visualization": "()",
     "export_gt_dataset": "() -> None",
-    "find_test_latest_dir": "(start_path, max_depth=3)",
     "find_tree_item_by_image_name": "(image_name)",
     "generate_all": "()",
     "highlight_saved_mask": "(image_path)",
@@ -103,9 +102,10 @@ SIGNATURES = {
     "mask_exists": "(image_name)",
     "natural_sort_key": "(text)",
     "navigate_image": "(delta: int) -> None",
+    # 2026-10-31 capsule toasts: the kind's own lifetime by default, and one action button.
     "notify": (
-        "(message: str, kind: str = 'success', timeout: int = 3200, *, "
-        "key: str | None = None) -> None"
+        "(message: str, kind: str = 'success', timeout: int | None = None, *, "
+        "key: str | None = None, action: app.feedback.NoticeAction | None = None) -> None"
     ),
     "on_area_visualization_server_closed": "()",
     "on_b_key_status_changed": "(is_pressed)",
