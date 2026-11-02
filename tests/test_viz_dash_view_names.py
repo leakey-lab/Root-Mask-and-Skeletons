@@ -11,7 +11,7 @@ from app.data_processing.data_processor_area import DataProcessorArea
 from app.visualization import theme
 from app.visualization.dash_app_area import AREA_SHELL, DashAppArea
 from app.visualization.dash_data_cache import DataCache
-from app.visualization.dash_length_layout import LENGTH_SHELL
+from app.visualization.dash_metric_layout import LENGTH_SHELL
 from app.visualization.dash_visualizations import DashVisualizations
 from tests.test_viz_data_cache import ROWS, write_metric_csv
 

@@ -13,7 +13,7 @@ import pytest
 from dash import Dash
 
 from app.visualization import dash_export
-from app.visualization.dash_length_layout import LENGTH_SHELL
+from app.visualization.dash_metric_layout import LENGTH_SHELL
 from app.visualization.dash_shell import DashboardShell
 from tests.viz_dash_helpers import build_area_app, build_length_app, call_callback
 

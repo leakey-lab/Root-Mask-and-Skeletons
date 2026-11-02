@@ -184,7 +184,7 @@ def _find(component, component_id):
 
 def test_dashboard_page_shows_the_exclusions_notice_only_when_rows_were_left_out():
     from app.data_processing.data_processor import RowExclusions
-    from app.visualization.dash_app import LENGTH_SHELL
+    from app.visualization.dash_metric_layout import LENGTH_SHELL
     from app.visualization.dash_shell import DashboardShell, exclusions_note
 
     class Processor:

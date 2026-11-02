@@ -1,7 +1,10 @@
 """Length dashboard: the served page and the callback wiring are frozen (CQ-07 split).
 
 ``dash_app.py`` was split into ``dash_length_layout`` (page), ``dash_length_views``
-(view model) and ``dash_length_callbacks`` (wiring) with no behaviour change. These
+(view model) and ``dash_length_callbacks`` (wiring) with no behaviour change; they are
+now ``dash_metric_layout``, ``dash_metric_views`` and ``dash_metric_callbacks``, and
+``DashApp`` is the ``dash_metric_app.MetricDashApp`` of root length (the area dashboard
+is the same class), again with no change to what the length app serves. These
 goldens hold what the browser receives: the layout, every callback's Outputs / Inputs /
 States in registration order (the order Dash fires them on page load) and the
 clientside JavaScript. The values were taken from the unsplit module and are unchanged

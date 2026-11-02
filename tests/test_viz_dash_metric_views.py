@@ -1,6 +1,6 @@
-"""Length dashboard view model and layout builders, called without a Dash server (CQ-07).
+"""Metric dashboard view model and layout builders, called without a Dash server (CQ-07).
 
-``dash_length_views`` turns the callback Inputs into outputs and ``dash_length_layout``
+``dash_metric_views`` turns the callback Inputs into outputs and ``dash_metric_layout``
 builds the page; both are plain functions since the split of ``dash_app.py``. The
 callbacks call them directly, so a callback makes no extra call through ``DashApp``.
 """
@@ -16,8 +16,8 @@ import pytest
 from dash import no_update
 from dash.exceptions import PreventUpdate
 
-from app.visualization import dash_length_layout as layout
-from app.visualization import dash_length_views as views
+from app.visualization import dash_metric_layout as layout
+from app.visualization import dash_metric_views as views
 from app.visualization import theme
 from app.visualization.dash_shell import NO_OPTIONS_SUMMARY
 from app.visualization.faceted_profile import MAX_TUBES
@@ -37,6 +37,7 @@ def _dashboard(tubes=(1, 2, 3)):
 
     return SimpleNamespace(
         data_cache=SimpleNamespace(tubes=tuple(tubes)),
+        data_processor=SimpleNamespace(metric_label="Length"),
         show_growth_over_time=builder("time"),
         show_growth_lines=builder("lines"),
         create_stacked_bar_chart=builder("stacked"),

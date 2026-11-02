@@ -154,18 +154,6 @@ def faceted_intervals(profile, value_column: str) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
-def position_means(cache, tube: Any) -> pd.DataFrame:
-    """Mean metric per measured position and date for one tube (the area profile)."""
-    rows = []
-    for date in cache.dates:
-        table = cache.get_interval_data(tube, date, 1)  # one "interval" per position
-        for position in sorted(table):
-            stats = table[position]
-            if stats["count"] > 0:
-                rows.append((int(tube), _day(date), position, stats["avg"]))
-    return pd.DataFrame(rows, columns=["Tube", "Date", "Position", f"Mean {cache.value_column}"])
-
-
 # ---- writing ------------------------------------------------------------------
 
 

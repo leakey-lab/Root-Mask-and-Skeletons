@@ -610,6 +610,7 @@ def test_prewarm_imports_loads_the_dashboard_stack():
         "plotly.graph_objects",
         "pandas",
         "app.visualization.dash_app",
+        "app.visualization.dash_metric_app",
         "app.visualization.dash_app_area",
         "app.data_processing.data_processor",
     ):

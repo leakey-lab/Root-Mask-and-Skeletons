@@ -600,7 +600,7 @@ SHOWN_AGAIN = [
 def test_a_view_shown_again_sends_the_same_figure(tmp_path, monkeypatch, dashboard, values):
     # The second request is a FigureMemo hit served from the kept browser JSON: it must
     # send the bytes of the first, and both what Dash makes of the figure itself.
-    from app.visualization import dash_app_area, dash_length_callbacks
+    from app.visualization import dash_app_area, dash_metric_callbacks
 
     builder = build_length_app if dashboard == "length" else build_area_app
     built = builder(tmp_path)
@@ -608,7 +608,7 @@ def test_a_view_shown_again_sends_the_same_figure(tmp_path, monkeypatch, dashboa
 
     first = _raw_response(built.app, values, view)
     again = _raw_response(built.app, values, view)
-    for module in (dash_length_callbacks, dash_app_area):
+    for module in (dash_metric_callbacks, dash_app_area):
         monkeypatch.setattr(module, "browser_figure", lambda figure: figure)
     (tmp_path / "plain").mkdir()
     plain = _raw_response(builder(tmp_path / "plain").app, values, view)

@@ -1,12 +1,14 @@
 """
-Root-length dashboard: the page layout (control cards, chart row, stores).
+Metric dashboards (length and area): the page layout (control cards, chart row, stores).
 
 Builders only: each takes the data it shows (tube and date dropdown options, the
 availability table, the thumbnail server) and returns Dash components, so the
 page can be built and checked without a running dashboard. The chrome around it
 (header, view selector, control strip, chart card) comes from :mod:`.dash_shell`.
+Both dashboards build the same page; only their shell (:func:`metric_shell`: title,
+plot file name) names the metric.
 
-Component ids are a contract with the callbacks (:mod:`.dash_length_callbacks`),
+Component ids are a contract with the callbacks (:mod:`.dash_metric_callbacks`),
 the renderer and the embedding window: keep them stable.
 """
 
@@ -18,18 +20,29 @@ from dash import dcc, html
 from .dash_shell import DashboardShell, ShellSpec, ViewOption, count_label, legend_store
 from .faceted_profile import MAX_TUBES
 
-LENGTH_SHELL = ShellSpec(
-    title="Root Length — trial overview",
-    controls_label="Tube & date range",
-    views=(
-        ViewOption("Totals by Tube", "stacked"),
-        ViewOption("Growth Over Time", "time", has_controls=True),
-        ViewOption("Depth Profile", "lines", has_controls=True),
-        ViewOption("Depth Profile Grid", "faceted", has_controls=True),
-    ),
-    plot_filename="root_length_plot",
-    tube_view="lines",
-)
+#: The label of the control strip of every view with settings.
+CONTROLS_LABEL = "Tube & date range"
+
+
+def metric_shell(metric_label: str, plot_filename: str) -> ShellSpec:
+    """The shell of the dashboard of one metric ("Length", "Area"): the same views and
+    controls for every metric; the title and the plot's file name name the metric."""
+    return ShellSpec(
+        title=f"Root {metric_label} — trial overview",
+        controls_label=CONTROLS_LABEL,
+        views=(
+            ViewOption("Totals by Tube", "stacked"),
+            ViewOption("Growth Over Time", "time", has_controls=True),
+            ViewOption("Depth Profile", "lines", has_controls=True),
+            ViewOption("Depth Profile Grid", "faceted", has_controls=True),
+        ),
+        plot_filename=plot_filename,
+        tube_view="lines",
+    )
+
+
+LENGTH_SHELL = metric_shell("Length", "root_length_plot")
+AREA_SHELL = metric_shell("Area", "root_area_plot")
 
 SHOWN = {"display": "block"}
 HIDDEN = {"display": "none"}
@@ -51,7 +64,7 @@ def page(
     date_options: list,
     notice: str | None = None,
 ) -> html.Div:
-    """The page: shell chrome around the length controls and chart."""
+    """The page: shell chrome around the metric controls and chart."""
     return shell.page(
         controls=controls(tube_options, date_options),
         # Lines view: chart and hover-image panel side by side; other views
@@ -76,7 +89,7 @@ def page(
 
 
 def controls(tube_options: list, date_options: list) -> list:
-    """The length dashboard's controls inside the collapsible strip."""
+    """The metric dashboard's controls inside the collapsible strip."""
     # Dropdown options are static: Dash 4's Dropdown drops a selected value
     # whenever its options change without it, so they are never blanked.
     return [

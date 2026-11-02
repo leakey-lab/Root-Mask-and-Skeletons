@@ -48,7 +48,8 @@ LOADING_DELAY_MS = 250
 
 #: The Growth Over Time legend of either dashboard: the store holds None (automatic: the
 #: dashboard decides from the number of tubes) or the user's choice, which the toggle
-#: button flips and which is kept across views. The ids are the length dashboard's.
+#: button flips and which is kept across views. The ids are those of the page both
+#: dashboards share (:mod:`.dash_metric_layout`).
 LEGEND_STORE_ID = "legend-visible-store"
 LEGEND_TOGGLE_ID = "toggle-legend-btn"
 
@@ -530,33 +531,6 @@ class DashboardShell:
             Input("viz-controls-collapse", "is_open"),
             Input("view-selector", "value"),
         )
-
-    def register_legend_toggle(
-        self,
-        app: Dash,
-        *,
-        automatic: Callable[..., bool],
-        states: Sequence[State] = (),
-    ) -> None:
-        """Wire the legend toggle (:data:`LEGEND_TOGGLE_ID`): each press stores the
-        opposite of what is shown in :data:`LEGEND_STORE_ID` (see :func:`flip_legend`).
-
-        Args:
-            app: the dashboard's Dash app.
-            automatic: ``automatic(*state_values)`` -> whether the legend is shown while
-                nobody chose (e.g. up to 30 tubes).
-            states: the selection States ``automatic`` needs.
-        """
-
-        @app.callback(
-            Output(LEGEND_STORE_ID, "data"),
-            Input(LEGEND_TOGGLE_ID, "n_clicks"),
-            State(LEGEND_STORE_ID, "data"),
-            *states,
-            prevent_initial_call=True,
-        )
-        def toggle_legend(n_clicks, choice, *values):
-            return flip_legend(n_clicks, choice, automatic(*values))
 
     def register_export(
         self,
