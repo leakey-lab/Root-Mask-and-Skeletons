@@ -10,7 +10,7 @@ from ._viz_server import _DashServerThreadBase
 from .viz_window import Builder, DashVizWindow, require_rows
 
 
-def build_area_dashboard(csv_path: str, save_directory: str):
+def build_area_dashboard(csv_path: str, save_directory: str, image_manager):
     """``(DataProcessorArea, DashAppArea)`` for a ``root_areas.csv``; runs on the init worker.
 
     pandas, dash and plotly are imported here: off the GUI thread, and only
@@ -21,7 +21,7 @@ def build_area_dashboard(csv_path: str, save_directory: str):
     from .dash_app_area import DashAppArea
 
     processor = require_rows(DataProcessorArea(csv_path))
-    return processor, DashAppArea(processor, save_directory)
+    return processor, DashAppArea(processor, save_directory, image_manager)
 
 
 class DashServerThreadArea(_DashServerThreadBase):
@@ -39,5 +39,12 @@ class RootAreaVisualization(DashVizWindow):
     default_port = DASH_AREA_PORT
     server_thread_class = DashServerThreadArea
 
+    def __init__(self, csv_path: str, image_manager, parent=None):
+        # Set before the base class starts the build, which reads it.
+        self.image_manager = image_manager
+        super().__init__(csv_path, parent)
+
     def _dashboard_builder(self) -> Builder:
-        return functools.partial(build_area_dashboard, self.csv_path, self.save_directory)
+        return functools.partial(
+            build_area_dashboard, self.csv_path, self.save_directory, self.image_manager
+        )

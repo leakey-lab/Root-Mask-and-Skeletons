@@ -156,7 +156,6 @@ class DashboardSpec:
     noun: str  # for messages
     attr: str  # MainWindow attribute holding the live dashboard (public contract)
     class_name: str  # dashboard class, resolved on this module
-    needs_image_manager: bool  # constructor takes (csv_path, image_manager)
     closed_slot: str  # MainWindow slot connected to the dashboard's server_closed
     button_attr: str  # legacy button whose text follows open / closed
     open_text: str
@@ -170,7 +169,6 @@ LENGTH = DashboardSpec(
     noun="root length",
     attr="root_length_viz",
     class_name="RootLengthVisualization",
-    needs_image_manager=True,
     closed_slot="on_visualization_server_closed",
     button_attr="visualize_root_length_button",
     open_text="📊 Visualize Root Length",
@@ -183,7 +181,6 @@ AREA = DashboardSpec(
     noun="root area",
     attr="root_area_viz",
     class_name="RootAreaVisualization",
-    needs_image_manager=False,
     closed_slot="on_area_visualization_server_closed",
     button_attr="visualize_root_area_button",
     open_text="📈 Visualize Root Area",
@@ -481,10 +478,7 @@ class DashboardController:
             self._gl.acquire(spec.kind)  # before the dashboard creates its browser widget
         try:
             cls = getattr(sys.modules[__name__], spec.class_name)
-            if spec.needs_image_manager:
-                dashboard = cls(csv_path, mw.image_manager)
-            else:
-                dashboard = cls(csv_path)
+            dashboard = cls(csv_path, mw.image_manager)
         except Exception:
             if self.dashboard(spec) is None:
                 self._gl.release(spec.kind)

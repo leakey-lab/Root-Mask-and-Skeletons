@@ -71,6 +71,10 @@ class StubLength(StubDashboard):
 class StubArea(StubDashboard):
     made: list = []
 
+    def __init__(self, csv_path, image_manager):
+        super().__init__(csv_path)
+        self.image_manager = image_manager
+
 
 class FakeImageManager:
     def __init__(self, folder):
@@ -245,6 +249,12 @@ def test_area_dashboard_reads_the_mask_csv(env):
     (dashboard,) = StubArea.made
     expected = env.project / "mask" / "root_areas.csv"
     assert os.path.normcase(dashboard.csv_path) == os.path.normcase(str(expected))
+
+
+def test_area_dashboard_gets_the_image_manager(env):
+    vm.show_root_area_visualization(env.mw)
+
+    assert StubArea.made[0].image_manager is env.mw.image_manager
 
 
 def test_showing_one_dashboard_hides_the_other_without_closing_it(env):
