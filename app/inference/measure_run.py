@@ -41,6 +41,7 @@ from app.config import (
     ROOT_LENGTHS_CSV,
     SOURCE_COLUMN,
 )
+from app.gt.files import image_size
 from app.inference import measure_inputs, measure_sources, metrics, run_record
 from app.inference.batch_pipeline import LogLimiter
 from app.inference.input_split import (
@@ -62,6 +63,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "AREA",
     "LENGTH",
+    "PHOTO_SHAPE_SAMPLE",
     "PREDICTION_ONLY",
     "SPECS",
     "WITHOUT_IMAGE_NAMES_LIMIT",
@@ -78,6 +80,8 @@ __all__ = [
 
 #: File names of each kind of skipped input a run's provenance lists (counts are exact).
 WITHOUT_IMAGE_NAMES_LIMIT = 100
+#: How many photos of the measured images a run checks the shape of (from their headers).
+PHOTO_SHAPE_SAMPLE = 200
 
 
 @dataclass(frozen=True)
@@ -175,6 +179,16 @@ def mixed_sizes(rows: Iterable[Mapping[str, Any]]) -> dict[str, int] | None:
     return None
 
 
+def _evenly_spaced(items: Sequence[str], limit: int) -> list[str]:
+    """At most ``limit`` of ``items``, evenly spaced, the first and the last included."""
+    n = len(items)
+    if n <= limit:
+        return list(items)
+    if limit <= 1:
+        return list(items[:limit])
+    return [items[i * (n - 1) // (limit - 1)] for i in range(limit)]
+
+
 def scan_png_files(folder: str) -> tuple[dict[str, str], list[tuple[str, str]]]:
     """``(stem -> path, shadowed)`` of the ``*.png`` files of ``folder`` (extension in any
     case; one ``os.scandir``; a missing folder has none).
@@ -217,6 +231,8 @@ class MeasureRun:
         photos: image name -> photo, for the size check of GT skeletons and masks. A
             GT-first run (``gt_files`` given) without them measures every GT file as
             ``unreadable``: each image is measured from its prediction and the skip is recorded.
+            Also the photos whose shape :meth:`compute` checks (:attr:`photo_shapes`,
+            ``inputs.photos`` of the provenance); without them nothing is checked.
         sources: name -> ``Source`` of each row when there are no ``gt_files`` (tests; a
             name not in it, or no mapping, is ``prediction``).
         gt_report: the GT report written to the provenance when there are no ``gt_files``.
@@ -265,6 +281,9 @@ class MeasureRun:
         self.without_image = tuple(without_image)
         self.duplicates = tuple(duplicates)
         self.rows: list[dict] | None = None  # set once every image was measured
+        #: The shapes of a sample of the measured images' photos (:meth:`_check_photo_shapes`),
+        #: set with :attr:`rows`; ``None``: nothing checked (no photos, or the check failed).
+        self.photo_shapes: dict[str, Any] | None = None
         #: input key -> (size, mtime_ns, sha256) of each file measured (filled by compute()).
         self.fingerprints: dict[str, Fingerprint] = {}
         self._fingerprints_lock = threading.Lock()
@@ -311,8 +330,52 @@ class MeasureRun:
                 self.sources = {name: source.source for name, source in sources.items()}
             for row in rows:
                 row[SOURCE_COLUMN] = self.sources.get(row["Image"], PREDICTION)
+            self.photo_shapes = self._check_photo_shapes(rows)
             self.rows = rows
         return self.rows
+
+    def _check_photo_shapes(self, rows: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+        """The sizes of a sample of the photos of the images in ``rows``, from their headers
+        (nothing decoded): ``{"n_photos", "n_checked", "n_unreadable", "sizes_px"}``.
+
+        The field of view spans each measured file's whole frame, and a prediction is at
+        the model's size whatever the photo, so only the photos tell whether their frame
+        has the field of view's shape. The sample is :data:`PHOTO_SHAPE_SAMPLE` photos at
+        most, evenly spaced over the sorted stems (the same project gives the same sample);
+        each image is paired with its photo as the GT size check pairs them. ``n_checked``
+        counts the headers read, ``n_unreadable`` the others; ``sizes_px`` is most common
+        first. ``None`` without photos, or when the check fails (logged): it never fails
+        the run and changes no row."""
+        if not self.photos:
+            return None
+        try:
+            photo_of = measure_sources._photo_finder(self.photos)
+            measured: dict[str, str] = {}
+            for row in rows:
+                name = row.get("Image")
+                photo = photo_of(name) if isinstance(name, str) else None
+                if photo is not None:
+                    measured.setdefault(name, photo)
+            sizes: Counter[str] = Counter()
+            unreadable = 0
+            for stem in _evenly_spaced(sorted(measured), PHOTO_SHAPE_SAMPLE):
+                try:
+                    size = image_size(measured[stem])
+                except Exception:  # a broken header is an unreadable photo
+                    size = None
+                if size is None or size[0] <= 0 or size[1] <= 0:
+                    unreadable += 1
+                else:
+                    sizes[f"{size[0]}x{size[1]}"] += 1
+            return {
+                "n_photos": len(measured),
+                "n_checked": sum(sizes.values()),
+                "n_unreadable": unreadable,
+                "sizes_px": dict(sizes.most_common()),
+            }
+        except Exception:  # the check is additive: the rows are measured
+            logger.warning("Could not check the shape of the photos", exc_info=True)
+            return None
 
     def _measure_gt_first(
         self,
@@ -516,6 +579,11 @@ class MeasureRun:
             # The generation run behind the predictions (their folder is the CSV's); None
             # (JSON null) when no Generate run of this app wrote into it.
             inputs["generation"] = run_record.generation_summary(self.output_dir)
+            # The photos' shapes (a sample, read from their headers); None: none checked.
+            photos = self.photo_shapes
+            inputs["photos"] = (
+                None if photos is None else {**photos, "sizes_px": dict(photos["sizes_px"])}
+            )
             outputs: dict[str, Any] = {
                 "csv": os.path.basename(csv_path),
                 "columns": list(self.spec.headers),

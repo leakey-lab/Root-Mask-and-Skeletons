@@ -45,6 +45,7 @@ __all__ = [
     "load_project_calibration",
     "method_note",
     "project_file_path",
+    "reference_frame",
     "same_fov",
 ]
 
@@ -354,11 +355,26 @@ def method_note(
     )
 
 
+def reference_frame(pc: ProjectCalibration) -> tuple[int, int] | None:
+    """The ``(width, height)`` frame ``pc``'s field of view belongs to: the project file's
+    ``reference_size_px`` when it states one; :data:`app.config.CALIBRATION_REFERENCE_SIZE_PX`
+    for the default (also when an invalid project file gave the default); ``None`` for a
+    project file that states none (its author chose the field of view: nothing to check
+    against). The field of view spans each whole image, so only photos of this frame's
+    shape are measured right."""
+    if pc.reference_size_px is not None:
+        return pc.reference_size_px
+    if pc.source == _SOURCE_DEFAULT:
+        return config.CALIBRATION_REFERENCE_SIZE_PX
+    return None
+
+
 def aspect_mismatches(
     sizes_px: Mapping[str, int], reference: tuple[int, int] | None, *, tolerance: float = 0.01
 ) -> int:
-    """How many measured files (``{"WxH": count}``) have a width / height ratio more than
-    ``tolerance`` (1 %) away from ``reference``'s; 0 without a reference."""
+    """How many files (``{"WxH": count}``: the measured files, or the photos checked) have a
+    width / height ratio more than ``tolerance`` (1 %) away from ``reference``'s; 0 without
+    a reference."""
     if reference is None:
         return 0
     wanted = reference[0] / reference[1]

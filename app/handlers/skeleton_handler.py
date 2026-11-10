@@ -26,6 +26,7 @@ from app.calibration import (
     default_calibration,
     fov_label,
     load_project_calibration,
+    reference_frame,
 )
 from app.dialogs import show_transient
 from app.feedback import UiFeedback
@@ -296,26 +297,41 @@ class SkeletonHandler(HandlerDependencies):
         self._notify_non_binary(thread.spec, rows)
 
     def _notify_sizes(self, job: MeasureRun, rows: list[dict]) -> None:
-        """Warn, once, about the sizes of the measured files: one warning for one cause.
+        """Warn about the shapes of the photos and the sizes of the measured files: one
+        warning for one cause.
 
+        The field of view belongs to a frame (:func:`~app.calibration.reference_frame`: the
+        project file's ``reference_size_px``, or 640 x 480 for the default) and spans each
+        whole image, so it fits only images of that frame's shape.
+
+        * Photos of the run's sample (``inputs.photos``) have another width / height ratio
+          than the frame: a prediction is at the model's size whatever the photo, so only
+          the photos show it.
         * The files of one source group have more than one size (M2): the photos differ,
           and one field of view was applied to all of them (sizes in the provenance,
           ``inputs.sizes_px``).
-        * Files have another width / height ratio than the reference size the project file
-          states (O3): the field of view spans each whole image, so it fits only files of the
-          reference's shape.
+        * Measured files have another ratio than the project file's reference (O3), or,
+          when no photo was checked, than the frame. GT files are photo-sized, so this says
+          what the photo warning says: it is left out when that is shown.
 
-        When both apply (an odd-shaped file among others), one warning says both."""
+        When the last two apply (an odd-shaped file among others), one warning says both."""
         fov = fov_label(job.calibration.calibration)
+        reference = reference_frame(job.calibration)
+        photo_warning = self._photo_shape_warning(job, reference, fov)
+        if photo_warning:
+            self._warn(photo_warning)
         sizes = mixed_sizes(rows)
-        reference = job.calibration.reference_size_px
-        n = aspect_mismatches(sizes_px(rows), reference)
+        # Checked photos speak for the frame; without them the measured files are checked
+        # against it (the default's frame too), else only against a project file's reference.
+        sampled = bool(job.photo_shapes and job.photo_shapes["n_checked"])
+        if not sampled:
+            measured_reference = reference
+        else:
+            measured_reference = job.calibration.reference_size_px
+        n = 0 if photo_warning else aspect_mismatches(sizes_px(rows), measured_reference)
         shape = None
-        if n and reference is not None:
-            shape = (
-                f"another shape than the {reference[0]}×{reference[1]} reference in "
-                f"{PROJECT_FILENAME}"
-            )
+        if n and measured_reference is not None:
+            shape = f"another shape than the {self._frame_words(job, measured_reference, fov)}"
         if sizes is None and shape is None:
             return
         if sizes is None:
@@ -335,6 +351,48 @@ class SkeletonHandler(HandlerDependencies):
                 f"{head}, and {n:,} {'has' if n == 1 else 'have'} {shape}: "
                 f"one {fov} field of view was applied to each whole image."
             )
+
+    @staticmethod
+    def _frame_words(job: MeasureRun, reference: tuple[int, int], fov: str) -> str:
+        """The frame the field of view belongs to, after "another shape than the": the
+        project file's reference, else the default's frame."""
+        size = f"{reference[0]}×{reference[1]}"
+        if job.calibration.reference_size_px is not None:
+            return f"{size} reference in {PROJECT_FILENAME}"
+        return f"{size} frame of the default {fov} field of view"
+
+    def _photo_shape_warning(
+        self, job: MeasureRun, reference: tuple[int, int] | None, fov: str
+    ) -> str:
+        """The warning about the photos of the run's sample that do not have the shape of
+        ``reference``; ``""`` when every checked photo fits, nothing was checked, or there
+        is no reference frame."""
+        record = job.photo_shapes
+        if not record or reference is None:
+            return ""
+        checked = record["sizes_px"]
+        n = aspect_mismatches(checked, reference)
+        k = record["n_checked"]
+        if not n or not k:
+            return ""
+        odd = [
+            (size, count)
+            for size, count in checked.items()
+            if aspect_mismatches({size: count}, reference)
+        ]
+        listed = [f"{size.replace('x', '×')} ×{count:,}" for size, count in odd[:_SIZES_LISTED]]
+        if len(odd) > _SIZES_LISTED:
+            listed.append("…")
+        head = (
+            f"{n:,} of {k:,} photos checked {'has' if n == 1 else 'have'} another shape than "
+            f"the {self._frame_words(job, reference, fov)} ({', '.join(listed)})"
+        )
+        if job.calibration.reference_size_px is not None:
+            return f"{head}: the field of view was applied to each whole image."
+        return (
+            f"{head}: it was applied to each whole image. "
+            f"State this camera's field of view in {PROJECT_FILENAME}."
+        )
 
     def _notify_non_binary(self, spec: MetricSpec, rows: list[dict]) -> None:
         """Warn, once, when measured masks have grey levels (M5, O10): the pixels above

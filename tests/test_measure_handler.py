@@ -32,11 +32,13 @@ class _IdleGeneration:
 
 
 def _project(tmp_path, n=4, skeletons=True, masks=True):
+    """``n`` photos of the default field of view's shape (80 x 60, 4:3, so Measure has no
+    photo shape to warn about), each with an 80 x 64 skeleton and mask."""
     for i in range(n):
         img = np.zeros((64, 80), np.uint8)
         cv2.line(img, (0, i), (79, 40 + i), 255, 2)
         name = f"x_T{i + 1}_L2_2024.01.02_01020{i}_001"
-        cv2.imwrite(str(tmp_path / f"{name}.jpg"), img)
+        cv2.imwrite(str(tmp_path / f"{name}.jpg"), np.zeros((60, 80), np.uint8))
         if skeletons:
             (tmp_path / "skeletons").mkdir(exist_ok=True)
             cv2.imwrite(str(tmp_path / "skeletons" / f"{name}_fake.png"), img)
@@ -423,12 +425,14 @@ def test_files_of_another_shape_warn_once(tmp_path, qapp):
     handler.calculate_root_area()
     _wait_idle(handler, qapp)
 
-    # One odd file is one cause: the size and shape warnings are one (review M2).
+    # The odd shape is said once, by the photos (T3); the measured files' two sizes are
+    # another cause and keep their warning, without the shape clause (review M2).
     sizes = [w for w in _warnings(mw) if "another shape" in w or w.startswith(_MIXED)]
     assert sizes == [
-        "The measured files have 2 sizes (80x60 ×2, 96x48 ×1), and 1 has another shape than "
-        "the 640×480 reference in sprouts_project.json: one 18×13.5 mm field of view was "
-        "applied to each whole image."
+        "1 of 3 photos checked has another shape than the 640×480 reference in "
+        "sprouts_project.json (96×48 ×1): the field of view was applied to each whole image.",
+        "The measured files have 2 sizes (80x60 ×2, 96x48 ×1): one 18×13.5 mm field of view "
+        "was applied to each.",
     ]
 
 
@@ -445,9 +449,9 @@ def test_files_all_of_another_shape_warn_once(tmp_path, qapp):
     _wait_idle(handler, qapp)
 
     sizes = [w for w in _warnings(mw) if "another shape" in w or w.startswith(_MIXED)]
-    assert sizes == [
-        "2 measured files have another shape than the 640×480 reference in "
-        "sprouts_project.json: the field of view was applied to each whole image."
+    assert sizes == [  # the photos say it (T3): the measured files' clause is left out
+        "2 of 2 photos checked have another shape than the 640×480 reference in "
+        "sprouts_project.json (96×48 ×2): the field of view was applied to each whole image."
     ]
 
 
@@ -534,7 +538,7 @@ def test_cancel_keeps_the_csv(tmp_path, qapp):
 
 def _write_gt_mask(tmp_path, offset=0):
     stem = next((tmp_path / "mask").glob("*.png")).stem
-    gt = np.zeros((64, 80), np.uint8)
+    gt = np.zeros((60, 80), np.uint8)  # the photo's size (_project): a GT file that is used
     gt[10 + offset : 30 + offset, 10:30] = 255
     (tmp_path / "gt" / "mask").mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(tmp_path / "gt" / "mask" / f"{stem}.png"), gt)

@@ -64,6 +64,8 @@ class Calibration:
 
 
 CALIBRATION = Calibration()
+# The (width, height) frame CALIBRATION's field of view was measured on (Rajurkar et al. 2022).
+CALIBRATION_REFERENCE_SIZE_PX = (640, 480)
 
 # --- Visualization servers --------------------------------------------------
 DASH_HOST = "127.0.0.1"  # loopback only: the dashboards are never exposed to the network

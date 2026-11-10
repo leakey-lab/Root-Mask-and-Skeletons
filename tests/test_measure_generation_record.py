@@ -464,8 +464,9 @@ def test_every_key_the_sidecar_had_is_still_there(tmp_path, spec, monkeypatch):
         "duplicates",
         "sizes_px",
         "generation",
+        "photos",
     ]
-    del inputs["generation"]
+    del inputs["generation"], inputs["photos"]
     before = real_build(
         spec.activity,
         inputs=inputs,
@@ -476,7 +477,7 @@ def test_every_key_the_sidecar_had_is_still_there(tmp_path, spec, monkeypatch):
     for key in ("created_utc", "runtime"):  # time and loaded libraries vary per call
         before[key] = record[key]
     assert list(record) == list(before)
-    assert list(record["inputs"])[:-1] == list(before["inputs"])
+    assert list(record["inputs"])[:-2] == list(before["inputs"])
     for key, value in before.items():
         if key == "inputs":
             for name, inner in value.items():
