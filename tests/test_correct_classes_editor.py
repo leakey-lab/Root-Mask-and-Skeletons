@@ -1964,8 +1964,9 @@ def test_export_with_no_traced_image_explains_and_stays_off(made, tmp_path):
     dlg = ExportDatasetDialog(str(tmp_path), images, default_registry())
     made.append(dlg)
     assert dlg.traced_label.text() == (
-        "No image in this folder has class labels yet. Paint some on the Correct page (G) first."
-    )  # the Trace GT stage is gone (WG-T11): the label names where to paint them
+        "No image in this folder has class labels yet. Paint some on the Correct page (G) "
+        "first, or use Mark empty for an image that shows none of the classes."
+    )  # the Trace GT stage is gone (WG-T11): the label names where to get them
     assert not [w for w in dlg.findChildren(QWidget) if "Trace GT" in w.toolTip()]
     # No "Only fully checked images" option (2026-11-01): every labelled image is exported.
     assert [b.text() for b in dlg.findChildren(QCheckBox)] == ["Keep each tube in one split"]

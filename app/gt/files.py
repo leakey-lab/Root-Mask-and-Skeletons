@@ -27,6 +27,7 @@ __all__ = [
     "image_size",
     "png_size",
     "remove_gt",
+    "remove_labels",
 ]
 
 #: Where the mask or skeleton shown for an image comes from.
@@ -98,6 +99,26 @@ def remove_gt(layout: ProjectLayout, image: str) -> tuple[str, ...]:
     if failed:
         raise GtRemoveError(tuple(removed), failed)
     return tuple(removed)
+
+
+def remove_labels(path: str) -> bool:
+    """Delete the class labels file ``path`` (one image's ``gt/<stem>.png``, as found) and
+    nothing else: True when it went, False when it was already gone.
+
+    The Correct page's Unmark: it takes Mark empty back without touching the image's GT mask
+    or skeleton. Any other path is refused with ``ValueError`` before anything is deleted:
+    ``gt/classes.json``, a file in ``gt/mask/`` or ``gt/skeletons/``, a prediction, anything
+    but a ``.png`` directly in a ``gt/`` folder (its name compared without case). Any other
+    ``OSError`` (a locked file, a read-only folder) is raised as it is.
+    """
+    folder, name = os.path.split(os.path.abspath(path))
+    if os.path.basename(folder).lower() != GT_DIRNAME.lower() or not name.lower().endswith(".png"):
+        raise ValueError(f"Not a class labels file: {path}")
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _list_gt(folder: str) -> tuple[set[str], bool]:

@@ -16,7 +16,7 @@ registry makes it read-only (its status says so; the open sends no notice: the l
 refused edit does, once per image); a file that cannot be read or has another size opens empty, is
 not shown and is kept unless a save replaces it. The page's Mark empty saves an empty file
 ("checked, none of the classes"), offered only while :meth:`empty_save_refusal` is ""
-(2026-11-02). The owner changes the plane only through
+(2026-11-02); its Unmark deletes that file again while :meth:`marked_empty`. The owner changes the plane only through
 ``history``, then calls ``count_patch`` and ``touch``. The revision, the baseline, the save
 error and Discard are :class:`app.editing.planes.PlaneDocument`'s.
 """
@@ -92,6 +92,7 @@ class ClassesDocument(PlaneDocument):
         self._saved_counts = self._counts.copy()
         self._remapped = False  # the open remapped the file's ids: they differ on disk
         self._opened_unsaved = False  # that remap is unsaved (until saved or discarded)
+        self._labels_stamp: tuple = ()  # gt/<stem>.png as read at open or last written
 
     # ------------------------------------------------------------------ state
     def is_dirty(self) -> bool:
@@ -124,9 +125,27 @@ class ClassesDocument(PlaneDocument):
             return "Saved class labels could not be shown: an empty save would replace them"
         if self.has_saved_file:
             return "This image already has class labels"
-        if self.is_dirty() or self._counts[GT_BACKGROUND_ID] != self.history.plane.size:
+        if self.is_dirty() or not self.is_all_background():
             return "Save or discard your painted class labels first"
         return ""
+
+    def marked_empty(self) -> bool:
+        """True while the saved class labels are all background and nothing is unsaved (Mark
+        empty saved them, or an older version, or a save of paint erased again), under a
+        valid registry, from a file that was shown: the page's Unmark deletes that file."""
+        if not self.is_open() or self.registry_error or self._not_loaded:
+            return False
+        return self.has_saved_file and not self.is_dirty() and self.is_all_background()
+
+    def is_all_background(self) -> bool:
+        """True while the open plane holds no labelled or Ignore pixel (False when closed)."""
+        plane = self.history.plane
+        return plane is not None and self._counts[GT_BACKGROUND_ID] == plane.size
+
+    def labels_changed_on_disk(self) -> bool:
+        """True when ``gt/<stem>.png`` is no longer the file read at open or written by the
+        last save (another program rewrote or deleted it, or wrote one)."""
+        return bool(self.image_path) and file_stamp(self.gt_path) != self._labels_stamp
 
     def status(self) -> LayerStatus:
         """Read-only > not saved (to the next edit) > unsaved > not shown > GT > none."""
@@ -258,6 +277,7 @@ class ClassesDocument(PlaneDocument):
             read = self.read(image_path, size)
         tracing, (width, height) = read.tracing, size
         self.image_path, self.gt_path, self._registry_path = image_path, labels, registry_file
+        self._labels_stamp = read.stamps[0]  # taken before the file was read
         self._size, self._project_dir = (width, height), layout.root
         self._root = root or layout.root
         self.registry_error = read.registry_error
@@ -278,7 +298,7 @@ class ClassesDocument(PlaneDocument):
         """Forget the document: no plane, no history, no file (the registry stays)."""
         self.image_path = self.gt_path = self._registry_path = self._root = ""
         self.has_saved_file, self.registry_error, self.warnings = False, "", ()
-        self._not_loaded, self._remapped = "", False
+        self._not_loaded, self._remapped, self._labels_stamp = "", False, ()
         self.history.reset(None)
         self._counts = np.zeros(N_IDS, np.int64)
         self._restart()
@@ -300,6 +320,7 @@ class ClassesDocument(PlaneDocument):
             logger.warning("Could not save the class labels to %s: %s", self.gt_path, exc)
             return ClassesSaveResult(False, self.gt_path, self._save_failed(exc))
         self.has_saved_file, self.warnings = True, ()
+        self._labels_stamp = file_stamp(self.gt_path)  # our own write is no change on disk
         self._not_loaded, self._remapped, self._opened_unsaved = "", False, False
         self._save_error = ""
         self._remember()

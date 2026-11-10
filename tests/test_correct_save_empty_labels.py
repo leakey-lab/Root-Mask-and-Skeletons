@@ -35,7 +35,7 @@ from app.gt import (
     write_tracing,
 )
 from app.gt.export import ExportOptions, export_dataset
-from app.gui.correct.actions import EMPTY_NO_IMAGE_TIP, EMPTY_TIP
+from app.gui.correct.actions import EMPTY_NO_IMAGE_TIP, EMPTY_TIP, UNMARK_TIP
 from app.gui.correct.layer import CLASSES, MASK, SKELETON
 from app.project_layout import ProjectLayout
 from tests.correct_support import H, W, drag, draw_line, new_project, paint, record, settle
@@ -131,8 +131,8 @@ def test_a_click_saves_class_labels_with_nothing_labelled(page, project):
     assert ("Saved class labels · a.png", "success") in notices
     assert row_text(page, CLASSES) == "GT" and page.status_chip.state() == "clean"
     assert not page.has_unsaved_changes()
-    assert not button(page).isEnabled()
-    assert "already has class labels" in button(page).toolTip()
+    assert button(page).isEnabled() and button(page).text() == "Unmark"  # the way back
+    assert button(page).toolTip() == UNMARK_TIP
 
 
 def test_the_saved_empty_labels_open_as_saved_class_labels(page, project):
@@ -143,7 +143,7 @@ def test_the_saved_empty_labels_open_as_saved_class_labels(page, project):
 
     classes = page.layers[CLASSES]
     assert classes.status().label == "GT" and not classes.is_dirty()
-    assert not button(page).isEnabled()
+    assert button(page).isEnabled() and button(page).text() == "Unmark"
 
 
 def test_an_existing_gt_classes_json_is_kept(page, project):
@@ -190,7 +190,8 @@ def test_a_labels_file_written_since_the_open_is_read_not_overwritten(page, proj
     with open(labels_file(project), "rb") as fh:
         assert fh.read() == theirs
     assert ("Class labels reloaded: the file changed on disk", "info") in notices
-    assert saved == [] and row_text(page, CLASSES) == "GT"
+    assert row_text(page, CLASSES) == "GT"
+    assert saved == [project.a]  # nothing written, but the Library learns of their file
     assert not button(page).isEnabled()
 
 
@@ -216,10 +217,12 @@ def test_painted_class_labels_are_never_saved_by_it(page, project):
 
 
 def test_an_existing_labels_file_turns_it_off(make_editor, project):
-    write_tracing(labels_file(project), Tracing(np.zeros((H, W), np.uint8)), default_registry())
+    plane = np.zeros((H, W), np.uint8)
+    plane[5, 5] = 1  # one labelled pixel: not marked empty
+    write_tracing(labels_file(project), Tracing(plane), default_registry())
     editor = make_editor(project.a, project.folder)
 
-    assert not button(editor).isEnabled()
+    assert not button(editor).isEnabled() and button(editor).text() == "Mark empty"
     assert button(editor).toolTip() == "This image already has class labels"
 
 
@@ -286,6 +289,7 @@ def test_remove_gt_removes_the_empty_labels_and_turns_it_on_again(page, project)
 
     assert not os.path.exists(labels_file(project))
     assert button(page).isEnabled() and row_text(page, CLASSES) == "No class labels"
+    assert button(page).text() == "Mark empty"
 
 
 def test_export_dataset_exports_the_image_with_empty_labels(page, project, tmp_path):
@@ -373,4 +377,215 @@ def test_a_click_in_the_window_marks_the_image_labelled_in_the_library(window_wi
 
     assert os.path.isfile(labels_file(project))
     assert window.image_manager.has_gt_labels("a")
-    assert not window.gt_empty_button.isEnabled()
+    assert window.gt_empty_button.text() == "Unmark"
+
+
+# ================================================================================ Unmark
+def marked(page, project):
+    """Mark empty image a; the files under the project folder after it."""
+    button(page).click()
+    assert button(page).text() == "Unmark"
+    return tree(project.folder)
+
+
+def save_mask_and_skeleton_gt(page, project) -> None:
+    """GT mask and GT skeleton of image a on disk (a corrected image)."""
+    paint(page, (20, 100), (60, 100))
+    page.set_active_layer(SKELETON)
+    draw_line(page)
+    assert page.save()
+    layout = ProjectLayout.for_image(project.a)
+    assert os.path.isfile(layout.gt_mask_path("a"))
+    assert os.path.isfile(layout.gt_skeleton_path("a"))
+
+
+def test_older_empty_labels_offer_unmark(make_editor, project):
+    """Saved all background by anyone (an older version, a painted-then-erased save)."""
+    write_tracing(labels_file(project), Tracing(np.zeros((H, W), np.uint8)), default_registry())
+    editor = make_editor(project.a, project.folder)
+
+    assert button(editor).isEnabled() and button(editor).text() == "Unmark"
+    assert button(editor).toolTip() == UNMARK_TIP
+    assert UNMARK_TIP == (
+        "This image is marked empty. Unmark deletes its empty class labels; its GT mask and "
+        "skeleton stay"
+    )
+
+
+def test_unmark_deletes_the_empty_labels_only(page, project):
+    save_mask_and_skeleton_gt(page, project)
+    before = marked(page, project)
+    removed = record(page.gt_removed)
+    notices = record(page.notice)
+
+    button(page).click()
+
+    assert changed(before, tree(project.folder)) == {norm(labels_file(project))}
+    assert not os.path.exists(labels_file(project))
+    assert os.path.isfile(registry_path(project.folder))  # gt/classes.json stays
+    assert removed == [project.a]
+    assert ("Unmarked · a.png", "success") in notices
+    assert row_text(page, CLASSES) == "No class labels"
+    assert button(page).isEnabled() and button(page).text() == "Mark empty"
+    assert button(page).toolTip() == EMPTY_TIP
+
+
+def test_unmark_keeps_the_other_layers_unsaved_edits_and_is_no_undo_step(page, project):
+    marked(page, project)
+    paint(page, (20, 100), (60, 100))  # the mask, unsaved
+    page.set_active_layer(SKELETON)
+    draw_line(page)
+    assert page.session.dirty_layers() == [MASK, SKELETON]
+    assert button(page).text() == "Unmark" and button(page).isEnabled()
+    steps = (page.layers[MASK].can_undo(), page.layers[SKELETON].can_undo())
+
+    button(page).click()
+
+    assert not os.path.exists(labels_file(project))
+    assert page.session.dirty_layers() == [MASK, SKELETON]  # still unsaved, still there
+    assert (page.layers[MASK].can_undo(), page.layers[SKELETON].can_undo()) == steps
+    page.undo()  # the newest step is still the skeleton line: Unmark is no step
+    assert page.session.dirty_layers() == [MASK]
+    assert not os.path.exists(labels_file(project))  # an undo never brings the file back
+
+
+def test_mark_empty_again_after_unmark(page, project):
+    marked(page, project)
+    button(page).click()  # Unmark
+
+    button(page).click()  # Mark empty again
+
+    assert os.path.isfile(labels_file(project)) and button(page).text() == "Unmark"
+
+
+def test_unmark_is_off_while_class_labels_are_painted(page, project):
+    marked(page, project)
+    paint_classes(page, (20, 100), (80, 110))
+
+    assert not button(page).isEnabled() and button(page).text() == "Mark empty"
+
+    page.actions.unmark_empty()  # off: nothing happens
+    assert os.path.isfile(labels_file(project)) and page.layers[CLASSES].is_dirty()
+
+
+def test_unmark_is_off_under_an_invalid_registry(make_editor, project):
+    write_tracing(labels_file(project), Tracing(np.zeros((H, W), np.uint8)), default_registry())
+    with open(registry_path(project.folder), "w", encoding="utf-8") as fh:
+        fh.write("{")
+    editor = make_editor(project.a, project.folder)
+
+    assert not button(editor).isEnabled() and button(editor).text() == "Mark empty"
+    assert "gt/classes.json is invalid" in button(editor).toolTip()
+
+    editor.actions.unmark_empty()
+    assert os.path.isfile(labels_file(project))
+
+
+def test_unmark_reads_a_labels_file_changed_on_disk_and_deletes_nothing(page, project):
+    marked(page, project)
+    plane = np.zeros((H, W), np.uint8)
+    plane[10:20, 10:20] = 1  # another program labelled the image meanwhile
+    write_tracing(labels_file(project), Tracing(plane), default_registry())
+    with open(labels_file(project), "rb") as fh:
+        theirs = fh.read()
+    notices = record(page.notice)
+    removed = record(page.gt_removed)
+
+    button(page).click()
+
+    with open(labels_file(project), "rb") as fh:
+        assert fh.read() == theirs
+    assert ("Class labels reloaded: the file changed on disk", "info") in notices
+    assert removed == []
+    assert page.layers[CLASSES].document.present_keys() == {"root"}  # read again
+    assert not button(page).isEnabled() and button(page).text() == "Mark empty"
+
+
+def test_unmark_after_the_file_went_on_disk_reads_the_layer_again(page, project):
+    marked(page, project)
+    os.remove(labels_file(project))
+    notices = record(page.notice)
+
+    button(page).click()
+
+    assert ("Class labels reloaded: the file changed on disk", "info") in notices
+    assert row_text(page, CLASSES) == "No class labels"
+    assert button(page).isEnabled() and button(page).text() == "Mark empty"
+
+
+def test_a_failed_unmark_says_why_and_changes_nothing(page, project, monkeypatch):
+    marked(page, project)
+
+    def locked(path):
+        raise PermissionError(13, "Permission denied", path)
+
+    monkeypatch.setattr("app.gt.files.os.remove", locked)
+    notices = record(page.notice)
+    removed = record(page.gt_removed)
+
+    button(page).click()
+
+    assert os.path.isfile(labels_file(project)) and removed == []
+    assert notices == [("Unmark · a.png: could not remove gt/a.png (Permission denied)", "danger")]
+    assert row_text(page, CLASSES) == "GT"
+    assert button(page).isEnabled() and button(page).text() == "Unmark"
+
+
+def test_unmark_deletes_the_file_the_page_found(page, project, monkeypatch):
+    """The labels file as found at open (another case on a case-sensitive disk), not a name
+    built again from the image."""
+    marked(page, project)
+    found = page.layers[CLASSES].document.gt_path
+    asked = []
+    monkeypatch.setattr(
+        "app.gui.correct.actions.remove_labels", lambda path: asked.append(path) or True
+    )
+
+    button(page).click()
+
+    assert asked == [found]
+
+
+def test_the_button_keeps_one_width_in_both_texts(page, project):
+    width = button(page).minimumWidth()
+    for text in ("Mark empty", "Unmark"):
+        probe = QPushButton(text)
+        probe.setObjectName(button(page).objectName())
+        probe.setProperty("density", "compact")
+        assert probe.sizeHint().width() <= width, text
+        probe.deleteLater()
+
+    marked(page, project)
+
+    assert button(page).minimumWidth() == width
+
+
+def test_unmark_in_the_window_clears_the_library_mark_and_keeps_the_gt(window_with_project):
+    window, project = window_with_project.window, window_with_project.project
+    window.gt_empty_button.click()
+    settle()
+    assert window.image_manager.has_gt_labels("a")
+    width = window.gt_empty_button.width()
+
+    window.gt_empty_button.click()  # Unmark
+    settle()
+
+    assert not os.path.exists(labels_file(project))
+    assert not window.image_manager.has_gt_labels("a")
+    assert window.gt_empty_button.text() == "Mark empty"
+    assert window.gt_empty_button.width() == width  # the top bar does not move
+
+
+def test_a_labels_file_found_by_the_save_shows_in_the_library(window_with_project):
+    """Another program wrote labels after the open: Mark empty reads them (writes nothing)
+    and the Library mark follows at once, without a rescan."""
+    window, project = window_with_project.window, window_with_project.project
+    plane = np.zeros((H, W), np.uint8)
+    plane[10:20, 10:20] = 1
+    write_tracing(labels_file(project), Tracing(plane), default_registry())
+
+    window.gt_empty_button.click()
+    settle()
+
+    assert window.correct_editor.layers[CLASSES].status().label == "GT"
+    assert window.image_manager.has_gt_labels("a")

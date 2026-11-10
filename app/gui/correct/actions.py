@@ -7,7 +7,10 @@ skeleton file…), put a layer's prediction back (Load prediction), edit the pro
 the topbar button it owns: on while an image is open and nothing is unsaved) and save its
 class labels with nothing labelled (Mark empty, its other topbar button: "checked, none of
 the classes", a negative example for training; on while the class labels are untouched and
-no labels file is saved or kept for the image). Each ends a drag in progress first, as every
+no labels file is saved or kept for the image). The same button takes it back: while the
+image's saved class labels are all background and nothing is unsaved on them it reads
+Unmark, which deletes that one labels file (never gt/classes.json, the GT mask or skeleton,
+or a prediction; no question, no undo step). Each ends a drag in progress first, as every
 transition of the page does. It also turns the session's report of each layer save into the
 page's signal: ``mask_saved`` / ``mask_cleared`` / ``skeleton_saved`` /
 ``skeleton_cleared`` / ``gt_saved``, on every save path.
@@ -24,9 +27,10 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from app import gt
 from app.dialogs import run_modal
-from app.gt.files import GtRemoveError, gt_files, remove_gt
+from app.gt.files import GtRemoveError, gt_files, remove_gt, remove_labels
 from app.gui.correct.classes_document import EMPTY_CLOSED, REGISTRY_LABEL
 from app.gui.correct.layer import CLASSES, MASK, SKELETON, SaveOutcome, project_label
+from app.gui.correct.save_gate import reloaded_message
 from app.gui.widgets import keep_canvas_focus
 from app.gui.widgets.buttons import ghost_button
 from app.project_layout import ProjectLayout
@@ -36,7 +40,14 @@ if TYPE_CHECKING:  # pragma: no cover
 
     from app.gui.correct.editor import CorrectEditor
 
-__all__ = ["EMPTY_NO_IMAGE_TIP", "EMPTY_TIP", "REMOVE_DETAIL", "PageActions", "ask_remove_gt"]
+__all__ = [
+    "EMPTY_NO_IMAGE_TIP",
+    "EMPTY_TIP",
+    "REMOVE_DETAIL",
+    "UNMARK_TIP",
+    "PageActions",
+    "ask_remove_gt",
+]
 
 SKELETON_FILES = "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)"
 REMOVE_DETAIL = (
@@ -51,6 +62,11 @@ EMPTY_TIP = (
     "the classes (an empty example for training)"
 )
 EMPTY_NO_IMAGE_TIP = EMPTY_CLOSED
+EMPTY_TEXT, UNMARK_TEXT = "Mark empty", "Unmark"  # the one button's two texts, one width
+UNMARK_TIP = (
+    "This image is marked empty. Unmark deletes its empty class labels; its GT mask and "
+    "skeleton stay"
+)
 
 
 def ask_remove_gt(parent: QWidget | None, name: str, detail: str) -> bool:
@@ -81,13 +97,15 @@ class PageActions(QObject):
         self.remove_button.setEnabled(False)
         self.remove_button.setToolTip(REMOVE_NO_IMAGE_TIP)
         # No icon: with one the topbar outgrows the 900 px window budget (the Correct page is
-        # its widest action page; tests/test_window_width_budget.py).
-        self.empty_button = ghost_button("Mark empty", compact=True)
+        # its widest action page; tests/test_window_width_budget.py). One width for both
+        # texts, so the top bar does not move when Mark empty becomes Unmark.
+        self.empty_button = ghost_button(EMPTY_TEXT, compact=True)
+        _fit_texts(self.empty_button, (EMPTY_TEXT, UNMARK_TEXT))
         self.empty_button.setEnabled(False)
         self.empty_button.setToolTip(EMPTY_NO_IMAGE_TIP)
         keep_canvas_focus(self.remove_button, self.empty_button)
         self.remove_button.clicked.connect(self.remove_gt)
-        self.empty_button.clicked.connect(self.save_empty_labels)
+        self.empty_button.clicked.connect(self._empty_clicked)
 
     # ------------------------------------------------------------------ actions
     def load_skeleton_file(self) -> None:
@@ -193,11 +211,44 @@ class PageActions(QObject):
         background) through the session's save, which reports, toasts and takes the stamps as
         for any save; only the class labels are saved. Saved labels are never replaced: the
         button is off while a labels file is saved or kept for the image (Remove GT… deletes
-        it again)."""
+        it again; Unmark deletes it while it is empty)."""
         self._editor.session.finish_gestures()
         if self._empty_refusal():
             return  # the button is off then
         self._editor.session.save_layer(CLASSES)
+
+    def unmark_empty(self) -> None:
+        """Unmark: delete the open image's class labels while they are saved, all background
+        and nothing is unsaved on them, and nothing else (the GT mask and skeleton stay; not
+        an undo step, no question: only an empty label map goes). The file deleted is the one
+        the page found at open. A labels file changed on disk since the page read it is not
+        deleted: the class labels are read again, with the page's notice for that. A file
+        that cannot be deleted is named with the reason; then nothing changes."""
+        editor = self._editor
+        session = editor.session
+        session.finish_gestures()
+        path, classes = session.image_path, editor.layers[CLASSES]
+        document = classes.document
+        if not path or not document.marked_empty():
+            return  # the button is off (or reads Mark empty) then
+        if document.labels_changed_on_disk():
+            editor.paging.forget(path)
+            self._read_labels_again()
+            editor.notify(reloaded_message(classes.noun), "info")
+            self._labels_followed(path)
+            return
+        labels, name = document.gt_path, os.path.basename(path)
+        try:
+            remove_labels(labels)
+        except (OSError, ValueError) as exc:
+            label = project_label(labels, ProjectLayout.for_image(path).root)
+            reason = getattr(exc, "strerror", None) or exc
+            editor.notify(f"Unmark · {name}: could not remove {label} ({reason})", "danger")
+            return
+        editor.paging.forget(path)  # what was read of it holds the labels
+        self._read_labels_again()  # now without a file
+        editor.gt_removed.emit(path)  # the Library mark and the metrics follow the disk
+        editor.notify(f"Unmarked · {name}", "success")
 
     def save_for_paging(self) -> bool:
         """PgDn / PgUp: True when the image may be left. The unsaved layers are saved without
@@ -222,7 +273,12 @@ class PageActions(QObject):
             enabled, tip = True, REMOVE_TIP
         _show(self.remove_button, enabled, tip)
         refusal = self._empty_refusal()
-        _show(self.empty_button, not refusal, refusal or EMPTY_TIP)
+        if not refusal:
+            _show(self.empty_button, True, EMPTY_TIP, EMPTY_TEXT)
+        elif self._marked_empty():
+            _show(self.empty_button, True, UNMARK_TIP, UNMARK_TEXT)
+        else:
+            _show(self.empty_button, False, refusal, EMPTY_TEXT)
 
     def _empty_refusal(self) -> str:
         """Why Mark empty is off ("" while it is on)."""
@@ -230,10 +286,42 @@ class PageActions(QObject):
             return EMPTY_NO_IMAGE_TIP
         return self._editor.layers[CLASSES].document.empty_save_refusal()
 
+    def _marked_empty(self) -> bool:
+        """True while the button reads Unmark (``ClassesDocument.marked_empty``)."""
+        editor = self._editor
+        return bool(editor.session.image_path) and editor.layers[CLASSES].document.marked_empty()
+
+    def _empty_clicked(self) -> None:
+        """The button as it reads: Unmark, else Mark empty (each checks its state again)."""
+        if self.empty_button.text() == UNMARK_TEXT:
+            self.unmark_empty()
+        else:
+            self.save_empty_labels()
+
+    def _read_labels_again(self) -> None:
+        """Read the class labels again from disk, as the save gate does for a file changed
+        on disk (their timeline entries go, their stamps are taken again); the other layers
+        and their unsaved edits stay."""
+        session = self._editor.session
+        session._reopen(CLASSES)  # the session's one-layer read (no public name yet)
+        session.forget(CLASSES)  # its batch refreshes the page once
+
+    def _labels_followed(self, path: str) -> None:
+        """The class labels were read again from disk: MainWindow's Library mark and metrics
+        bar follow (a labels file found: ``gt_saved``; none: ``gt_removed`` reads the GT
+        marks from disk)."""
+        editor = self._editor
+        if editor.layers[CLASSES].document.has_saved_file:
+            editor.gt_saved.emit(path)
+        else:
+            editor.gt_removed.emit(path)
+
     # ------------------------------------------------------------------ reports
     def report(self, outcome: SaveOutcome) -> None:
         """One layer save attempt -> the page's signal for MainWindow (a failed save reports
-        nothing); what was read ahead of the image goes (its files changed)."""
+        nothing); what was read ahead of the image goes (its files changed). Class labels the
+        save gate read again instead of writing (their file changed on disk) report what is
+        on disk now, so the Library follows a labels file that appeared."""
         editor = self._editor
         path = editor.session.image_path
         editor.paging.forget(path)
@@ -248,11 +336,28 @@ class PageActions(QObject):
             editor.skeleton_saved.emit(written)
         elif layer_id == CLASSES and written:
             editor.gt_saved.emit(path)
+        elif layer_id == CLASSES:
+            self._labels_followed(path)
 
 
-def _show(button: QPushButton, enabled: bool, tip: str) -> None:
-    """Set ``button``'s state and tooltip where they changed."""
+def _show(button: QPushButton, enabled: bool, tip: str, text: str | None = None) -> None:
+    """Set ``button``'s state, tooltip and text (None: kept) where they changed."""
     if button.isEnabled() != enabled:
         button.setEnabled(enabled)
     if button.toolTip() != tip:
         button.setToolTip(tip)
+    if text is not None and button.text() != text:
+        button.setText(text)
+
+
+def _fit_texts(button: QPushButton, texts: tuple[str, ...]) -> None:
+    """``button`` keeps one width for each of ``texts`` (the widest, measured once with its
+    font and style), so the row it sits in does not move when the text changes; it shows the
+    first text."""
+    button.ensurePolished()
+    widths = []
+    for text in texts:
+        button.setText(text)
+        widths.append(button.sizeHint().width())
+    button.setText(texts[0])
+    button.setMinimumWidth(max(widths))

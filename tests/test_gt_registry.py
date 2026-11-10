@@ -49,6 +49,57 @@ def test_default_class_colours_differ_from_the_layer_colours():
     assert class_colours["root"] == "#56b4e9"
 
 
+def _lab(color: str) -> tuple[float, float, float]:
+    """CIELAB (D65) of a ``#rrggbb`` sRGB colour."""
+    rgb = [int(color[i : i + 2], 16) / 255 for i in (1, 3, 5)]
+    r, g, b = (c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb)
+    x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+    y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+
+    def f(t: float) -> float:
+        return t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
+
+
+def _delta_e(first: str, second: str) -> float:
+    """CIE76 colour difference (dE76) of two ``#rrggbb`` colours."""
+    return sum((p - q) ** 2 for p, q in zip(_lab(first), _lab(second), strict=True)) ** 0.5
+
+
+#: How far apart two class colours stay (CIE76): the default classes are 33.5 apart at the
+#: closest (Root tip and Nodule); the old first Add colour #4c9bd6 was 10.5 from Root.
+CLASS_COLOUR_DISTANCE = 30.0
+
+
+def test_default_class_colours_stay_apart():
+    colours = [c.color for c in default_registry().classes]
+    closest = min(_delta_e(a, b) for i, a in enumerate(colours) for b in colours[i + 1 :])
+    assert closest >= CLASS_COLOUR_DISTANCE, closest
+
+
+def test_the_add_palette_stays_apart_from_every_default_and_layer_colour():
+    """The colours Add offers for a new class (the first one no class uses) keep the
+    defaults' distance from every default class colour, and from the layer colours they are
+    painted over (since Root became #56b4e9 the first two were nearly Root's blue). A saved
+    registry is not touched: this is only what Add offers."""
+    from app.design import tokens
+    from app.gui.class_editor_dialog import _ADD_PALETTE
+
+    references = [c.color for c in default_registry().classes]
+    references += [tokens.MASK, tokens.SKEL, tokens.ACCENT]
+    too_close = {
+        (color, other): round(_delta_e(color, other), 1)
+        for color in _ADD_PALETTE
+        for other in references
+        if _delta_e(color, other) < CLASS_COLOUR_DISTANCE
+    }
+    assert too_close == {}
+    assert len({c.lower() for c in _ADD_PALETTE}) == len(_ADD_PALETTE)
+
+
 def test_to_dict_from_dict_round_trip():
     reg = default_registry()
     data = reg.to_dict()

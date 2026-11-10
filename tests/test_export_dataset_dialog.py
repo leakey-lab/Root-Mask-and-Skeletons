@@ -465,3 +465,22 @@ def test_close_stays_available_after_a_finished_export(app, tmp_path):
 
     dialog.output_edit.setText("")  # the output gate only applies to "Export"
     assert dialog.export_button.isEnabled()
+
+
+def test_nothing_to_export_names_both_ways_to_class_labels(app, tmp_path):
+    """No labels file yet: paint them, or Mark empty an image that shows none of the classes
+    (its empty labels file is exported too)."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    image = project_dir / f"{_STEMS[0]}.png"
+    Image.new("RGB", (20, 20), color=(5, 5, 5)).save(image, format="PNG")
+    dialog = ExportDatasetDialog(str(project_dir), {_STEMS[0]: str(image)}, default_registry())
+
+    text = dialog.traced_label.text()
+
+    assert text == (
+        "No image in this folder has class labels yet. Paint some on the Correct page (G) "
+        "first, or use Mark empty for an image that shows none of the classes."
+    )
+    dialog.start_export()
+    assert dialog.status_label.text() == text

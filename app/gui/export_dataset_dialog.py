@@ -45,7 +45,8 @@ _MAX_LISTED_ERRORS = 10
 _EXPORT_LABEL = "Export"
 _CLOSE_LABEL = "Close"
 _NOTHING_TRACED = (
-    "No image in this folder has class labels yet. Paint some on the Correct page (G) first."
+    "No image in this folder has class labels yet. Paint some on the Correct page (G) "
+    "first, or use Mark empty for an image that shows none of the classes."
 )
 
 

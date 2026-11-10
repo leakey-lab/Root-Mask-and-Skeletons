@@ -6,7 +6,8 @@ Qt-free :class:`~app.gui.correct.classes_document.ClassesDocument` (the class-id
 registry, ``gt/<stem>.png``). It paints in the active class's colour
 (:attr:`ClassesLayer.brush_color`) and its brush ring follows that colour, while its rail
 and row keep the layer's purple; Fill reads the active class's outlines only; each class
-keeps its own brush size.
+keeps its own brush size. Clear on labels that are all background already adds no step and
+says there is nothing to clear (Save would write nothing then).
 
 While ``gt/classes.json`` is invalid the layer is read-only: a press, Clear and the
 page's Classes… are refused (:meth:`ClassesLayer.locked`), the first refusal on an image with
@@ -49,6 +50,9 @@ class ClassesLayer(RasterLayer):
     CLEARED_NOTICE = platform_keys(
         "Class labels cleared. Ctrl+Z to undo; Save writes an empty file."
     )
+    #: Clear on labels that are all background already: a labels file is saved, or not.
+    NOTHING_SAVED = "No class labels to clear"
+    NOTHING_TO_CLEAR = "No class labels to clear · Mark empty saves an empty file"
     NOT_OPEN = "No class labels are open"
     READ = ClassesRead
     document: ClassesDocument
@@ -134,8 +138,19 @@ class ClassesLayer(RasterLayer):
         super().press(pos, modifiers)
 
     def clear(self) -> bool:
-        """``RasterLayer.clear``; False while read-only (or nothing is open)."""
-        return False if self.locked() else super().clear()
+        """``RasterLayer.clear``; False while read-only (or nothing is open). A plane that is
+        all background already changes nothing (no step; Save would write nothing, O2): the
+        notice says so, and names Mark empty while no labels file is saved for the image."""
+        if self.locked():
+            return False
+        document = self.document
+        if document.is_open():
+            self.finish_gesture()  # a stroke in progress becomes its own action first
+            if document.is_all_background():
+                saved = document.has_saved_file or document.unloaded_file()
+                self._host.notify(self.NOTHING_SAVED if saved else self.NOTHING_TO_CLEAR, "info")
+                return True
+        return super().clear()
 
     def replace_plane(self, plane) -> bool:
         """``RasterLayer.replace_plane``; False while read-only (no history entry)."""

@@ -808,10 +808,123 @@ def test_erasing_a_stroke_by_hand_is_saved_again(scene, project):
     assert layer.status() == LayerStatus("clean", "GT", "gt/plot_001.png")
 
 
+NOTHING_TO_CLEAR = "No class labels to clear"
+NOTHING_TO_CLEAR_UNSAVED = "No class labels to clear · Mark empty saves an empty file"
+
+
 def test_clearing_empty_labels_changes_nothing(scene, project):
+    """Clear on an all-background plane: no patch, no undo step, and a notice that promises
+    no file (Save writes nothing then: O2)."""
     opened = open_session(scene, project.image)
     assert opened.layer.clear() is True
     assert not opened.layer.is_dirty() and opened.dirty == []
+    assert not opened.layer.can_undo() and not opened.session.can_undo()
+    assert notices_of(opened.host) == [(NOTHING_TO_CLEAR_UNSAVED, "info")]
+
+
+def test_clearing_saved_empty_labels_says_there_is_nothing_to_clear(scene, project):
+    write_tracing(project.labels, Tracing(np.zeros((H, W), np.uint8)), default_registry())
+    opened = open_session(scene, project.image)
+
+    assert opened.layer.clear() is True
+
+    assert not opened.layer.is_dirty() and not opened.layer.can_undo()
+    assert notices_of(opened.host) == [(NOTHING_TO_CLEAR, "info")]
+
+
+def test_clearing_labels_erased_by_hand_adds_no_step(scene, project):
+    """Painted, then erased back to background: the plane is empty, Clear adds nothing."""
+    layer, host, _ = open_layer(scene, project.image)
+    stroke(layer, (10, 30), (70, 30), size=6)
+    layer.set_tool("eraser")
+    stroke(layer, (5, 30), (75, 30), size=20)
+    steps = len(layer.document.history.undo_stack)
+
+    assert layer.clear() is True
+
+    assert len(layer.document.history.undo_stack) == steps
+    assert notices_of(host)[-1] == (NOTHING_TO_CLEAR_UNSAVED, "info")
+
+
+def test_clearing_labelled_pixels_clears_with_the_cleared_notice(scene, project):
+    layer, host, _ = open_layer(scene, project.image)
+    stroke(layer, (10, 30), (70, 30), size=6)
+
+    assert layer.clear() is True
+
+    assert not ids(layer).any() and len(layer.document.history.undo_stack) == 2
+    assert notices_of(host)[-1] == (layer.CLEARED_NOTICE, "info")
+
+
+# ============================================================================== marked empty
+def test_saved_empty_labels_are_marked_empty(scene, project):
+    layer, _, _ = open_layer(scene, project.image)
+    assert not layer.document.marked_empty()  # no file
+    assert layer.save().ok  # an empty file (Mark empty's save)
+
+    assert layer.document.marked_empty()
+    layer.open(project.image, (W, H), project.folder)
+    assert layer.document.marked_empty()
+
+
+def test_labels_with_a_labelled_pixel_are_not_marked_empty(scene, project):
+    plane = np.zeros((H, W), np.uint8)
+    plane[5, 5] = 1
+    write_tracing(project.labels, Tracing(plane), default_registry())
+
+    layer, _, _ = open_layer(scene, project.image)
+
+    assert not layer.document.marked_empty()
+
+
+def test_unsaved_paint_over_empty_labels_is_not_marked_empty(scene, project):
+    write_tracing(project.labels, Tracing(np.zeros((H, W), np.uint8)), default_registry())
+    layer, _, _ = open_layer(scene, project.image)
+    stroke(layer, (10, 30), (70, 30), size=6)
+
+    assert not layer.document.marked_empty()
+    layer.undo()
+    assert layer.document.marked_empty()
+
+
+def test_empty_labels_under_an_invalid_registry_are_not_marked_empty(scene, project):
+    write_tracing(project.labels, Tracing(np.zeros((H, W), np.uint8)), default_registry())
+    with open(registry_path(project.folder), "w", encoding="utf-8") as fh:
+        fh.write("{")
+
+    layer, _, _ = open_layer(scene, project.image)
+
+    assert not layer.document.marked_empty()
+
+
+@pytest.mark.parametrize("kind", ["unreadable", "size"])
+def test_a_labels_file_not_shown_is_not_marked_empty(scene, project, kind):
+    os.makedirs(os.path.dirname(project.labels), exist_ok=True)
+    if kind == "unreadable":
+        with open(project.labels, "wb") as fh:
+            fh.write(b"not a png")
+    else:
+        write_tracing(project.labels, Tracing(np.zeros((10, 10), np.uint8)), default_registry())
+
+    layer, _, _ = open_layer(scene, project.image)
+
+    assert not layer.document.marked_empty()
+
+
+def test_the_document_tells_a_labels_file_changed_since_it_was_read(scene, project):
+    write_tracing(project.labels, Tracing(np.zeros((H, W), np.uint8)), default_registry())
+    layer, _, _ = open_layer(scene, project.image)
+    assert not layer.document.labels_changed_on_disk()
+
+    plane = np.zeros((H, W), np.uint8)
+    plane[0:20, 0:20] = 1  # another size on disk: the stamp changes
+    write_tracing(project.labels, Tracing(plane), default_registry())
+
+    assert layer.document.labels_changed_on_disk()
+    layer.open(project.image, (W, H), project.folder)
+    assert not layer.document.labels_changed_on_disk()
+    os.remove(project.labels)
+    assert layer.document.labels_changed_on_disk()
 
 
 def test_picking_classes_changes_nothing(scene, project):

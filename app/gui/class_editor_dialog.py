@@ -43,17 +43,20 @@ from app.gui.widgets import tokens
 
 # Default colours offered for a new class, in order; the first one no class
 # uses (retired included) is picked, so Add works without choosing a colour.
+# Each is at least CIE76 dE 30 from every default class colour and from the
+# mask, skeleton and layer colours it is painted over, farthest first
+# (tests/test_gt_registry.py); a saved registry keeps its own colours.
 _ADD_PALETTE = (
-    "#4c9bd6",
-    "#f4a261",
+    "#76ff03",
+    "#d500f9",
+    "#ff1744",
+    "#3d5afe",
+    "#66a61e",
+    "#ff7f00",
+    "#00897b",
+    "#46f0f0",
+    "#808000",
     "#9b5de5",
-    "#2ec4b6",
-    "#e76f51",
-    "#90be6d",
-    "#f15bb5",
-    "#00bbf9",
-    "#c9a227",
-    "#8d99ae",
 )
 # Class rows scroll beyond this height, so the dialog fits on screen.
 _ROWS_MAX_HEIGHT = 360
