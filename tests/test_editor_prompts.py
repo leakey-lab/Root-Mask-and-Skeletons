@@ -17,11 +17,10 @@ from app.gui.editor_prompts import (
     ask_unsaved,
     join_nouns,
 )
-from tests.box_titles import record_titles, title_of
+from tests.editor_prompts_support import ESCAPE, Answer
 from tests.qt_teardown import flush_deleted
 
 Button = QMessageBox.StandardButton
-ESCAPE = "escape"  # the scripted answer "the user pressed Esc"
 
 
 @pytest.fixture
@@ -31,30 +30,6 @@ def parent(app):
     widget.deleteLater()
     del widget
     flush_deleted()
-
-
-class Answer:
-    """Stands in for ``QMessageBox.exec``: records what the box shows, returns an answer."""
-
-    def __init__(self, monkeypatch, answer):
-        self.answer = answer
-        self.seen: dict = {}
-        record_titles(monkeypatch)
-        monkeypatch.setattr(QMessageBox, "exec", lambda box: self._exec(box))
-
-    def _exec(self, box):
-        self.seen = {
-            "icon": box.icon(),
-            "title": title_of(box),
-            "text": box.text(),
-            "info": box.informativeText(),
-            "buttons": {box.standardButton(w): w.text() for w in box.buttons()},
-            "default": box.standardButton(box.defaultButton()),
-            "escape": box.standardButton(box.escapeButton()),
-        }
-        if self.answer == ESCAPE:  # Esc (or closing the box) answers with the escape button
-            return int(box.standardButton(box.escapeButton()).value)
-        return int(getattr(self.answer, "value", self.answer))
 
 
 NOUNS = ["mask", "skeleton", "mask and skeleton", "GT"]

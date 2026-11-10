@@ -13,8 +13,7 @@ import pytest
 
 from app import enhancement as enh
 from app.gui.correct.layer import MASK, SKELETON
-from tests.correct_goldens_support import make_synth_project
-from tests.test_correct_goldens import (
+from tests.correct_goldens_page_support import (
     GOLDENS,
     assert_mask_file,
     assert_skeleton_file,
@@ -22,6 +21,7 @@ from tests.test_correct_goldens import (
     replay,
     skeleton_start,
 )
+from tests.correct_goldens_support import make_synth_project
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 

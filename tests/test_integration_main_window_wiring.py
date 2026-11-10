@@ -9,57 +9,22 @@ import csv
 import os
 
 import pytest
-from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from tests import guards
-from tests.qt_teardown import delete_widgets
 from tests.qt_wait import wait_until as _wait
-from tests.window_support import build_window, open_folder, quiet_window, write_photos
+
+# The fixtures app, make_window, mw, no_delayed_temp_sweep (autouse) and settings are in
+# tests/window_support.py (test_wording_guards and test_startup_qt_warnings use them too).
+from tests.window_support import app as app  # fixture
+from tests.window_support import make_window as make_window  # fixture
+from tests.window_support import mw as mw  # fixture
+from tests.window_support import no_delayed_temp_sweep as no_delayed_temp_sweep  # fixture
+from tests.window_support import open_folder, write_photos
+from tests.window_support import settings as settings  # fixture
 
 USER = Qt.ItemDataRole.UserRole
 STEMS = [f"24EFCAM1_T001_L0{d}_2024.07.18_1115{d}_001_SMM" for d in (11, 12, 13)]
-
-# app, make_window, mw, no_delayed_temp_sweep and settings: test_wording_guards and
-# test_startup_qt_warnings import them.
-
-
-@pytest.fixture(scope="module")
-def app():
-    return QApplication.instance() or QApplication([])
-
-
-@pytest.fixture(autouse=True)
-def no_delayed_temp_sweep(monkeypatch):
-    """A loaded project's delayed stale-temp sweep does nothing (``guards.skip_temp_sweep``)."""
-    guards.skip_temp_sweep(monkeypatch)
-
-
-@pytest.fixture
-def settings(tmp_path):
-    return QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
-
-
-@pytest.fixture
-def make_window(app, settings):
-    """``make(settings=...)``: a MainWindow on the test's INI settings (or on the given ones),
-    neither resized nor shown; every window made is closed without prompts afterwards."""
-    windows = []
-
-    def make(**kwargs):
-        windows.append(
-            build_window(settings=kwargs.pop("settings", settings), size=None, show=False)
-        )
-        return windows[-1]
-
-    yield make
-    delete_widgets(windows, prepare=quiet_window)
-    QApplication.processEvents()
-
-
-@pytest.fixture
-def mw(make_window):
-    return make_window()
 
 
 # --------------------------------------------------------------------------- #

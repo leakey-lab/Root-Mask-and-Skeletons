@@ -28,8 +28,8 @@ from app.gui.display_controller import DisplayController
 from app.gui.display_read_ahead import DisplayReadAhead
 from app.gui.image_manager import ImageManager
 from app.io_utils import file_stamp
+from tests.correct_paging_support import key, read_ahead_done, ring
 from tests.correct_support import bump, write_image
-from tests.test_correct_editor_paging import key, read_ahead_done, ring
 
 VALUES = {"A": 90, "B": 60, "C": 30}
 

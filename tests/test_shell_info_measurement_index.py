@@ -14,38 +14,10 @@ import pytest
 from app.config import AREA_CSV_HEADERS, LENGTH_CSV_HEADERS
 from app.data_processing.measurement_index import Measurement, MeasurementIndex
 from app.inference.metrics import write_metric_csv
+from tests.measure_support import _bump_mtime, _row, _write_areas, _write_lengths
 
 STEM = "24EFCAM1_T001_L044_2024.07.18_111530_001_SMM"
 OTHER = "24EFCAM1_T001_L045_2024.07.18_111612_001_SMM"
-
-
-def _row(stem: str, column: str, value, error: str = "") -> dict:
-    row = {"Image": stem, "Tube": 1, "Position": 44, "Date": "2024.07.18", "Time": "11:15:30"}
-    row[column] = value
-    if error:
-        row["Error"] = error
-    return row
-
-
-def _write_lengths(root, rows) -> str:
-    folder = root / "skeletons"
-    folder.mkdir(exist_ok=True)
-    path = str(folder / "root_lengths.csv")
-    write_metric_csv(rows, path, LENGTH_CSV_HEADERS)
-    return path
-
-
-def _write_areas(root, rows) -> str:
-    folder = root / "mask"
-    folder.mkdir(exist_ok=True)
-    path = str(folder / "root_areas.csv")
-    write_metric_csv(rows, path, AREA_CSV_HEADERS)
-    return path
-
-
-def _bump_mtime(path: str, seconds: float = 5.0) -> None:
-    st = os.stat(path)
-    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + int(seconds * 1e9)))
 
 
 def test_values_are_read_verbatim_from_both_csvs(tmp_path):

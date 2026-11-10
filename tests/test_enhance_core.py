@@ -20,6 +20,7 @@ from app.enhancement import (
     EnhanceSettings,
     SourceImageCache,
 )
+from tests.enhance_support import exif_rotated_jpeg
 from tests.real_data import real_data_dir
 
 
@@ -209,17 +210,6 @@ def test_default_store_lives_in_the_user_config_dir(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- cache
-def exif_rotated_jpeg(path, width=80, height=40, orientation=6) -> str:
-    """A JPEG stored ``width`` x ``height`` whose EXIF orientation says "rotate on display"."""
-    from PIL import Image
-
-    picture = Image.fromarray(np.full((height, width, 3), 128, np.uint8))
-    exif = Image.Exif()
-    exif[0x0112] = orientation  # 6 = rotate 90 degrees clockwise to display
-    picture.save(str(path), exif=exif.tobytes())
-    return str(path)
-
-
 def test_source_cache_keeps_the_stored_geometry_of_an_exif_rotated_jpeg(tmp_path):
     """Qt ignores EXIF orientation (every canvas and saved mask use the stored size), so the
     one decode must too; otherwise the photo would be transposed against the plane (C12)."""
@@ -472,7 +462,7 @@ def test_deblock_core_imports_no_torch_or_qt():
     import subprocess
     import sys
 
-    from tests.test_layering_contract import ROOT
+    from tests.enhance_support import ROOT
 
     code = (
         "import sys, numpy as np; from app.enhancement import deblock; "

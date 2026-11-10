@@ -4,7 +4,7 @@ import pytest
 from PyQt6.QtCore import qInstallMessageHandler
 
 from tests.qt_wait import settle
-from tests.test_integration_main_window_wiring import (  # noqa: F401
+from tests.window_support import (  # noqa: F401
     make_window,
     settings,
 )

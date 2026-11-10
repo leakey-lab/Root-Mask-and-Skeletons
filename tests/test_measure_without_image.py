@@ -24,7 +24,7 @@ from app.handlers import skeleton_handler
 from app.inference import measure_run
 from app.inference.input_split import split_by_image, split_inputs
 from app.project_layout import SKELETON_SUFFIX, ProjectLayout
-from tests.test_measure_handler import _handler, _project, _wait_idle
+from tests.measure_support import _handler, _project, _wait_idle
 
 ORPHAN = "orphan_T9_L2_2024.01.02_010209_001"
 

@@ -64,7 +64,7 @@ def test_x11_dashboards_embed_natively_and_skip_the_canvas_swap(monkeypatch):
 
 def test_an_x11_dashboard_gets_its_own_opengl_window(qapp, tmp_path, monkeypatch):
     import app.visualization.viz_window as vw
-    from tests.test_viz_embed_window import FakeProfile, _Dashboard
+    from tests.viz_window_support import FakeProfile, _Dashboard
 
     opengl = QSurface.SurfaceType.OpenGLSurface
     real = vw.native_child_surface

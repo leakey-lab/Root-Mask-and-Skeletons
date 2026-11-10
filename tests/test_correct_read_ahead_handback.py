@@ -23,6 +23,7 @@ import app.gui.correct.skeleton_document as skeleton_document
 from app.gui.correct.layer import MASK, SKELETON
 from app.gui.correct.mask_document import MaskDocument
 from app.gui.correct.read_ahead import ReadAhead
+from tests.correct_paging_support import GuiDecodes, key, read_ahead_done, ring
 from tests.correct_support import (
     DISCARD,
     answer_prompts,
@@ -36,7 +37,6 @@ from tests.correct_support import (
     write_image,
     write_mask,
 )
-from tests.test_correct_editor_paging import GuiDecodes, key, read_ahead_done, ring
 
 pytestmark = pytest.mark.usefixtures("correct_guards")
 

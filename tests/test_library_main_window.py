@@ -12,14 +12,14 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from tests import guards
-from tests.qt_teardown import flush_deleted
 from tests.qt_wait import wait_until as _wait
+from tests.window_project_support import mw as mw  # fixture
 from tests.window_support import open_folder, write_photos
 
 USER = Qt.ItemDataRole.UserRole
 STEMS = [f"24EFCAM1_T001_L0{d}_2024.07.18_1115{d}_001_SMM" for d in (11, 12, 13, 14, 15)]
 
-# _wait, app, mw and no_delayed_temp_sweep: test_stem_case_and_formats imports them.
+# The fixture mw is in tests/window_project_support.py (test_stem_case_and_formats uses it too).
 
 
 @pytest.fixture(scope="module")
@@ -31,23 +31,6 @@ def app():
 def no_delayed_temp_sweep(monkeypatch):
     """A loaded project's delayed stale-temp sweep does nothing (``guards.skip_temp_sweep``)."""
     guards.skip_temp_sweep(monkeypatch)
-
-
-@pytest.fixture
-def mw(app, monkeypatch):
-    from app.gui.main_window import MainWindow
-
-    monkeypatch.setattr(MainWindow, "_record_recent_project", lambda self, count: None)
-    w = MainWindow()
-    monkeypatch.setattr(w.correct_editor, "maybe_save_changes", lambda: None)
-    toasts = []
-    monkeypatch.setattr(w, "notify", lambda msg, kind="success", **_k: toasts.append((kind, msg)))
-    w.toasts_seen = toasts
-    yield w
-    w.close()
-    w.deleteLater()
-    del w
-    flush_deleted()
 
 
 def _open(mw, folder):

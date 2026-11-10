@@ -20,7 +20,6 @@ import logging
 import os
 import sys
 import threading
-from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -39,6 +38,7 @@ from app.gui.correct.layer import MASK, SKELETON
 from app.gui.key_text import platform_keys
 from app.gui.panels import Panel
 from app.gui.skeleton_graph_model import SkeletonCorrectionModel
+from tests.correct_paging_support import read_ahead_done
 from tests.correct_support import (
     CANCEL,
     DISCARD,
@@ -57,18 +57,27 @@ from tests.correct_support import (
     raster,
     record,
     same_path,
-    write_image,
     write_mask,
     write_skeleton,
 )
-from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
 from tests.qt_wait import wait_until as wait
-from tests.test_correct_editor_paging import read_ahead_done
-from tests.window_support import build_window, open_folder, quiet_window
+from tests.window_project_support import (
+    STAGE_NAMES,
+    STEMS,
+    Project,
+    activate,
+    enter,
+    in_correct,
+    leaf,
+    new_project,
+    open_project,
+    select,
+)
+from tests.window_project_support import (
+    make_window as make_window,  # fixture (the redundant alias: no F811 on its parameters)
+)
 
-STEMS = tuple(f"24EFCAM1_T001_L0{d}_2024.07.18_1115{d}_001_SMM" for d in (21, 22, 23, 24))
-STAGE_NAMES = ["Library", "Generate", "Correct", "Measure", "Visualize"]
 #: The code under test: an exception it raises inside a Qt slot fails the test.
 SLOT_ERRORS_FROM = tuple(
     os.path.normcase(os.path.join("app", "gui", *part))
@@ -95,78 +104,6 @@ SLOT_ERRORS_FROM = tuple(
 
 
 # ============================================================================== helpers
-@dataclass(frozen=True)
-class Project:
-    """A project folder: four photos; the first has a model mask and a generated skeleton."""
-
-    folder: str
-
-    def image(self, i: int) -> str:
-        """The photo of image ``i``."""
-        return os.path.join(self.folder, f"{STEMS[i]}.jpg")
-
-    def mask(self, i: int) -> str:
-        """The model's mask (the prediction) of image ``i``."""
-        return os.path.join(self.folder, "mask", f"{STEMS[i]}.png")
-
-    def gt_mask(self, i: int) -> str:
-        """The saved (GT) mask of image ``i``: what a mask save writes."""
-        return os.path.join(self.folder, "gt", "mask", f"{STEMS[i]}.png")
-
-    def correction(self, i: int) -> str:
-        """The saved (GT) skeleton of image ``i``: what a skeleton save writes."""
-        return os.path.join(self.folder, "gt", "skeletons", f"{STEMS[i]}.png")
-
-    def generated(self, i: int) -> str:
-        """The generated skeleton of image ``i``."""
-        return os.path.join(self.folder, "skeletons", f"{STEMS[i]}_fake.png")
-
-
-def new_project(root) -> Project:
-    """Four photos in ``root/project``; image 0 with a model mask and a generated skeleton."""
-    project = Project(str(root / "project"))
-    for i in range(len(STEMS)):
-        write_image(project.image(i), value=60 + 20 * i)
-    write_mask(project.mask(0), box_plane())
-    write_skeleton(project.generated(0))
-    return project
-
-
-def open_project(window, project: Project) -> None:
-    """Open ``project`` in ``window`` (the folder scan runs in a thread), wait until that
-    load has ended, and expand the tree."""
-    open_folder(window, project.folder, len(STEMS))
-    window.file_list.expandAll()
-    settle()
-
-
-def leaf(window, i: int):
-    """The library row of image ``i``."""
-    return window.library_index.item_for(STEMS[i])
-
-
-def select(window, i: int) -> None:
-    """A click on the library row of image ``i``."""
-    item = leaf(window, i)
-    window.file_list.setCurrentItem(item)
-    window.on_tree_item_clicked(item, 0)
-    settle()
-
-
-def enter(window, stage: str) -> None:
-    """A click on the topbar's ``stage`` button."""
-    window.ribbon_buttons[stage].click()
-    settle()
-
-
-def activate(window) -> None:
-    """Make ``window`` the active window (keyboard shortcuts need it)."""
-    window.show()
-    window.activateWindow()
-    assert QTest.qWaitForWindowActive(window, 3000)
-    settle()
-
-
 def record_toasts(window) -> list[tuple[str, str]]:
     """Every toast the window shows from now on, as ``(kind, message)``."""
     seen: list[tuple[str, str]] = []
@@ -184,36 +121,6 @@ def app():
 # this test never sweeps inside a later test), and no exception of the code under test
 # hidden in a Qt slot (PyQt hands those to ``sys.excepthook``).
 pytestmark = pytest.mark.usefixtures("window_guards", "slot_errors")
-
-
-@pytest.fixture
-def make_window(app, tmp_path):
-    """``make(*, show=True)`` builds a MainWindow (1280x800) with its own INI settings;
-    every window made is closed without prompts and deleted afterwards."""
-    made = []
-
-    def make(*, show: bool = True):
-        window = build_window(tmp_path / f"settings_{len(made)}.ini", show=False)
-        made.append(window)
-        if show:
-            window.show()
-            settle()
-        return window
-
-    yield make
-    delete_widgets(made, prepare=quiet_window)
-    QApplication.processEvents()
-
-
-def in_correct(make_window, tmp_path, image: int = 0, project: Project | None = None):
-    """A shown window on a new project with image ``image`` open in the Correct stage."""
-    project = project or new_project(tmp_path)
-    window = make_window()
-    open_project(window, project)
-    select(window, image)
-    enter(window, "Correct")
-    assert window.right_panel.currentIndex() == Panel.CORRECT
-    return window, project
 
 
 # ======================================================================= stages and pages

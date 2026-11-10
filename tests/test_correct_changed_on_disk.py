@@ -38,7 +38,7 @@ from tests.correct_support import (
     write_mask,
     write_skeleton,
 )
-from tests.test_editor_prompts import ESCAPE, Answer
+from tests.editor_prompts_support import ESCAPE, Answer
 
 PROMPT = ("Mask changed on disk", "gt/mask/a.png changed on disk after you opened it.")
 INFO = "Overwrite it with your edits, reload it from disk (your edits are lost), or cancel."

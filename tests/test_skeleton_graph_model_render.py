@@ -20,7 +20,7 @@ import pytest
 import app.gui.skeleton_graph_model as sgm
 from app.editing.thinning import thin_raster
 from app.gui.skeleton_graph_model import SkeletonCorrectionModel
-from tests.test_skeleton_roi import CASES, EDITS, SEEDS, _opened, _walk
+from tests.skeleton_corpus_support import CASES, EDITS, SEEDS, _opened, _walk
 
 _full_frame = sgm._skeletonize_uint8  # scikit-image on the whole frame
 

@@ -28,10 +28,10 @@ from app.inference.mask_origin import OverwritePolicy, scan_existing_masks
 from app.io_utils import path_key
 from app.naming import image_stem, stem_key
 from app.project_layout import ImageScan, ProjectLayout
+from tests.generation_stubs_support import _Brightness, _mean, _Skeleton
+from tests.measure_support import _row, _write_lengths
 from tests.qt_wait import wait_until as _wait
-from tests.test_library_main_window import mw  # noqa: F401 - fixture
-from tests.test_robust_generation_stem_clash import _Brightness, _mean, _Skeleton
-from tests.test_shell_info_measurement_index import _row, _write_lengths
+from tests.window_project_support import mw  # noqa: F401 - fixture
 
 pytestmark = pytest.mark.usefixtures("no_temp_sweep")
 

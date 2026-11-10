@@ -9,7 +9,7 @@ import re
 from app import project_layout
 from app.gui import shell_chrome
 from app.inference import skeleton_inference
-from tests.test_integration_main_window_wiring import (  # noqa: F401
+from tests.window_support import (  # noqa: F401
     app,
     make_window,
     mw,

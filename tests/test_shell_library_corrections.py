@@ -25,7 +25,7 @@ from app.gui.correct.layer import SKELETON
 from tests.correct_support import H, W, draw_line, write_skeleton
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
-from tests.test_correct_main_window import STEMS, enter, leaf, new_project, open_project, select
+from tests.window_project_support import STEMS, enter, leaf, new_project, open_project, select
 from tests.window_support import build_window, quiet_window
 
 pytestmark = pytest.mark.usefixtures("window_guards")

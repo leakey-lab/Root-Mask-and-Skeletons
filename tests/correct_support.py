@@ -2,8 +2,9 @@
 prompt answers, input on the canvas and what the layers hold.
 
 This is their one copy: the test modules that use them import them from here.
-``test_correct_editor.py`` re-exports the names that two golden modules
-(``test_correct_goldens.py``, ``test_correct_classes_goldens.py``) still import from it.
+``test_correct_editor.py`` still re-exports many of them (no other test module imports
+them from it any more). ``wheel`` came from ``test_correct_editor_keys.py``;
+``case_sensitive_folder`` is a copy of ``test_gt_case_variant_lookups.py``'s.
 ``conftest.py`` wraps four of them in fixtures (``correct_guards``, ``make_editor``,
 ``project``, ``answers``). ``install_guards`` is composed from ``tests.guards``; the user's
 config needs no line here, as every test has its own config folder (``conftest.py``).
@@ -12,13 +13,15 @@ config needs no line here, as every test has its own config folder (``conftest.p
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from dataclasses import dataclass
 
 import cv2
 import numpy as np
 import pytest
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
-from PyQt6.QtGui import QColor, QImage, QMouseEvent
+from PyQt6.QtGui import QColor, QImage, QMouseEvent, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
@@ -372,3 +375,46 @@ def count_opens(editor, monkeypatch) -> list[str]:
 
         monkeypatch.setattr(layer, "open", spy)
     return opened
+
+
+def wheel(view, dy: int) -> None:
+    viewport = view.viewport()
+    centre = QPointF(viewport.rect().center())
+    event = QWheelEvent(
+        centre,
+        QPointF(viewport.mapToGlobal(centre.toPoint())),
+        QPoint(0, 0),
+        QPoint(0, dy),
+        Qt.MouseButton.NoButton,
+        NO_MODS,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    QApplication.sendEvent(viewport, event)
+
+
+# A copy of ``test_gt_case_variant_lookups.py``'s helpers (that module is frozen in wave 1;
+# wave 2 imports them from here and drops its own).
+def _case_sensitive(folder: str) -> bool:
+    probe = os.path.join(folder, "Probe")
+    with open(probe, "wb"):
+        pass
+    try:
+        return not os.path.exists(os.path.join(folder, "probe"))
+    finally:
+        os.remove(probe)
+
+
+def case_sensitive_folder(path: str) -> str:
+    """``path`` created on a case-sensitive file system (folders made in it inherit that
+    on NTFS), else the test is skipped."""
+    os.makedirs(path)
+    if sys.platform == "win32":
+        subprocess.run(
+            ["fsutil", "file", "setCaseSensitiveInfo", path, "enable"],
+            capture_output=True,
+            check=False,
+        )
+    if not _case_sensitive(path):
+        pytest.skip("needs a case-sensitive folder (fsutil on Windows; the ubuntu CI)")
+    return path

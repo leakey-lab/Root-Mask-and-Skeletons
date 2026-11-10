@@ -34,7 +34,7 @@ from tests.correct_support import plane, write_image, write_mask
 from tests.generation_support import generation_project
 from tests.generation_support import wait_for_thread as _wait
 from tests.qt_wait import settle
-from tests.test_correct_main_window import (
+from tests.window_project_support import (
     STEMS,
     Project,
     in_correct,

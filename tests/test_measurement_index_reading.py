@@ -19,7 +19,7 @@ import pytest
 from app.config import AREA_CSV_HEADERS, LENGTH_CSV_HEADERS
 from app.data_processing.measurement_index import Measurement, MeasurementIndex
 from app.inference.measure_inputs import input_key, inputs_record_path, write_inputs_record
-from tests.test_shell_info_measurement_index import _bump_mtime, _row, _write_areas, _write_lengths
+from tests.measure_support import _bump_mtime, _row, _write_areas, _write_lengths
 
 STEM = "24EFCAM1_T001_L044_2024.07.18_111530_001_SMM"
 GT_STEM = "24EFCAM1_T001_L045_2024.07.18_111612_001_SMM"

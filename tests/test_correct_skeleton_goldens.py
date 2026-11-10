@@ -15,8 +15,6 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEvent, QPoint, Qt  # noqa: E402
-from PyQt6.QtGui import QKeyEvent  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QGraphicsScene, QMessageBox  # noqa: E402
 
 from app.gui.correct.skeleton_layer import SkeletonLayer  # noqa: E402
@@ -31,10 +29,9 @@ from tests.correct_goldens_support import (  # noqa: E402
     make_synth_project,
     sha,
 )
+from tests.skeleton_edit_support import apply  # noqa: E402
 
 GOLDENS = load_goldens()
-NO_MOD = Qt.KeyboardModifier.NoModifier
-KEYS = {"Delete": Qt.Key.Key_Delete}
 # What a saved correction must match (its bytes and the length are derived, informational).
 SAVED_KEYS = ("exists", "shape", "dtype", "colour_type", "pixels_sha256", "on_count", "values")
 
@@ -50,52 +47,6 @@ def _no_message_boxes(monkeypatch):
         raise AssertionError(f"unexpected message box: {box.text()}")
 
     monkeypatch.setattr(QMessageBox, "exec", refuse)
-
-
-def _drag(layer, points):
-    """Press at the first point, a dragging move per further point, release at the last."""
-    first, *rest = [QPoint(*p) for p in points]
-    layer.press(first, NO_MOD)
-    for point in rest:
-        layer.move(point, True)
-    layer.release(rest[-1] if rest else first)
-
-
-def apply(layer: SkeletonLayer, op: list):
-    """One golden op through the layer (C18); returns the save's result for ``save``."""
-    kind = op[0]
-    if kind == "tool":
-        layer.set_tool(op[1])
-    elif kind == "smooth":
-        layer.set_smooth(bool(op[1]))
-    elif kind == "eraser_size":
-        layer.set_size(op[1])
-    elif kind == "click":
-        _drag(layer, [op[1]])
-    elif kind == "double_click":
-        layer.double_click(QPoint(*op[1]))
-    elif kind == "drag":
-        _drag(layer, op[1])
-    elif kind == "connect_endpoints":
-        ends = sorted(layer.document.model.endpoints())
-        if len(ends) > max(op[1], op[2]):
-            _drag(layer, [ends[op[1]], ends[op[2]]])
-    elif kind == "finish":
-        layer.finish_polyline()
-    elif kind == "key":
-        layer.key(QKeyEvent(QEvent.Type.KeyPress, KEYS[op[1]], NO_MOD))
-    elif kind == "clear":
-        layer.clear()
-    elif kind == "undo":
-        if not layer.undo_in_gesture():
-            layer.undo()
-    elif kind == "redo":
-        layer.redo()
-    elif kind == "save":
-        return layer.save().ok
-    else:
-        raise ValueError(f"unknown golden op {op!r}")
-    return None
 
 
 @pytest.mark.parametrize("script", ["skeleton", "skeleton_clear"])

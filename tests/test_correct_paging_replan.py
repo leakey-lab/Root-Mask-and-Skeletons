@@ -17,8 +17,8 @@ import os
 
 import pytest
 
+from tests.correct_paging_support import key, read_ahead_done
 from tests.correct_support import write_image
-from tests.test_correct_editor_paging import key, read_ahead_done
 
 pytestmark = pytest.mark.usefixtures("correct_guards")
 

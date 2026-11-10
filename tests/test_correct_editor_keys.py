@@ -14,10 +14,9 @@ import os
 import re
 
 import pytest
-from PyQt6.QtCore import QPoint, QPointF, Qt
-from PyQt6.QtGui import QKeySequence, QShortcut, QWheelEvent
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QKeySequence, QShortcut
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication
 
 from app.gui import shortcuts
 from app.gui.correct.layer import MASK, SKELETON
@@ -35,6 +34,7 @@ from tests.correct_support import (
     plane,
     raster,
     record,
+    wheel,
 )
 
 CTRL, SHIFT = Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.ShiftModifier
@@ -190,22 +190,6 @@ def test_the_bracket_keys_resize_the_tool_of_the_edited_layer(page):
     assert (skeleton.size(), mask.size()) == (22, 8)
     press(page, Key.Key_BracketLeft)
     assert skeleton.size() < 22
-
-
-def wheel(view, dy: int) -> None:
-    viewport = view.viewport()
-    centre = QPointF(viewport.rect().center())
-    event = QWheelEvent(
-        centre,
-        QPointF(viewport.mapToGlobal(centre.toPoint())),
-        QPoint(0, 0),
-        QPoint(0, dy),
-        Qt.MouseButton.NoButton,
-        NO_MODS,
-        Qt.ScrollPhase.NoScrollPhase,
-        False,
-    )
-    QApplication.sendEvent(viewport, event)
 
 
 def test_holding_b_and_scrolling_sizes_the_mask_brush_from_the_skeleton(page):

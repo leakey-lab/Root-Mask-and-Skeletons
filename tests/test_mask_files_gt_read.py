@@ -19,14 +19,12 @@ import pytest
 from app.gui.correct import mask_files
 from app.io_utils import imread_unicode
 from app.masks import MASK_THRESHOLD, read_mask_file, store, write_mask_file
-from tests import test_mask_editor_store as editor_cases
-from tests import test_mask_store_grey_fast_path as grey_cases
-from tests import test_mask_store_rgba_fast_path as rgba_cases
+from tests.mask_corpus_support import ALL, EDITOR_CASES, RGBA_CASES
 
 CORPUS = {
-    **{f"editor_{name}": case[0] for name, case in editor_cases.CASES.items()},
-    **{f"grey_{name}": case[0] for name, case in grey_cases.ALL.items()},
-    **{f"rgba_{name}": case[0] for name, case in rgba_cases.CASES.items()},
+    **{f"editor_{name}": case[0] for name, case in EDITOR_CASES.items()},
+    **{f"grey_{name}": case[0] for name, case in ALL.items()},
+    **{f"rgba_{name}": case[0] for name, case in RGBA_CASES.items()},
 }
 
 

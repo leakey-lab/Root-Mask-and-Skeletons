@@ -31,8 +31,14 @@ from app.gui.panels import Panel
 from tests.correct_support import paint, plane, same_path
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
-from tests.qt_wait import wait_until as wait
-from tests.test_correct_main_window import STEMS, activate, enter, leaf, new_project, open_project
+from tests.window_project_support import (
+    click_row,
+    enter,
+    in_stage,
+    leaf,
+    new_project,
+    open_project,
+)
 from tests.window_support import build_window, quiet_window
 
 CTRL = Qt.KeyboardModifier.ControlModifier
@@ -55,18 +61,6 @@ def window(app, tmp_path):
     yield made[0]
     delete_widgets(made, prepare=quiet_window)
     QApplication.processEvents()
-
-
-def click_row(window, i: int) -> None:
-    """A mouse click on the library row of image ``i`` (the tree takes the keyboard)."""
-    tree = window.file_list
-    item = leaf(window, i)
-    tree.scrollToItem(item)
-    settle()
-    QTest.mouseClick(
-        tree.viewport(), Qt.MouseButton.LeftButton, pos=tree.visualItemRect(item).center()
-    )
-    settle()
 
 
 def key(widget, k, modifiers=Qt.KeyboardModifier.NoModifier) -> None:
@@ -96,28 +90,6 @@ def ctrl_wheel(view) -> None:
     )
     QApplication.sendEvent(vp, event)
     settle()
-
-
-def in_stage(window, stage: str, image: int = 1):
-    """Enter ``stage``, click the image before ``image`` in the library, then step to
-    ``image`` with the Down arrow: it opens, and the tree keeps the keyboard (by design,
-    so the arrows keep browsing)."""
-    enter(window, stage)
-    activate(window)
-    click_row(window, image - 1)
-    window.file_list.setFocus()
-    settle()
-    QTest.keyClick(window.file_list, Qt.Key.Key_Down)
-    editor = window._editors().get(window.right_panel.currentIndex())
-    if editor is not None:
-        path = window.project.image(image)
-        assert wait(lambda: same_path(editor.current_image_path, path), 2.0)
-    else:
-        assert wait(lambda: window.display_controller.current_name == STEMS[image], 2.0)
-    settle()
-    assert window.file_list.hasFocus()
-    assert window.file_list.currentItem() is leaf(window, image)
-    return editor
 
 
 def ambiguous_log(window) -> list[str]:

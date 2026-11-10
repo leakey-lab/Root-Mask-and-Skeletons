@@ -26,7 +26,7 @@ from app.gui import visualization_manager as vm
 from app.gui.panels import Panel
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
-from tests.test_correct_main_window import (
+from tests.window_project_support import (
     STAGE_NAMES,
     activate,
     leaf,

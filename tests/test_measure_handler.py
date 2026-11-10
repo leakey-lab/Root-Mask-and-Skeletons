@@ -18,52 +18,10 @@ from PyQt6 import sip
 from PyQt6.QtWidgets import QMessageBox
 
 from app import provenance
-from app.feedback import RecordingFeedback
 from app.gui.ui_feedback import QtUiFeedback
-from app.handlers.job_registry import JobRegistry
-from app.handlers.skeleton_handler import SkeletonHandler
 from app.inference import measure_run
 from app.io_utils import FileLockedError
-
-
-class _IdleGeneration:
-    def is_busy(self) -> bool:
-        return False
-
-
-def _project(tmp_path, n=4, skeletons=True, masks=True):
-    """``n`` photos of the default field of view's shape (80 x 60, 4:3, so Measure has no
-    photo shape to warn about), each with an 80 x 64 skeleton and mask."""
-    for i in range(n):
-        img = np.zeros((64, 80), np.uint8)
-        cv2.line(img, (0, i), (79, 40 + i), 255, 2)
-        name = f"x_T{i + 1}_L2_2024.01.02_01020{i}_001"
-        cv2.imwrite(str(tmp_path / f"{name}.jpg"), np.zeros((60, 80), np.uint8))
-        if skeletons:
-            (tmp_path / "skeletons").mkdir(exist_ok=True)
-            cv2.imwrite(str(tmp_path / "skeletons" / f"{name}_fake.png"), img)
-        if masks:
-            (tmp_path / "mask").mkdir(exist_ok=True)
-            cv2.imwrite(str(tmp_path / "mask" / f"{name}.png"), img)
-    return tmp_path
-
-
-def _handler(tmp_path, qapp, jobs=None):
-    mw = SimpleNamespace(
-        image_manager=SimpleNamespace(original_folder=str(tmp_path), images={}),
-        feedback=RecordingFeedback(),
-        jobs=jobs if jobs is not None else JobRegistry(),
-    )
-    return SkeletonHandler(mw, generation=_IdleGeneration()), mw
-
-
-def _wait_idle(handler, qapp, timeout=20.0):
-    end = time.monotonic() + timeout
-    while handler.is_busy() or handler.main_window.jobs.is_busy():
-        assert time.monotonic() < end, "measure did not finish"
-        qapp.processEvents()
-        time.sleep(0.005)
-    qapp.processEvents()
+from tests.measure_support import _handler, _project, _wait_idle
 
 
 def test_measure_length_runs_as_named_job_with_feedback(tmp_path, qapp):

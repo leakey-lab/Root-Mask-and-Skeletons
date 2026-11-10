@@ -15,8 +15,8 @@ import pytest
 from app.gui.correct.layer import MASK, SKELETON, ReadAheadLayer, missing_members
 from app.gui.skeleton_graph_model import SkeletonCorrectionModel
 from app.masks import MaskStore
+from tests.correct_paging_support import read_ahead_done, ring
 from tests.correct_support import bump, new_project, plane, raster, write_mask, write_skeleton
-from tests.test_correct_editor_paging import read_ahead_done, ring
 
 W, H = 200, 150
 

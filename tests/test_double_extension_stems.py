@@ -36,7 +36,7 @@ from tests.correct_support import (
     write_mask,
     write_skeleton,
 )
-from tests.test_measure_gt_first import run_area, run_length
+from tests.measure_support import run_area, run_length
 
 pytestmark = pytest.mark.usefixtures("correct_guards")
 

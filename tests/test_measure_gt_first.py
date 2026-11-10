@@ -11,7 +11,6 @@ its tooltips and the status line.
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 import threading
@@ -36,10 +35,7 @@ from tests.correct_goldens_support import (
     load_goldens,
     make_synth_project,
 )
-from tests.qt_teardown import delete_widgets
-from tests.test_measure_core import _legacy_csv, _make_dataset
-from tests.test_measure_handler import _handler, _wait_idle
-from tests.test_measure_sources import (
+from tests.measure_sources_support import (
     PHOTO_SIZE,
     STEMS,
     _write_png,
@@ -49,6 +45,16 @@ from tests.test_measure_sources import (
     write_gt_skeleton,
     write_photo,
 )
+from tests.measure_support import (
+    _csv_path,
+    _legacy_csv,
+    _make_dataset,
+    _rows,
+    _run,
+    run_area,
+    run_length,
+)
+from tests.qt_teardown import delete_widgets
 from tests.window_support import build_window, open_folder, quiet_window
 
 LENGTH_COL, AREA_COL = LENGTH_CSV_HEADERS[5], AREA_CSV_HEADERS[5]
@@ -62,17 +68,6 @@ def gt_project(tmp_path) -> tuple[ProjectLayout, dict[str, str]]:
     return make_gt_project(str(tmp_path))
 
 
-def _csv_path(layout: ProjectLayout, kind: str) -> str:
-    if kind == "length":
-        return os.path.join(layout.skeletons_dir, "root_lengths.csv")
-    return os.path.join(layout.mask_dir, "root_areas.csv")
-
-
-def _rows(path: str) -> dict[str, dict]:
-    with open(path, newline="", encoding="utf-8") as fh:
-        return {row["Image"]: row for row in csv.DictReader(fh)}
-
-
 def _sidecar(csv_path: str) -> dict:
     with open(csv_path + ".provenance.json", encoding="utf-8") as fh:
         return json.load(fh)
@@ -80,24 +75,6 @@ def _sidecar(csv_path: str) -> dict:
 
 def _notices(mw) -> list[tuple]:
     return [c.args for c in mw.feedback.calls if c.name == "notify"]
-
-
-def _run(layout: ProjectLayout, qapp, kind: str):
-    """Measure ``kind`` through the handler, as the Measure button does; the fake window."""
-    handler, mw = _handler(layout.root, qapp)
-    (handler.calculate_root_length if kind == "length" else handler.calculate_root_area)()
-    _wait_idle(handler, qapp)
-    return mw
-
-
-def run_length(layout: ProjectLayout, qapp) -> dict[str, dict]:
-    _run(layout, qapp, "length")
-    return _rows(_csv_path(layout, "length"))
-
-
-def run_area(layout: ProjectLayout, qapp) -> dict[str, dict]:
-    _run(layout, qapp, "area")
-    return _rows(_csv_path(layout, "area"))
 
 
 def other_skeleton() -> np.ndarray:
@@ -164,7 +141,7 @@ def seed_golden_correction(root: str, case: str) -> ProjectLayout:
     ``layout.gt_skeleton_path``; the pixels are the golden's."""
     from app.gui.correct.skeleton_layer import SkeletonLayer
     from tests.correct_fakes import FakeHost
-    from tests.test_correct_skeleton_goldens import apply
+    from tests.skeleton_edit_support import apply
 
     folder, image_path = make_synth_project(root, case)
     height, width = imread_unicode(image_path).shape[:2]

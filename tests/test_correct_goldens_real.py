@@ -34,13 +34,7 @@ from app.editing.thinning import thin_raster  # noqa: E402
 from app.gui.correct.layer import MASK, SKELETON  # noqa: E402
 from app.io_utils import imread_unicode, imwrite_unicode  # noqa: E402
 from app.project_layout import ProjectLayout  # noqa: E402
-from tests import test_correct_goldens as drivers  # noqa: E402
-from tests.correct_goldens_support import (  # noqa: E402
-    describe_mask_file,
-    describe_skeleton_file,
-    sha,
-)
-from tests.test_correct_goldens import (  # noqa: E402
+from tests.correct_goldens_page_support import (  # noqa: E402
     OPS,
     apply,
     assert_mask_file,
@@ -52,9 +46,14 @@ from tests.test_correct_goldens import (  # noqa: E402
 )
 
 # The page's fixtures, as the synthetic goldens use them (pytest finds them by these names).
-app = drivers.app
-guards = drivers.guards
-make_editor = drivers.make_editor
+from tests.correct_goldens_page_support import app as app  # noqa: E402 - fixture
+from tests.correct_goldens_page_support import guards as guards  # noqa: E402 - fixture
+from tests.correct_goldens_page_support import make_editor as make_editor  # noqa: E402 - fixture
+from tests.correct_goldens_support import (  # noqa: E402
+    describe_mask_file,
+    describe_skeleton_file,
+    sha,
+)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXAMPLES = os.path.join(REPO_ROOT, "docs", "examples")

@@ -30,6 +30,7 @@ from app.gui.correct.mask_files import mask_stamps, read_mask
 from app.io_utils import file_stamp
 from app.masks import MaskFileError, MaskStore, write_mask_file
 from app.project_layout import ProjectLayout
+from tests.correct_paging_support import read_ahead_done, ring
 from tests.correct_support import (
     DISCARD,
     H,
@@ -37,14 +38,13 @@ from tests.correct_support import (
     answer_prompts,
     box_plane,
     bump,
+    case_sensitive_folder,
     paint,
     plane,
     record,
     write_image,
     write_mask,
 )
-from tests.test_correct_editor_paging import read_ahead_done, ring
-from tests.test_gt_case_variant_lookups import case_sensitive_folder
 
 pytestmark = pytest.mark.usefixtures("correct_guards")
 

@@ -26,8 +26,7 @@ from tests.correct_support import paint, same_path
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
 from tests.qt_wait import wait_until as wait
-from tests.test_correct_main_window import STEMS, leaf, new_project, open_project
-from tests.test_shell_keys_after_tree_focus import click_row, in_stage
+from tests.window_project_support import STEMS, click_row, in_stage, leaf, new_project, open_project
 from tests.window_support import build_window, quiet_window
 
 # No prompt or file dialog, no GL, no delayed sweeps.

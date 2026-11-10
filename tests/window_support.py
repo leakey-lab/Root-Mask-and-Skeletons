@@ -16,6 +16,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from PyQt6.QtCore import QSettings
+from PyQt6.QtWidgets import QApplication
+
+from tests import guards
+from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle, wait_until
 
 #: The size the window tests use.
@@ -86,3 +92,46 @@ def open_folder(window, folder, count: int, timeout: float = 5.0) -> None:
         ),
         timeout,
     ), f"opening {folder}: the load did not end with {count} images in {timeout} s"
+
+
+# ======================================================== the fixtures of the wiring tests
+# Moved here from test_integration_main_window_wiring.py; test_wording_guards.py and
+# test_startup_qt_warnings.py use them too. A test module takes one by importing it by name.
+
+
+@pytest.fixture(scope="module")
+def app():
+    return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(autouse=True)
+def no_delayed_temp_sweep(monkeypatch):
+    """A loaded project's delayed stale-temp sweep does nothing (``guards.skip_temp_sweep``)."""
+    guards.skip_temp_sweep(monkeypatch)
+
+
+@pytest.fixture
+def settings(tmp_path):
+    return QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
+
+
+@pytest.fixture
+def make_window(app, settings):
+    """``make(settings=...)``: a MainWindow on the test's INI settings (or on the given ones),
+    neither resized nor shown; every window made is closed without prompts afterwards."""
+    windows = []
+
+    def make(**kwargs):
+        windows.append(
+            build_window(settings=kwargs.pop("settings", settings), size=None, show=False)
+        )
+        return windows[-1]
+
+    yield make
+    delete_widgets(windows, prepare=quiet_window)
+    QApplication.processEvents()
+
+
+@pytest.fixture
+def mw(make_window):
+    return make_window()

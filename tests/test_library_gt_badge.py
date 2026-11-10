@@ -32,7 +32,7 @@ from app.project_layout import ProjectLayout
 from tests.correct_support import H, W, draw_line, paint, write_mask
 from tests.qt_teardown import delete_widgets, flush_deleted
 from tests.qt_wait import settle
-from tests.test_correct_main_window import STEMS, enter, new_project, open_project, select
+from tests.window_project_support import STEMS, enter, new_project, open_project, select
 from tests.window_support import build_window, quiet_window
 
 STEM = "24EFCAM1_T001_L011_2024.07.18_111530_001_SMM"

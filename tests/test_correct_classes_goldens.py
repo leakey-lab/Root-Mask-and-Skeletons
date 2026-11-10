@@ -34,8 +34,8 @@ from app.gui import canvas_gl  # noqa: E402
 from app.gui.correct.classes_layer import ClassesLayer  # noqa: E402
 from app.gui.correct.layer import CLASSES  # noqa: E402
 from tests.correct_fakes import FakeHost  # noqa: E402
+from tests.correct_support import drag, editor_factory  # noqa: E402
 from tests.gt_goldens_support import GT_CASES, load_goldens, make_gt_project, replay  # noqa: E402
-from tests.test_correct_editor import drag, editor_factory  # noqa: E402
 
 INFORMATIONAL = {"file_sha256_informational"}  # encoder bytes may differ; pixels may not
 PAGE_CASES = tuple(case for case in GT_CASES if case != "empty_save")  # O2: see the docstring

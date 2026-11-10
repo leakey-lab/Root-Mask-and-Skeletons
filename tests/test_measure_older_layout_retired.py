@@ -13,7 +13,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from tests.test_measure_handler import _handler, _project, _wait_idle
+from tests.measure_support import _handler, _project, _wait_idle
 
 
 def _warnings(mw) -> list[str]:

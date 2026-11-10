@@ -18,7 +18,7 @@ from app.gui.panels import Panel
 from tests.correct_support import same_path
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
-from tests.test_correct_main_window import STEMS, enter, new_project, open_project, select
+from tests.window_project_support import STEMS, enter, new_project, open_project, select
 from tests.window_support import build_window, quiet_window
 
 USER = Qt.ItemDataRole.UserRole

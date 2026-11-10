@@ -8,46 +8,16 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import Executor, Future
 from pathlib import Path
 
-import cv2
 import numpy as np
 import pytest
 
 from app.gui.correct.read_ahead import AheadImage, ReadAhead, read_image
 from app.io_utils import file_stamp, path_key
+from tests.read_ahead_support import InlineExecutor, Payload, photo
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-class InlineExecutor(Executor):
-    """Runs each job at once on the calling thread (a finished Future comes back)."""
-
-    def __init__(self) -> None:
-        self.submitted = 0
-
-    def submit(self, fn, /, *args, **kwargs):
-        self.submitted += 1
-        future: Future = Future()
-        try:
-            future.set_result(fn(*args, **kwargs))
-        except BaseException as exc:  # noqa: BLE001 - the future carries it
-            future.set_exception(exc)
-        return future
-
-
-class Payload:
-    """A layer payload that reports its size."""
-
-    def __init__(self, nbytes: int) -> None:
-        self.nbytes = nbytes
-
-
-def photo(tmp_path, name: str = "a.png", w: int = 40, h: int = 30, value: int = 90) -> str:
-    path = str(tmp_path / name)
-    cv2.imwrite(path, np.full((h, w, 3), value, np.uint8))
-    return path
 
 
 def bump(path: str) -> None:

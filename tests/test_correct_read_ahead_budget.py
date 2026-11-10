@@ -19,7 +19,7 @@ import numpy as np
 
 from app.gui.correct.read_ahead import AheadImage, ReadAhead
 from app.io_utils import file_stamp, path_key
-from tests.test_correct_read_ahead import InlineExecutor, Payload, photo
+from tests.read_ahead_support import InlineExecutor, Payload, photo
 
 
 class ManualExecutor(Executor):

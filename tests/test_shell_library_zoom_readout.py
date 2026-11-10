@@ -12,7 +12,7 @@ import pytest
 from app.gui.key_text import platform_keys
 from app.gui.metrics_bar import MetricsBar
 from tests.qt_teardown import delete_widgets, flush_deleted
-from tests.test_correct_main_window import new_project, open_project, select
+from tests.window_project_support import new_project, open_project, select
 from tests.window_support import build_window
 
 

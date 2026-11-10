@@ -21,7 +21,7 @@ from app.gui.correct.layer import MASK, LayerStatus
 from app.gui.key_text import platform_keys
 from app.masks import write_mask_file
 from tests.correct_support import CANCEL, SAVE, paint, record, write_image
-from tests.test_editor_prompts import ESCAPE, Answer
+from tests.editor_prompts_support import ESCAPE, Answer
 
 NOT_SHOWN_SIZE = (
     "Saved mask size does not match the image: it is not shown and is kept unless you save over it"

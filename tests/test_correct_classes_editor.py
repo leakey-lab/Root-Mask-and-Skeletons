@@ -532,7 +532,7 @@ def test_f_takes_the_fill_of_the_classes_layer_and_the_masks_from_the_skeleton(
 
 
 def test_b_and_the_wheel_size_the_brush_of_the_classes_layer(page):
-    from tests.test_correct_editor_keys import wheel
+    from tests.correct_support import wheel
 
     mask_size = page.layers[MASK].size()
     QTest.keyPress(page.graphics_view, Qt.Key.Key_B)

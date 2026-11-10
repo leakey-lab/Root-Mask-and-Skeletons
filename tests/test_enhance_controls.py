@@ -254,7 +254,7 @@ def test_display_pixmap_raw_then_enhanced_and_none_for_missing(app, tmp_path):
 
 def test_source_image_is_one_cached_decode_in_qt_geometry(app, tmp_path):
     """C12: the editors decode once; the array has the size QImage gives the same file."""
-    from tests.test_enhance_core import exif_rotated_jpeg
+    from tests.enhance_support import exif_rotated_jpeg
 
     path = exif_rotated_jpeg(tmp_path / "rotated.jpg")
     controls = NormalizationControls(store=_store(tmp_path))

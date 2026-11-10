@@ -22,14 +22,14 @@ from app.gui.skeleton_document import GT, PREDICTION, SkeletonFiles
 from app.io_utils import imread_unicode
 from app.project_layout import ProjectLayout
 from tests.correct_support import H, W, click, draw_line, raster, record, write_skeleton
-from tests.test_correct_main_window import (
+from tests.qt_wait import settle
+from tests.window_project_support import (
     STEMS,
     enter,
     open_project,
     select,
-    settle,
 )
-from tests.test_correct_main_window import new_project as new_window_project
+from tests.window_project_support import new_project as new_window_project
 
 # The Correct page's guards; a loaded project's stale-temp sweep 2 s later (R8) is a no-op.
 pytestmark = pytest.mark.usefixtures("correct_guards", "no_temp_sweep")

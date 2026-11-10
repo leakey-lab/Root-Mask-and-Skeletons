@@ -59,7 +59,17 @@ import pytest
 
 # Rich assert messages in the shared helpers too (registered before any import of them).
 pytest.register_assert_rewrite(
-    "tests.correct_support", "tests.generation_support", "tests.guards", "tests.window_support"
+    "tests.correct_goldens_page_support",
+    "tests.correct_support",
+    "tests.generation_support",
+    "tests.guards",
+    "tests.mask_corpus_support",
+    "tests.measure_sources_support",
+    "tests.measure_support",
+    "tests.skeleton_corpus_support",
+    "tests.skeleton_edit_support",
+    "tests.window_project_support",
+    "tests.window_support",
 )
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

@@ -33,7 +33,7 @@ from tests.correct_support import drag, paint
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
 from tests.qt_wait import wait_until as wait
-from tests.test_correct_main_window import STEMS, enter, new_project, open_project, select
+from tests.window_project_support import STEMS, enter, new_project, open_project, select
 from tests.window_support import build_window, quiet_window
 
 pytestmark = pytest.mark.usefixtures("window_guards")

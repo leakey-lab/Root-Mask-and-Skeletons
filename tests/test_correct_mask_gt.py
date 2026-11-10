@@ -27,6 +27,7 @@ from app.io_utils import imread_unicode
 from app.masks import write_mask_file
 from app.project_layout import ProjectLayout
 from tests.correct_goldens_support import describe_mask_file, png_colour_type
+from tests.correct_paging_support import read_ahead_done, ring
 from tests.correct_support import (
     CANCEL,
     H,
@@ -40,7 +41,6 @@ from tests.correct_support import (
     write_image,
     write_mask,
 )
-from tests.test_correct_editor_paging import read_ahead_done, ring
 
 pytestmark = pytest.mark.usefixtures("correct_guards")
 

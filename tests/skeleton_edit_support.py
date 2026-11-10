@@ -4,7 +4,9 @@ Builds 1 px skeletons from straight lines (thinned by scikit-image, so they are 
 editor opens), opens them in a real ``SkeletonLayer`` on an offscreen scene with a recording
 ``FakeHost``, and sends it clicks, double-clicks and keys as the canvas does (press,
 release, double-click, release). Used by ``test_skeleton_junction_edits.py``,
-``test_skeleton_pick_without_edit.py`` and ``test_skeleton_ring_pick.py``.
+``test_skeleton_pick_without_edit.py`` and ``test_skeleton_ring_pick.py``. ``apply`` replays
+one golden op of ``tests/data/correct_goldens.json`` through the layer, for
+``test_correct_skeleton_goldens.py`` and ``test_measure_gt_first.py``.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from tests.correct_fakes import FakeHost
 
 W, H = 640, 480
 NO_MOD = Qt.KeyboardModifier.NoModifier
+KEYS = {"Delete": Qt.Key.Key_Delete}
 
 
 def thin(mask: np.ndarray) -> np.ndarray:
@@ -112,3 +115,49 @@ def pick(layer: SkeletonLayer, x: int, y: int) -> None:
 def edits(host: FakeHost) -> int:
     """How many undoable actions the layer reported."""
     return sum(1 for call in host.calls if call[0] == "layer_edited")
+
+
+def _drag(layer, points):
+    """Press at the first point, a dragging move per further point, release at the last."""
+    first, *rest = [QPoint(*p) for p in points]
+    layer.press(first, NO_MOD)
+    for point in rest:
+        layer.move(point, True)
+    layer.release(rest[-1] if rest else first)
+
+
+def apply(layer: SkeletonLayer, op: list):
+    """One golden op through the layer (C18); returns the save's result for ``save``."""
+    kind = op[0]
+    if kind == "tool":
+        layer.set_tool(op[1])
+    elif kind == "smooth":
+        layer.set_smooth(bool(op[1]))
+    elif kind == "eraser_size":
+        layer.set_size(op[1])
+    elif kind == "click":
+        _drag(layer, [op[1]])
+    elif kind == "double_click":
+        layer.double_click(QPoint(*op[1]))
+    elif kind == "drag":
+        _drag(layer, op[1])
+    elif kind == "connect_endpoints":
+        ends = sorted(layer.document.model.endpoints())
+        if len(ends) > max(op[1], op[2]):
+            _drag(layer, [ends[op[1]], ends[op[2]]])
+    elif kind == "finish":
+        layer.finish_polyline()
+    elif kind == "key":
+        layer.key(QKeyEvent(QEvent.Type.KeyPress, KEYS[op[1]], NO_MOD))
+    elif kind == "clear":
+        layer.clear()
+    elif kind == "undo":
+        if not layer.undo_in_gesture():
+            layer.undo()
+    elif kind == "redo":
+        layer.redo()
+    elif kind == "save":
+        return layer.save().ok
+    else:
+        raise ValueError(f"unknown golden op {op!r}")
+    return None
