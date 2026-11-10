@@ -56,10 +56,10 @@ def test_chart_titles_use_one_scheme(length, area):
     assert area.show_growth_over_time().layout.title.text == "Root Area Growth Over Time"
     assert length.show_growth_lines(1).layout.title.text == "Root Length Depth Profile - Tube 1"
     assert area.show_growth_lines(1).layout.title.text == "Root Area Depth Profile - Tube 1"
-    for dashboard in (length, area):
+    for dashboard, label in ((length, "Length"), (area, "Area")):
         faceted = dashboard.create_faceted_depth_profile([1, 2])
         assert faceted.layout.title.text == (
-            "Depth Profile Grid - Field Average (Left) vs Tube (Right)"
+            f"Root {label} Depth Profile Grid - Field Average (Left) vs Tube (Right)"
         )
 
 
@@ -68,6 +68,8 @@ def test_legend_title_and_depth_axes_agree(length, area):
         for fig in (dashboard.create_stacked_bar_chart(), dashboard.show_growth_lines(1)):
             assert fig.layout.legend.title.text == "Measurement date"
         assert dashboard.show_growth_lines(1).layout.yaxis.title.text == "Position (L)"
+        grid = dashboard.create_faceted_depth_profile([1, 2])
+        assert grid.layout.yaxis.title.text == "Position (L)"
 
 
 def test_hover_dates_are_iso(length):

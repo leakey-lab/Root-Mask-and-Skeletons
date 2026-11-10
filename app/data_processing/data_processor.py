@@ -3,6 +3,7 @@
 import logging
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 
 from app.config import LENGTH_VALUE_COLUMN
@@ -40,6 +41,20 @@ def _parse_dates(text: pd.Series) -> pd.Series:
     return dates.where(inside).astype("datetime64[ns]")
 
 
+def _numbers(cells: pd.Series) -> pd.Series:
+    """``cells`` as numbers; text, empty cells and infinities (``inf``, ``-inf``) are NaN.
+
+    Measure never writes an infinity, but a hand-edited CSV can hold one: the charts and
+    exports would show it, and the depth intervals cannot place it (the Depth Profile Grid
+    failed with "cannot convert float infinity to integer"). Its row is left out as
+    unreadable, like a non-numeric cell.
+    """
+    numbers = pd.to_numeric(cells, errors="coerce")
+    if pd.api.types.is_float_dtype(numbers):
+        numbers = numbers.mask(np.isinf(numbers))
+    return numbers
+
+
 @dataclass(frozen=True)
 class RowExclusions:
     """Rows of a metric CSV that the dashboards leave out, by cause (FR-15).
@@ -48,7 +63,8 @@ class RowExclusions:
         failed: measurements that failed (non-empty ``Error`` cell).
         bad_name: image names ``app.naming`` cannot read a tube, position and
             date from (not in :data:`NAME_FORMAT_HINT` form, e.g. ``IMG_0001``).
-        unreadable: other rows with a missing or non-numeric field or value.
+        unreadable: other rows with a missing or non-numeric field or value (an infinite
+            number included).
     """
 
     failed: int = 0
@@ -215,11 +231,9 @@ class MetricDataProcessor:
                     "Date": _parse_dates(df["Date"]),
                     # No integer downcast: int8 positions overflow in the depth-interval
                     # arithmetic (124 -> interval end 130 wraps to -126, PV-01).
-                    "Tube": pd.to_numeric(df["Tube"], errors="coerce"),
-                    "Position": pd.to_numeric(df["Position"], errors="coerce"),
-                    self.value_column: pd.to_numeric(df[self.value_column], errors="coerce").astype(
-                        "float64"
-                    ),
+                    "Tube": _numbers(df["Tube"]),
+                    "Position": _numbers(df["Position"]),
+                    self.value_column: _numbers(df[self.value_column]).astype("float64"),
                 },
                 index=df.index,
             )

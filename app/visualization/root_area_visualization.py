@@ -7,21 +7,26 @@ import functools
 from app.config import DASH_AREA_PORT
 
 from ._viz_server import _DashServerThreadBase
-from .viz_window import Builder, DashVizWindow, require_rows
+from .viz_window import Builder, DashVizWindow, project_root_of, require_rows
 
 
-def build_area_dashboard(csv_path: str, save_directory: str, image_manager):
+def build_area_dashboard(
+    csv_path: str, save_directory: str, image_manager, *, project_root: str | None = None
+):
     """``(DataProcessorArea, DashAppArea)`` for a ``root_areas.csv``; runs on the init worker.
 
     pandas, dash and plotly are imported here: off the GUI thread, and only
-    when a dashboard is opened.
+    when a dashboard is opened. ``project_root``: the open project's folder, for the
+    export's field of view (None: the project file above the CSV).
     """
     from app.data_processing.data_processor_area import DataProcessorArea
 
     from .dash_app_area import DashAppArea
 
     processor = require_rows(DataProcessorArea(csv_path))
-    return processor, DashAppArea(processor, save_directory, image_manager)
+    return processor, DashAppArea(
+        processor, save_directory, image_manager, project_root=project_root
+    )
 
 
 class DashServerThreadArea(_DashServerThreadBase):
@@ -45,6 +50,11 @@ class RootAreaVisualization(DashVizWindow):
         super().__init__(csv_path, parent)
 
     def _dashboard_builder(self) -> Builder:
+        # The project's folder is read here, on the GUI thread; the worker gets a string.
         return functools.partial(
-            build_area_dashboard, self.csv_path, self.save_directory, self.image_manager
+            build_area_dashboard,
+            self.csv_path,
+            self.save_directory,
+            self.image_manager,
+            project_root=project_root_of(self.image_manager),
         )

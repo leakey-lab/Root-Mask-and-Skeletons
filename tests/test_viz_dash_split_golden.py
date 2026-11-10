@@ -22,8 +22,9 @@ import pytest
 from tests.viz_dash_helpers import build_length_app
 
 # plotly.js 4: main-graph's config sets showSendToCloud and doubleClickDelay back to their
-# plotly.js 3 values (dash_shell.graph_config); without the two keys it is c0fb067a....
-GOLDEN_LAYOUT_SHA256 = "544df6b8dc151d391af9596affebecab2e0b0e2902452ab7f7603ca416e930e2"
+# plotly.js 3 values (dash_shell.graph_config); the hash includes the two keys. The Growth
+# Over Time option reads "Show Field ±1 SD Shading" (its band is +/- 1 SD, not a variance).
+GOLDEN_LAYOUT_SHA256 = "c22ecb59e3165cb90b0912561bf293f873e0e28669a8d3a1dd628e45de8ef053"
 GOLDEN_CLIENTSIDE_JS_SHA256 = "1863b8b26341b720103746b6bb34d387a351178883aa2759244b69871ee5c174"
 # (output, inputs, states, prevent_initial_call, runs in the browser), in registration order.
 GOLDEN_CALLBACKS = (

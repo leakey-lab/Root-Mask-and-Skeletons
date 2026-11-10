@@ -540,6 +540,7 @@ class DashboardShell:
         source_csv: str,
         metric_column: str,
         metric_slug: str,
+        project_root: str | None = None,
     ) -> None:
         """Wire "Export CSV": the current view's table plus provenance (PV-16).
 
@@ -551,6 +552,9 @@ class DashboardShell:
             source_csv: the metric CSV the dashboard was opened on.
             metric_column: e.g. "Length (mm)".
             metric_slug: file-name prefix, e.g. "root_length".
+            project_root: the open project's folder, for the field of view of the
+                calibration line (:func:`.dash_export.calibration_line`); None looks for
+                the project file above ``source_csv``.
         """
 
         @app.callback(
@@ -572,6 +576,7 @@ class DashboardShell:
                     metric_column=metric_column,
                     view=view,
                     generated_at=now,
+                    project_root=project_root,
                 )
                 filename = dash_export.export_filename(metric_slug, view, now)
             except PreventUpdate:

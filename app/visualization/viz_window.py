@@ -32,6 +32,7 @@ from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWidgets import QLabel, QMainWindow, QStackedLayout, QWidget
 
 from app.design import tokens
+from app.project_layout import project_layout_of
 from app.qt_environment import linux_quick_uses_opengl, windows_quick_uses_direct3d
 from app.workers import GuardedThread, release_qthread
 
@@ -94,6 +95,18 @@ def native_child_surface(
     if platform == "xcb" and linux_quick_uses_opengl(environ):
         return QSurface.SurfaceType.OpenGLSurface
     return None
+
+
+def project_root_of(image_manager) -> str | None:
+    """The folder of ``image_manager``'s project (:func:`app.project_layout.project_layout_of`,
+    as the window resolves it), or None when nothing is loaded.
+
+    Read on the GUI thread when a dashboard's build is set up: the worker gets the folder as a
+    string, so the export's calibration line uses the open project's ``sprouts_project.json``
+    and not a project file found above the CSV (``docs/KNOWN_ISSUES.md`` M7).
+    """
+    layout = project_layout_of(image_manager)
+    return None if layout is None else layout.root
 
 
 def require_rows(processor):

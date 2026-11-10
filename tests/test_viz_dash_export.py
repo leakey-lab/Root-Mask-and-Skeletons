@@ -184,7 +184,7 @@ def test_faceted_export_pairs_tube_and_field_means(length_app):
     table = _read(download["content"])
     assert list(table.columns) == [
         "Tube", "Date", "Interval start", "Interval end", "Mean Length (mm)", "Count",
-        "Field Mean Length (mm)", "Field SD (mm)",
+        "Field Mean Length (mm)", "Field SD (mm)", "Field Count",
     ]  # fmt: skip
     got = {(r.Date, r[3]): (r[4], r[6]) for r in table.itertuples(index=False)}
     # Tube 2 has L5 on 07-18 (interval L1-10) and L12 on 08-07 (L11-20). Field

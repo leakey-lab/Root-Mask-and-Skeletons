@@ -77,6 +77,7 @@ def register_callbacks(dash_app) -> None:
         source_csv=dash_app.data_processor.csv_path,
         metric_column=dash_app.data_cache.value_column,
         metric_slug=dash_app.metric_slug,
+        project_root=dash_app.project_root,
     )
 
     # The control cards of the selected view, shown in the browser in the click's

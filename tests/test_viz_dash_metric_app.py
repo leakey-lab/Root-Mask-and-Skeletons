@@ -178,7 +178,7 @@ def test_area_time_view_with_one_tube_draws_without_a_band(tmp_path):
         selected_tubes=[1], show_field_average=True, show_field_variance=True
     )
     names = [trace.name for trace in figure.data]
-    assert "Field Variance (±1 SD)" not in names
+    assert "Field Mean ±1 SD" not in names
     assert "Field Average" in names
 
 

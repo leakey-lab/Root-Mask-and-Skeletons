@@ -230,7 +230,7 @@ def viz_options_card() -> dbc.Card:
                     id="growth-viz-options",
                     options=[
                         {"label": "Show Field Average", "value": "show_field_avg"},
-                        {"label": "Show Field Variance Shading", "value": "show_field_var"},
+                        {"label": "Show Field ±1 SD Shading", "value": "show_field_var"},
                     ],
                     value=["show_field_avg", "show_field_var"],
                     className="viz-checklist",

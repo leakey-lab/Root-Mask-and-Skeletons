@@ -32,8 +32,11 @@ from . import theme
 INTERVAL_SIZE = 10
 #: Most tube columns the grid is designed for.
 MAX_TUBES = 6
+#: The grid's title, after the metric (``Root Length`` / ``Root Area``), as the other views'.
 TITLE = "Depth Profile Grid - Field Average (Left) vs Tube (Right)"
-DEPTH_AXIS_TITLE = "Vertical Depth (cm)"
+#: The depth axis holds positions (one camera frame along the tube each), not centimetres:
+#: the title of the Depth Profile view's depth axis too.
+POSITION_AXIS_TITLE = "Position (L)"
 
 
 @dataclass(frozen=True)
@@ -42,8 +45,9 @@ class FacetCell:
 
     All tuples run in parallel over the intervals that have tube rows, shallow
     to deep. ``field_means``/``field_stds`` pool every tube of the date (not only
-    the selected ones); ``depth_fractions`` place each interval between the
-    tube's first (0.0) and last (1.0) interval of that date.
+    the selected ones), ``field_counts`` the images behind them (a ``field_stds`` of 0
+    with a count of 1 is undefined, drawn as 0); ``depth_fractions`` place each interval
+    between the tube's first (0.0) and last (1.0) interval of that date.
     """
 
     tube: Any
@@ -55,6 +59,7 @@ class FacetCell:
     field_means: tuple[float, ...] = ()
     field_stds: tuple[float, ...] = ()
     depth_fractions: tuple[float, ...] = ()
+    field_counts: tuple[int, ...] = ()
 
     @property
     def has_data(self) -> bool:
@@ -87,15 +92,17 @@ def _build_cell(cache, tube, date, field_table: dict, interval_size: int) -> Fac
         return FacetCell(tube=tube, date=date)
 
     first, last = min(table), max(table)
-    field_means, field_stds = [], []
+    field_means, field_stds, field_counts = [], [], []
     for end in measured:
         field = field_table.get(end)
         if field is not None and field["count"] > 0:
             field_means.append(field["avg"])
             field_stds.append(0 if math.isnan(field["std"]) else field["std"])
+            field_counts.append(field["count"])
         else:  # cannot happen for consistent data (tube rows are field rows)
             field_means.append(0)
             field_stds.append(0)
+            field_counts.append(0)
     return FacetCell(
         tube=tube,
         date=date,
@@ -108,6 +115,7 @@ def _build_cell(cache, tube, date, field_table: dict, interval_size: int) -> Fac
         depth_fractions=tuple(
             (end - first) / (last - first) if last > first else 0.5 for end in measured
         ),
+        field_counts=tuple(field_counts),
     )
 
 
@@ -431,12 +439,19 @@ class _FacetedFigureAssembler:
             y_tickvals.append(y_max)
         # hide the 0 and max depth labels to reduce clutter
         y_ticktext = ["" if v in (0, y_max) else str(v) for v in y_tickvals]
+        # Each bottom panel's bars are interval means: the field's left, the tube's right.
+        value_title = f"Mean {self.label} ({self.unit})"
 
         updates: dict[str, Any] = {
             # The template itself: without validation a name is not looked up, and
             # plotly.js ignores a template given as a string.
             "template": pio.templates["sprouts"],
-            "title": {"text": TITLE, "y": 0.985, "yanchor": "top", "font": {"size": 16}},
+            "title": {
+                "text": f"Root {self.label} {TITLE}",
+                "y": 0.985,
+                "yanchor": "top",
+                "font": {"size": 16},
+            },
             "showlegend": True,
             "autosize": True,
             # Smaller per-row height so few-row selections roughly fill the
@@ -444,8 +459,9 @@ class _FacetedFigureAssembler:
             # scroll but with readable, non-overlapping text.
             "height": max(560, self.n_rows * 300),
             # Wider top margin separates the main title from the "Tube N"
-            # column titles; trim the oversized right margin.
-            "margin": {"l": 64, "r": 60, "t": 118, "b": 52},
+            # column titles; trim the oversized right margin. The bottom one holds the
+            # value-axis titles under the tick labels.
+            "margin": {"l": 64, "r": 60, "t": 118, "b": 76},
             "hovermode": "closest",
             "barmode": "overlay",  # field and tube bars share each depth row
             "shapes": [],
@@ -473,12 +489,13 @@ class _FacetedFigureAssembler:
                     "ticks": "outside" if bottom else "",
                     "ticklen": 6 if bottom else 0,
                     "tickfont": {"size": 11},
+                    "title": {"text": value_title if bottom else "", "font": {"size": 13}},
                 }
                 depth_title = col == 1 and row == (self.n_rows + 1) // 2
                 updates[f"yaxis{suffix}"] = {
                     "range": [y_max, 0],  # depth grows downwards
                     "title": {
-                        "text": DEPTH_AXIS_TITLE if depth_title else "",
+                        "text": POSITION_AXIS_TITLE if depth_title else "",
                         "font": {"size": 13},
                     },
                     "showgrid": True,
@@ -517,7 +534,7 @@ def faceted_profile_figure(
 
     Args:
         profile: output of :func:`build_faceted_profile` with at least one date.
-        label: metric name for hover text (e.g. "Length", "Area").
-        unit: metric unit for hover text (e.g. "mm", "mm²").
+        label: metric name for the title, value axes and hover text (e.g. "Length", "Area").
+        unit: metric unit for the value axes and hover text (e.g. "mm", "mm²").
     """
     return _FacetedFigureAssembler(profile, label, unit).figure()

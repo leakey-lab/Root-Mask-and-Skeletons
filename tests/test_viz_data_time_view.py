@@ -98,10 +98,10 @@ def _reference_length(charts, tubes, show_field_average, show_field_variance, sh
                     fill="tonexty",
                     fillcolor=theme.rgba(theme.TEXT, 0.10),
                     line=dict(color="rgba(0,0,0,0)"),
-                    name="Field Variance (±1 SD)",
+                    name="Field Mean ±1 SD",
                     legendgroup="field_avg",
                     hovertemplate=theme.hover(
-                        "Field Variance Range",
+                        "Field ±1 SD Range",
                         [("Date", "%{x|%Y-%m-%d}"), ("Range", "+-1 Standard Deviation")],
                     ),
                 )

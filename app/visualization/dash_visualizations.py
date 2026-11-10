@@ -16,7 +16,12 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from . import theme
-from .faceted_profile import MAX_TUBES, build_faceted_profile, faceted_profile_figure
+from .faceted_profile import (
+    MAX_TUBES,
+    POSITION_AXIS_TITLE,
+    build_faceted_profile,
+    faceted_profile_figure,
+)
 from .figure_memo import FigureMemo
 
 logger = logging.getLogger(__name__)
@@ -180,9 +185,9 @@ class DashVisualizations:
             return self._memoized(
                 ("lines", selected_tube), lambda: self._growth_lines_figure(selected_tube)
             )
-        except Exception:
+        except Exception as e:
             logger.exception("Error generating growth lines")
-            return go.Figure()
+            return theme.message_figure(f"Error: {e}", color=theme.DANGER)
 
     def _growth_lines_figure(self, tube: int) -> go.Figure:
         label, unit = self._metric_text()
@@ -241,7 +246,7 @@ class DashVisualizations:
         fig.update_layout(
             title_text=f"Root {label} Depth Profile - Tube {int(tube)}",
             xaxis_title_text=f"Root {label} ({unit})",
-            yaxis_title_text="Position (L)",
+            yaxis_title_text=POSITION_AXIS_TITLE,
             legend_title_text="Measurement date",
             hovermode="closest",
         )
@@ -293,12 +298,12 @@ class DashVisualizations:
         show_legend: bool | None = True,
     ) -> go.Figure:
         """
-        Generate growth over time figure with flexible tube selection and variance options.
+        Generate growth over time figure with flexible tube selection and the field's SD band.
 
         Args:
             selected_tubes: List of tube numbers to display. If None or empty, no individual tubes shown.
             show_field_average: Whether to show the field average line
-            show_field_variance: Whether to show shaded variance for field average
+            show_field_variance: Whether to shade the field average's ±1 SD band
             show_legend: Whether to display the legend; None: only up to
                 :data:`AUTO_LEGEND_MAX_TUBES` tubes (see :func:`auto_legend`)
 
@@ -312,9 +317,9 @@ class DashVisualizations:
             return self._memoized(
                 ("time", tubes, *flags), lambda: self._growth_over_time_figure(tubes, *flags)
             )
-        except Exception:
+        except Exception as e:
             logger.exception("Error generating growth over time")
-            return go.Figure()
+            return theme.message_figure(f"Error: {e}", color=theme.DANGER)
 
     def _growth_over_time_figure(
         self, tubes: tuple, show_field_average: bool, show_field_variance: bool, show_legend: bool
@@ -389,10 +394,10 @@ class DashVisualizations:
                     fill="tonexty",
                     fillcolor=theme.rgba(theme.TEXT, 0.10),
                     line={"color": "rgba(0,0,0,0)"},
-                    name="Field Variance (±1 SD)",
+                    name="Field Mean ±1 SD",
                     legendgroup="field_avg",
                     hovertemplate=theme.hover(
-                        "Field Variance Range",
+                        "Field ±1 SD Range",
                         [
                             ("Date", "%{x|%Y-%m-%d}"),
                             ("Range", "+-1 Standard Deviation"),
@@ -428,9 +433,9 @@ class DashVisualizations:
         """Create an optimized stacked bar chart."""
         try:
             return self._memoized(("stacked",), self._stacked_bar_figure)
-        except Exception:
+        except Exception as e:
             logger.exception("Error generating stacked bar chart")
-            return go.Figure()
+            return theme.message_figure(f"Error: {e}", color=theme.DANGER)
 
     def _stacked_bar_figure(self) -> go.Figure:
         return stacked_bar_figure(self.data_cache, *self._metric_text())

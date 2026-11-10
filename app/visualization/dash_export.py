@@ -133,23 +133,28 @@ def depth_intervals(
 
 
 def faceted_intervals(profile, value_column: str) -> pd.DataFrame:
-    """Tube vs field-average interval means of a faceted profile (as drawn).
+    """Tube vs field-average interval means of a faceted profile (as drawn), with the
+    number of images behind each field mean.
 
-    ``profile`` is a :class:`~app.visualization.faceted_profile.FacetedProfile`.
+    ``profile`` is a :class:`~app.visualization.faceted_profile.FacetedProfile`. The SD of
+    a field mean over fewer than two images is undefined: its cell is empty, as in the
+    Depth Profile export (the figure draws it as 0).
     """
     unit = _unit(value_column)
     rows = []
     for row in profile.cells:
         for cell in row:
-            for start, end, mean, count, field_mean, field_sd in zip(
+            for start, end, mean, count, field_mean, field_sd, field_count in zip(
                 cell.interval_starts, cell.interval_ends, cell.tube_means,
-                cell.tube_counts, cell.field_means, cell.field_stds, strict=True,
+                cell.tube_counts, cell.field_means, cell.field_stds, cell.field_counts,
+                strict=True,
             ):  # fmt: skip
+                sd = field_sd if field_count > 1 else float("nan")
                 rows.append((int(cell.tube), _day(cell.date), start, end, mean, count,
-                             field_mean, field_sd))  # fmt: skip
+                             field_mean, sd, field_count))  # fmt: skip
     columns = [
         "Tube", "Date", "Interval start", "Interval end", f"Mean {value_column}", "Count",
-        f"Field Mean {value_column}", f"Field SD ({unit})",
+        f"Field Mean {value_column}", f"Field SD ({unit})", "Field Count",
     ]  # fmt: skip
     return pd.DataFrame(rows, columns=columns)
 

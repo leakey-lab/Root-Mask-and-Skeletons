@@ -49,10 +49,22 @@ class MetricDashApp(DashVisualizations):
     #: File-name prefix of "Export CSV", e.g. "root_length".
     metric_slug: ClassVar[str]
 
-    def __init__(self, data_processor: Any, save_directory: str, image_manager=None):
+    def __init__(
+        self,
+        data_processor: Any,
+        save_directory: str,
+        image_manager=None,
+        *,
+        project_root: str | None = None,
+    ):
+        """``project_root``: the folder of the open project, whose ``sprouts_project.json``
+        the export's calibration line compares with (:func:`.dash_export.calibration_line`);
+        None looks for the project file above the CSV (a dashboard built without a project).
+        """
         self.data_processor = data_processor
         self.save_directory = save_directory
         self.image_manager = image_manager
+        self.project_root = project_root
 
         # (tube, position, date) -> image path, parsed after the first chart was sent
         # (see _parse_images_after_this_response) or on first use (PV-17).

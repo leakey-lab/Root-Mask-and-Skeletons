@@ -49,6 +49,7 @@ def test_profile_cells_hold_measured_bins_and_field_means(cache):
     assert tube1_a.tube_counts == (2, 1)
     assert tube1_a.field_means == pytest.approx((3.0, 10.0))
     assert tube1_a.field_stds == pytest.approx((math.sqrt(2), 0.0))  # single row -> 0
+    assert tube1_a.field_counts == (2, 1)
     assert tube1_a.depth_fractions == pytest.approx((0.0, 1.0))  # over the L1-L30 span
     assert tube2_a.interval_ends == (20,)
     assert tube2_a.depth_fractions == (0.5,)  # a single bin sits mid-scale
@@ -88,7 +89,10 @@ def test_figure_draws_one_panel_per_cell_with_shared_scales(cache):
         assert tuple(layout[key].range) == (40, 0)
         assert list(layout[key].tickvals) == [0, 20, 40]
         assert list(layout[key].ticktext) == ["", "20", ""]
-    assert layout.yaxis.title.text == "Vertical Depth (cm)"
+    assert layout.yaxis.title.text == "Position (L)"
+    assert [layout[k].title.text for k in ("xaxis", "xaxis2", "xaxis3", "xaxis4")] == [
+        "", "", "Mean Length (mm)", "Mean Length (mm)",
+    ]  # fmt: skip
     assert layout.height == 600
     assert layout.barmode == "overlay"
     titles = [a.text for a in layout.annotations]
