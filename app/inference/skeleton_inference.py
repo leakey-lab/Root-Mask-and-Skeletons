@@ -146,6 +146,47 @@ class Identity(nn.Module):
         return x
 
 
+class ImageStatsBatchNorm2d(nn.BatchNorm2d):
+    """BatchNorm2d that normalises each image with its own statistics.
+
+    Every image of the batch is normalised with its own per-channel mean and biased
+    variance over H x W, then scaled by ``weight`` and shifted by ``bias``. The running
+    statistics are neither used nor updated. ``instance_norm`` is batch norm in training
+    mode on the batch reshaped to (1, N * C, H, W): for one image it is the same kernel
+    that ``nn.BatchNorm2d`` runs in train mode, and a row's result never depends on the
+    other rows (a zero row has variance 0 and gives ``bias``, never NaN).
+
+    Parameters and buffers are those of ``nn.BatchNorm2d``, so a checkpoint's state dict
+    loads into either class and keeps its keys.
+    """
+
+    def forward(self, input):
+        self._check_input_dim(input)
+        return nn.functional.instance_norm(
+            input,
+            running_mean=None,
+            running_var=None,
+            weight=self.weight,
+            bias=self.bias,
+            use_input_stats=True,
+            eps=self.eps,
+        )
+
+
+def use_image_norm_stats(net: nn.Module) -> int:
+    """Switch every ``nn.BatchNorm2d`` of ``net`` to :class:`ImageStatsBatchNorm2d`.
+
+    Done in place on the loaded network (the class of each layer is swapped; module
+    names, parameters and buffers stay as loaded). Returns the number of layers switched.
+    """
+    switched = 0
+    for module in net.modules():
+        if type(module) is nn.BatchNorm2d:
+            module.__class__ = ImageStatsBatchNorm2d
+            switched += 1
+    return switched
+
+
 def get_norm_layer(norm_type="instance"):
     """Return a normalization layer."""
     if norm_type == "batch":
@@ -383,14 +424,26 @@ class EnhancedResnetGenerator(nn.Module):
 
 
 class SkeletonModel:
-    """Skeleton inference model wrapper."""
+    """Skeleton inference model wrapper.
 
-    def __init__(self, gpu_ids=None):
+    ``norm_stats`` (``runtime.SKELETON_NORM_STATS_MODES``; default
+    ``runtime.skeleton_norm_stats()``, read once here) says where the generator's
+    BatchNorm layers take their statistics from, and stays the mode of this model:
+    ``"running"``, the checkpoint's running statistics (``netG.eval()``); ``"image"``,
+    each image's own statistics (:class:`ImageStatsBatchNorm2d`). Dropout is off in both.
+    """
+
+    def __init__(self, gpu_ids=None, norm_stats: str | None = None):
+        from app.inference import runtime  # local import, as in the module's other functions
+
+        self.norm_stats = runtime.resolve_skeleton_norm_stats(norm_stats)
         gpu_ids = gpu_ids or []
         self.device = torch.device(f"cuda:{gpu_ids[0]}") if gpu_ids else torch.device("cpu")
         self.netG = self._load_network()
-        # Ensure the model is in eval mode (ML correctness: no BatchNorm train-mode noise)
+        # Eval mode: Dropout off, and no BatchNorm layer updates its running statistics.
         self.netG.eval()
+        if self.norm_stats == "image":
+            use_image_norm_stats(self.netG)
 
     def _load_network(self) -> EnhancedResnetGenerator:
         """The generator with the weights at ``runtime.skeleton_weights_path()``, on the device.
@@ -544,6 +597,8 @@ def run_skeleton_generation(
                 "load_size": LOAD_SIZE,
                 "aspect_ratio": ASPECT_RATIO,
                 "output_size_wh": list(config.SKELETON_OUTPUT_SIZE),
+                # The mode of the model that ran (None: not loaded, or a model without it).
+                "norm_stats": getattr(model, "norm_stats", None),
             },
         )
 

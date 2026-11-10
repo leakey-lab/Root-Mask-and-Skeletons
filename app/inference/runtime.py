@@ -33,11 +33,13 @@ Public API:
   peek_runtime() -> RuntimeConfig | None  (never resolves)
   warm_up(models=True) -> RuntimeConfig   (imports for the first job + get_runtime(); no model)
   describe_runtime(resolve=False) -> RuntimeSummary  (status line; never loads models)
-  get_skeleton_model(device) -> SkeletonModel  (cached singleton)
+  get_skeleton_model(device, norm_stats) -> SkeletonModel  (cached, one per mode)
   get_mask_model(device) -> torch.nn.Module     (cached singleton)
   release_cuda_cache() -> None            (call once when a batch job ends)
   batch_policy() -> str                   ("fixed" | "auto", SPROUTS_BATCH_POLICY; O4)
   resolve_batch_policy(policy) -> str     (a caller's explicit policy, else batch_policy())
+  skeleton_norm_stats() -> str            ("running" | "image", SPROUTS_SKELETON_NORM_STATS)
+  resolve_skeleton_norm_stats(mode) -> str  (a caller's explicit mode, else the above)
   fixed_batch_size(model, device_type) -> int   (never queries the GPU)
   check_fixed_batch_memory(model, batch_size, device_type) -> float | None
                                           (pre-flight: free GiB, stops below the floor)
@@ -82,6 +84,16 @@ DEFAULT_BATCH_POLICY = "fixed"
 FIXED_MASK_BATCH_SIZE_CUDA = 4
 FIXED_SKELETON_BATCH_SIZE_CUDA = 64
 
+# Where the skeleton generator's BatchNorm layers take their statistics from.
+# "running": netG.eval(), the checkpoint's running statistics. "image": each image's own
+# per-channel mean and variance (the checkpoint was trained and validated that way, as
+# pix2pix test.py runs without --eval, batch 1), Dropout off: deterministic, and an image's
+# result does not depend on the other rows of its batch (the batch shape still picks the
+# GPU kernels, as in "running"). Fixed when the model loads.
+SKELETON_NORM_STATS_ENV = "SPROUTS_SKELETON_NORM_STATS"
+SKELETON_NORM_STATS_MODES = ("running", "image")
+DEFAULT_SKELETON_NORM_STATS = "running"
+
 # Pre-flight floors (GiB) of a fixed-size GPU run (research/o4-gpu-batch.md, Exp 1c /
 # Exp 4). Below them cuDNN can switch kernels without an error and outputs change. They
 # are compared with the DRIVER's free memory (torch.cuda.mem_get_info) read after the
@@ -93,6 +105,9 @@ FIXED_SKELETON_BATCH_SIZE_CUDA = 64
 #                 leaves ~0.4 GiB, the margin for the cuDNN / cuBLAS handles that load after
 #                 the pre-flight (a Generate run, mask model loaded, needs about 3.8 GiB).
 #   masks 16:    only for a caller's explicit 16: identical down to 12 000 MiB; floor 12.0.
+# The skeleton floor is that of norm statistics "running". "image" needs more: on an RTX
+# 5070 Ti (torch 2.15.0+cu132) batch 64 was identical down to a 4400 MiB cap and changed
+# at 4300, so 3.8 GiB free does not keep its kernels.
 FIXED_MASK_VRAM_FLOOR_GIB = 3.6
 FIXED_SKELETON_VRAM_FLOOR_GIB = 3.8
 FIXED_MASK_16_VRAM_FLOOR_GIB = 12.0
@@ -165,6 +180,40 @@ def resolve_batch_policy(policy: str | None) -> str:
     if policy not in BATCH_POLICIES:
         raise ValueError(f"Unknown batch policy {policy!r}; expected one of {BATCH_POLICIES}")
     return policy
+
+
+def skeleton_norm_stats() -> str:
+    """``SPROUTS_SKELETON_NORM_STATS`` (stripped, lower-cased) if valid, else the default.
+
+    Read on every call. Unset or blank gives ``DEFAULT_SKELETON_NORM_STATS``; an unknown
+    value logs a warning and gives the default too.
+    """
+    raw = os.environ.get(SKELETON_NORM_STATS_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_SKELETON_NORM_STATS
+    value = raw.strip().lower()
+    if value in SKELETON_NORM_STATS_MODES:
+        return value
+    logger.warning(
+        "Unknown %s=%r; using %r (expected one of %s)",
+        SKELETON_NORM_STATS_ENV,
+        raw,
+        DEFAULT_SKELETON_NORM_STATS,
+        ", ".join(SKELETON_NORM_STATS_MODES),
+    )
+    return DEFAULT_SKELETON_NORM_STATS
+
+
+def resolve_skeleton_norm_stats(mode: str | None) -> str:
+    """A caller's explicit mode (validated), or :func:`skeleton_norm_stats` for ``None``."""
+    if mode is None:
+        return skeleton_norm_stats()
+    if mode not in SKELETON_NORM_STATS_MODES:
+        raise ValueError(
+            f"Unknown skeleton norm statistics {mode!r}; expected one of "
+            f"{SKELETON_NORM_STATS_MODES}"
+        )
+    return mode
 
 
 def fixed_batch_size(model: str, device_type: str) -> int:
@@ -468,12 +517,24 @@ def _is_loaded(factory: Any) -> bool:
 _model_lock = threading.Lock()
 
 
-@functools.lru_cache(maxsize=1)
-def get_skeleton_model(device: torch.device | None = None):
-    """Return a cached singleton SkeletonModel for skeleton inference.
+def get_skeleton_model(device: torch.device | None = None, norm_stats: str | None = None):
+    """Return the cached SkeletonModel for skeleton inference.
 
-    The generator network and its checkpoint are loaded exactly once per
-    process, on the runtime device, in eval mode and (on CUDA) channels_last.
+    The generator network and its checkpoint are loaded once per (device, norm
+    statistics mode), on the runtime device, in eval mode and (on CUDA) channels_last.
+    ``norm_stats`` defaults to :func:`skeleton_norm_stats`, resolved here on every call,
+    so a model built for one mode is never served for another; the cache holds one
+    model, so switching modes releases the other one. ``cache_info`` / ``cache_clear``
+    are those of the cache.
+    """
+    _refuse_pool_thread()
+    return _cached_skeleton_model(device, resolve_skeleton_norm_stats(norm_stats))
+
+
+@functools.lru_cache(maxsize=1)
+def _cached_skeleton_model(device: torch.device | None, norm_stats: str):
+    """The model of :func:`get_skeleton_model` for one (device, resolved mode) key.
+
     Imported lazily to avoid a circular import with skeleton_inference.
     """
     _refuse_pool_thread()
@@ -485,7 +546,7 @@ def get_skeleton_model(device: torch.device | None = None):
     target = device if device is not None else rt.device
     with _model_lock:
         gpu_ids = [target.index or 0] if target.type == "cuda" else []
-        model = SkeletonModel(gpu_ids=gpu_ids)
+        model = SkeletonModel(gpu_ids=gpu_ids, norm_stats=norm_stats)
         net = model.netG
         if rt.use_channels_last and target.type == "cuda":
             try:
@@ -493,8 +554,12 @@ def get_skeleton_model(device: torch.device | None = None):
             except (RuntimeError, ValueError) as exc:
                 logger.debug("channels_last not applied to skeleton model: %s", exc)
         net.eval()
-    logger.info("Skeleton model singleton created on %s", target)
+    logger.info("Skeleton model singleton created on %s (norm statistics %s)", target, norm_stats)
     return model
+
+
+get_skeleton_model.cache_info = _cached_skeleton_model.cache_info  # type: ignore[attr-defined]
+get_skeleton_model.cache_clear = _cached_skeleton_model.cache_clear  # type: ignore[attr-defined]
 
 
 @functools.lru_cache(maxsize=1)
@@ -572,6 +637,9 @@ __all__ = [
     "BATCH_POLICY_ENV",
     "CUDNN_BENCHMARK_ENV",
     "DEFAULT_BATCH_POLICY",
+    "DEFAULT_SKELETON_NORM_STATS",
+    "SKELETON_NORM_STATS_ENV",
+    "SKELETON_NORM_STATS_MODES",
     "FIXED_MASK_16_VRAM_FLOOR_GIB",
     "FIXED_MASK_BATCH_SIZE_CUDA",
     "FIXED_MASK_VRAM_FLOOR_GIB",
@@ -582,6 +650,8 @@ __all__ = [
     "check_fixed_batch_memory",
     "fixed_batch_size",
     "resolve_batch_policy",
+    "resolve_skeleton_norm_stats",
+    "skeleton_norm_stats",
     "RuntimeConfig",
     "RuntimeSummary",
     "describe_runtime",
