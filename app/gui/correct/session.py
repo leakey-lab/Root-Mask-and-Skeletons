@@ -198,6 +198,12 @@ class CorrectSession:
         self.journal.forget(layer_id)
         self._take(layer_id)
 
+    def reopen_layer(self, layer_id: str) -> None:
+        """Read ``layer_id`` alone again from disk (its timeline entries go, its stamps are
+        taken again); the other layers and their edits stay. The page's Unmark calls it."""
+        with self._batch:
+            self._reopen(layer_id)
+
     def _root(self) -> str:
         """The project folder the gate's file labels are relative to."""
         return self._images_base_folder or os.path.dirname(self.image_path)

@@ -67,8 +67,8 @@ class CorrectEditor(PagingApi, QWidget):
     mask_cleared = pyqtSignal(str)  # image path: a mask equal to the prediction removed its GT
     skeleton_saved = pyqtSignal(str)  # GT skeleton path (measured, O1): Library, metrics bar
     skeleton_cleared = pyqtSignal(str)  # image path: the skeleton equals the prediction, GT removed
-    gt_saved = pyqtSignal(str)  # image path: its class labels were written (gt/<stem>.png)
-    gt_removed = pyqtSignal(str)  # image path: Remove GT… deleted its GT files
+    gt_saved = pyqtSignal(str)  # image path: its class labels were written, or a save found them
+    gt_removed = pyqtSignal(str)  # image path: GT deleted (Remove GT…, Unmark) or none on disk
     b_key_status_changed = pyqtSignal(bool)
     navigate_requested = pyqtSignal(int)  # PgDn / PgUp after the dirty layers were saved
     active_layer_changed = pyqtSignal(str)

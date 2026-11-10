@@ -233,10 +233,9 @@ class SkeletonLayer:
             return False
         self.finish_gesture()
         self.cancel_transient()
-        self.model.push_undo()
-        self.model.clear()
+        cleared = self.model.clear_step()  # no pixel set: no step, nothing to undo
         self.render_skeleton()
-        self.notify(self.CLEARED_NOTICE, "info")
+        self.notify(self.CLEARED_NOTICE if cleared else f"No {self.noun} to clear", "info")
         return True
 
     def undo(self) -> bool:

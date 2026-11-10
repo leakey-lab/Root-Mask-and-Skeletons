@@ -586,7 +586,7 @@ def test_row_error_survives_add_form_edits(app):
 
 
 def test_default_add_colour_is_never_taken(app):
-    retired = default_registry().add(key="old", name="Old", color="#4c9bd6").retire("old")
+    retired = default_registry().add(key="old", name="Old", color="#76ff03").retire("old")
     for registry in (default_registry(), retired):
         dialog = _dialog(registry)
         for name in ("First", "Second", "Third"):

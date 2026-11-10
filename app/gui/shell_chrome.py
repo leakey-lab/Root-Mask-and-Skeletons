@@ -368,7 +368,8 @@ class ShellTopbar(QFrame):
         # unsaved) and asks before it deletes the image's GT files.
         mw.gt_remove_button = mw.correct_editor.actions.remove_button
         # Mark empty: the Correct page owns it too (on while the image's class labels are
-        # untouched and no labels file is saved or kept for it).
+        # untouched and no labels file is saved or kept for it; it reads Unmark while its
+        # saved labels are empty).
         mw.gt_empty_button = mw.correct_editor.actions.empty_button
 
         pages = {

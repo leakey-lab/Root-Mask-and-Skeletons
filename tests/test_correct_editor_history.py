@@ -361,16 +361,23 @@ def test_sixty_mixed_actions_undo_and_redo_exactly_across_both_layers(
     states = [state(editor)]  # states[i + 1]: after action i
     owners: list[str] = []
     memo: dict = {}
+    empty_clears = 0  # Clear on a mask with no set pixel: no action (review 2026-11-10)
     for index, kind in enumerate(action_kinds(rng)):
+        if kind == "clear" and not plane(editor).any():
+            act(editor, rng, kind, memo)
+            empty_clears += 1
+            assert len(journal) == len(owners), (index, kind)  # no step
+            assert_state(editor, states[-1], (index, kind))  # nothing changed
+            continue
         owners.append(act(editor, rng, kind, memo))
-        assert len(journal) == index + 1, (index, kind)  # exactly one action each
+        assert len(journal) == len(owners), (index, kind)  # exactly one action each
         states.append(state(editor))
-    assert len(owners) == 60 and owners.count(SKELETON) == 32
+    assert len(owners) == 60 - empty_clears and owners.count(SKELETON) == 32
     assert journal.undo_entries == tuple(owners)
     limit = editor.layers[SKELETON].document.model.max_stack_size
     assert limit == 25 < owners.count(SKELETON)
     kept = [i for i, owner in enumerate(owners) if owner == SKELETON][-limit:]
-    undoable = [i for i in reversed(range(60)) if owners[i] == MASK or i in kept]
+    undoable = [i for i in reversed(range(len(owners))) if owners[i] == MASK or i in kept]
     active = editor.active_layer_id
     tools = {layer_id: layer.current_tool for layer_id, layer in editor.layers.items()}
 

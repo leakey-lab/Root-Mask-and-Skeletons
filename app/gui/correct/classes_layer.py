@@ -138,19 +138,15 @@ class ClassesLayer(RasterLayer):
         super().press(pos, modifiers)
 
     def clear(self) -> bool:
-        """``RasterLayer.clear``; False while read-only (or nothing is open). A plane that is
-        all background already changes nothing (no step; Save would write nothing, O2): the
-        notice says so, and names Mark empty while no labels file is saved for the image."""
-        if self.locked():
-            return False
+        """``RasterLayer.clear``; False while read-only (or nothing is open)."""
+        return False if self.locked() else super().clear()
+
+    def nothing_to_clear(self) -> str:
+        """``RasterLayer.nothing_to_clear`` for labels that are all background already (Save
+        would write nothing, O2): names Mark empty while no labels file is saved."""
         document = self.document
-        if document.is_open():
-            self.finish_gesture()  # a stroke in progress becomes its own action first
-            if document.is_all_background():
-                saved = document.has_saved_file or document.unloaded_file()
-                self._host.notify(self.NOTHING_SAVED if saved else self.NOTHING_TO_CLEAR, "info")
-                return True
-        return super().clear()
+        saved = document.has_saved_file or document.unloaded_file()
+        return self.NOTHING_SAVED if saved else self.NOTHING_TO_CLEAR
 
     def replace_plane(self, plane) -> bool:
         """``RasterLayer.replace_plane``; False while read-only (no history entry)."""

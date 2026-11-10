@@ -121,10 +121,8 @@ class RasterLayer:
         self._tool: MaskTool = self._tools[self.tools[0].tool_id]
         self._drag: MaskTool | None = None  # the tool that began the drag in progress
         self._stepping = False  # an undo / redo is replaying a patch
-        self._size = self.DEFAULT_SIZE
-        self._opacity = self.DEFAULT_OPACITY
-        self._active = True
-        self._visible = True
+        self._size, self._opacity = self.DEFAULT_SIZE, self.DEFAULT_OPACITY
+        self._active = self._visible = True
         self._root = ""  # the project folder the file labels are relative to
         self._apply_opacity()
 
@@ -194,13 +192,18 @@ class RasterLayer:
 
     # ------------------------------------------------------------------ plane
     def clear(self) -> bool:
-        """Empty the plane as one undoable action (Save then writes an empty file)."""
+        """Empty the plane as one undoable action; no pixel set: no step (nothing_to_clear)."""
         if not self.document.is_open():
             return False
         self.finish_gesture()  # a stroke in progress becomes its own action first
-        self.canvas.clear()
-        self._host.notify(self.CLEARED_NOTICE, "info")
+        if filled := bool(self.document.history.plane.any()):
+            self.canvas.clear()
+        self._host.notify(self.CLEARED_NOTICE if filled else self.nothing_to_clear(), "info")
         return True
+
+    def nothing_to_clear(self) -> str:
+        """Clear's notice on a plane with no set pixel ("No mask to clear")."""
+        return f"No {self.noun} to clear"
 
     def replace_plane(self, plane: np.ndarray) -> bool:
         """Put ``plane`` in as one undoable action; False (nothing changes) while nothing is

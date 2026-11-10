@@ -302,9 +302,7 @@ class PageActions(QObject):
         """Read the class labels again from disk, as the save gate does for a file changed
         on disk (their timeline entries go, their stamps are taken again); the other layers
         and their unsaved edits stay."""
-        session = self._editor.session
-        session._reopen(CLASSES)  # the session's one-layer read (no public name yet)
-        session.forget(CLASSES)  # its batch refreshes the page once
+        self._editor.session.reopen_layer(CLASSES)  # one refresh of the page at its end
 
     def _labels_followed(self, path: str) -> None:
         """The class labels were read again from disk: MainWindow's Library mark and metrics

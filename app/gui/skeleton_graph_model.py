@@ -789,6 +789,15 @@ class SkeletonCorrectionModel:
         self._fixed_point = False
         self._touch()
 
+    def clear_step(self) -> bool:
+        """Erase every skeleton pixel as one undoable action (``push_undo``, then
+        :meth:`clear`); False, and no step, when no pixel is set or no mask is loaded."""
+        if self.is_empty():
+            return False
+        self.push_undo()
+        self.clear()
+        return True
+
     def clear(self) -> None:
         """Erase every skeleton pixel (call push_undo() first to make it undoable)."""
         if self._mask is None:

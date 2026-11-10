@@ -3,7 +3,7 @@
 The right panel shows one page at a time (:class:`~app.gui.panels.Panel`); leaving the
 editor first offers to save its pending edits, and an editor the user keeps editing
 refuses the switch. The window follows the editor's reports: its notices (toasts; a
-save's toast updates in place, as does Remove GT's), the title's unsaved marker, a saved
+save's toast updates in place, as do Remove GT's and Unmark's), the title's unsaved marker, a saved
 or removed mask, skeleton or class labels and Remove GT… (the Library badge's GT marks and
 the metrics; a GT skeleton is measured first, O1), and B held on the Correct canvas.
 
@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 
 #: The one toast of the editors' saves: a newer save updates it in place (V6).
 SAVED_TOAST = "editor-saved"
-#: The notices that are that toast: a save's summary and Remove GT's.
-_SAVED_PREFIXES = ("Saved ", "Removed GT ")
+#: The notices that are that toast: a save's summary, Remove GT's and Unmark's.
+_SAVED_PREFIXES = ("Saved ", "Removed GT ", "Unmarked ")
 
 
 def editors(window: "MainWindow") -> dict:
@@ -49,10 +49,11 @@ def editor_canvas(window: "MainWindow"):
 
 
 def on_editor_notice(window: "MainWindow", message: str, kind: str) -> None:
-    """An editor's notice as a toast. A save's summary ("Saved mask · X.jpg") and Remove
-    GT's ("Removed GT · X.jpg") are the one keyed save toast: saving again, or paging on
-    with PgDn, updates it in place instead of stacking copies (V6). Every other notice, a
-    failed save's among them, shows as is."""
+    """An editor's notice as a toast. A save's summary ("Saved mask · X.jpg"), Remove GT's
+    ("Removed GT · X.jpg") and Unmark's ("Unmarked · X.jpg") are the one keyed save toast:
+    saving again, Unmark after Mark empty, or paging on with PgDn, updates it in place
+    instead of stacking copies (V6). Every other notice, a failed save's among them, shows
+    as is."""
     key = SAVED_TOAST if kind == "success" and message.startswith(_SAVED_PREFIXES) else None
     window.notify(message, kind, key=key)
 
@@ -68,9 +69,10 @@ def on_gt_saved(window: "MainWindow", image_path: str) -> None:
 
 
 def on_gt_removed(window: "MainWindow", image_path: str) -> None:
-    """Remove GT… deleted the GT files of ``image_path``: the Library's three GT marks follow
-    the disk (a file that could not be deleted keeps its mark), then its row and the
-    metrics (Measure reads GT first, O1). The page's own toast says what went."""
+    """Remove GT… or Unmark deleted GT files of ``image_path`` (or the Correct page read its
+    class labels again and found none): the Library's three GT marks follow the disk (a
+    file that could not be deleted keeps its mark), then its row and the metrics (Measure
+    reads GT first, O1). The page's own toast says what went."""
     manager, stem = window.image_manager, image_stem(image_path)
     layout = project_layout_of(manager)
     found = None if layout is None else gt_files(layout, image_path)
