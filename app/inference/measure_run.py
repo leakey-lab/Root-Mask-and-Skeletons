@@ -41,7 +41,7 @@ from app.config import (
     ROOT_LENGTHS_CSV,
     SOURCE_COLUMN,
 )
-from app.inference import measure_inputs, measure_sources, metrics
+from app.inference import measure_inputs, measure_sources, metrics, run_record
 from app.inference.batch_pipeline import LogLimiter
 from app.inference.input_split import (
     InputSplit,
@@ -513,6 +513,9 @@ class MeasureRun:
                     "files": dict(report.files),  # a read-only mapping: JSON wants a dict
                     "skipped": [{"stem": stem, "reason": why} for stem, why in report.skipped],
                 }
+            # The generation run behind the predictions (their folder is the CSV's); None
+            # (JSON null) when no Generate run of this app wrote into it.
+            inputs["generation"] = run_record.generation_summary(self.output_dir)
             outputs: dict[str, Any] = {
                 "csv": os.path.basename(csv_path),
                 "columns": list(self.spec.headers),

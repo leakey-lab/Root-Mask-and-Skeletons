@@ -16,10 +16,15 @@ record of the run that made the outputs. Every such run is also one line of
 built or written, a minimal one (``provenance.minimal_record``: the outcome and
 ``provenance_error``) replaces it, and if even that fails the outdated file is
 removed: the folder never describes an older run than its outputs (R5).
+
+:func:`generation_summary` reads both files back for a Measure run, whose CSV sits in the
+same folder as the predictions it measured: the CSV's sidecar then names the generation run.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 from collections.abc import Callable, Mapping, Sequence
@@ -32,6 +37,12 @@ logger = logging.getLogger(__name__)
 
 #: A history line lists the written names up to this many; beyond it, a count and a digest.
 HISTORY_NAMES_LIMIT = 1000
+#: A mapping copied into a generation summary is nested at most this deep; a deeper one is
+#: left out, so the sidecar that holds the summary can always be written (its pretty-printing
+#: encoder recurses once per level).
+SUMMARY_DEPTH_LIMIT = 32
+#: A field the manifest does not have (unlike one recorded as ``null``).
+_MISSING = object()
 
 
 def _reason(exc: BaseException) -> str:
@@ -165,4 +176,172 @@ def record_failed_run(
         logger.error("Could not record the failed run: %s", exc, exc_info=exc)
 
 
-__all__ = ["HISTORY_NAMES_LIMIT", "history_entry", "record_failed_run", "write_run_manifest"]
+def generation_summary(output_dir: str) -> dict[str, Any] | None:
+    """Which generation run made the predictions in ``output_dir``, for a Measure sidecar.
+
+    ``None`` when the folder has neither ``_sprouts_run.json`` nor ``_sprouts_runs.jsonl``
+    (no Generate run of this app wrote into it: predictions copied in by hand, GT only).
+    Otherwise a small JSON-able dict: ``record`` and ``record_sha256`` (the manifest's name
+    and the SHA-256 of the bytes parsed), the manifest's ``kind``, ``created_utc``,
+    ``app_version``, ``git_commit``, ``status``, ``models`` (``{name: sha256}``),
+    ``parameters``, ``torch`` and ``inference`` (from ``runtime``) and, for a minimal record,
+    ``provenance_error``; and ``history``, the distinct model digests, app versions and
+    commits of every run in ``_sprouts_runs.jsonl``. The manifest describes the latest run
+    into the folder that wrote or failed an input; a prediction kept from an earlier run
+    (*Keep predictions*) can come from another run, which is why the history's distinct
+    digests are listed.
+
+    Never raises for anything those two files hold: a manifest that cannot be read or is not
+    a JSON object gives ``record`` and ``error`` only (the history is still summarised), a
+    field of the wrong type (or nested deeper than ``SUMMARY_DEPTH_LIMIT``) is left out, and
+    a history line that is not a JSON object is counted in ``n_unreadable``.
+    """
+    try:
+        summary = _manifest_summary(provenance.run_manifest_path(output_dir))
+        history = _history_summary(provenance.run_history_path(output_dir))
+    except Exception as exc:  # noqa: BLE001 - a Measure run must never fail on its sidecar
+        logger.warning("Could not summarise the generation record of %s: %s", output_dir, exc)
+        return {"record": provenance.RUN_MANIFEST_FILENAME, "error": _reason(exc)}
+    if summary is None and history is None:
+        return None
+    summary = summary if summary is not None else {}
+    if history is not None:
+        summary["history"] = history
+    return summary
+
+
+def _manifest_summary(path: str) -> dict[str, Any] | None:
+    """The manifest's part of :func:`generation_summary`; ``None`` when there is no file."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:  # a folder of that name, no permission, a read error
+        return {"record": provenance.RUN_MANIFEST_FILENAME, "error": _reason(exc)}
+    try:
+        record = json.loads(data.decode("utf-8"))
+    except (ValueError, RecursionError) as exc:  # bad UTF-8, bad JSON, nested too deep
+        return {"record": provenance.RUN_MANIFEST_FILENAME, "error": _reason(exc)}
+    if not isinstance(record, dict):
+        return {
+            "record": provenance.RUN_MANIFEST_FILENAME,
+            "error": f"not a JSON object: {type(record).__name__}",
+        }
+    summary: dict[str, Any] = {
+        "record": provenance.RUN_MANIFEST_FILENAME,
+        "record_sha256": hashlib.sha256(data).hexdigest(),
+    }
+    app = record.get("app")
+    outputs = record.get("outputs")
+    runtime = record.get("runtime")
+    fields = {
+        "kind": record.get("kind", _MISSING),
+        "created_utc": record.get("created_utc", _MISSING),
+        "app_version": app.get("version", _MISSING) if isinstance(app, dict) else _MISSING,
+        "git_commit": record.get("git_commit", _MISSING),
+        "status": outputs.get("status", _MISSING) if isinstance(outputs, dict) else _MISSING,
+    }
+    for key, value in fields.items():
+        if value is None or isinstance(value, str):
+            summary[key] = value
+    models = record.get("models")
+    if isinstance(models, dict):
+        summary["models"] = {
+            name: info["sha256"]
+            for name, info in models.items()
+            if isinstance(info, dict) and _text_or_none(info.get("sha256", _MISSING))
+        }
+    if _shallow_mapping(record.get("parameters")):
+        summary["parameters"] = record["parameters"]
+    if isinstance(runtime, dict):
+        for key in ("torch", "inference"):
+            if _shallow_mapping(runtime.get(key)):
+                summary[key] = runtime[key]
+    if isinstance(record.get("provenance_error"), str):
+        summary["provenance_error"] = record["provenance_error"]
+    return summary
+
+
+def _history_summary(path: str) -> dict[str, Any] | None:
+    """The history's part of :func:`generation_summary`; ``None`` when there is no file.
+
+    Read line by line; of each line only its models, app version, commit and time are kept
+    (a line can list 1,000 file names). A blank line is not a run."""
+    n_runs = n_unreadable = 0
+    models: dict[str, set[str]] = {}
+    versions: set[str] = set()
+    commits: set[str] = set()
+    times: set[str] = set()
+    try:
+        with open(path, "rb") as fh:
+            for raw in fh:
+                if not raw.strip():
+                    continue
+                try:
+                    entry = json.loads(raw.decode("utf-8"))
+                except ValueError, RecursionError:
+                    entry = None
+                if not isinstance(entry, dict):
+                    n_unreadable += 1
+                    continue
+                n_runs += 1
+                digests = entry.get("models")
+                if isinstance(digests, dict):
+                    for name, digest in digests.items():
+                        if isinstance(digest, str):
+                            models.setdefault(name, set()).add(digest)
+                        elif digest is None:
+                            models.setdefault(name, set())
+                for value, seen in (
+                    (entry.get("app_version"), versions),
+                    (entry.get("git_commit"), commits),
+                    (entry.get("created_utc"), times),
+                ):
+                    if isinstance(value, str):
+                        seen.add(value)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:  # a folder of that name, no permission, a read error
+        return {"file": provenance.RUN_HISTORY_FILENAME, "error": _reason(exc)}
+    return {
+        "file": provenance.RUN_HISTORY_FILENAME,
+        "n_runs": n_runs,
+        "n_unreadable": n_unreadable,
+        "models": {name: sorted(digests) for name, digests in models.items()},
+        "app_versions": sorted(versions),
+        "git_commits": sorted(commits),
+        "first_utc": min(times) if times else None,
+        "last_utc": max(times) if times else None,
+    }
+
+
+def _text_or_none(value: object) -> bool:
+    """True for a recorded digest: text, or ``null`` (a checkpoint that could not be read)."""
+    return value is None or isinstance(value, str)
+
+
+def _shallow_mapping(value: object) -> bool:
+    """True when ``value`` is a dict nested at most ``SUMMARY_DEPTH_LIMIT`` deep (no recursion)."""
+    if not isinstance(value, dict):
+        return False
+    stack: list[tuple[object, int]] = [(value, 1)]
+    while stack:
+        node, depth = stack.pop()
+        children = node.values() if isinstance(node, dict) else node
+        for child in children:  # type: ignore[union-attr]
+            if isinstance(child, (dict, list)):
+                if depth >= SUMMARY_DEPTH_LIMIT:
+                    return False
+                stack.append((child, depth + 1))
+    return True
+
+
+__all__ = [
+    "HISTORY_NAMES_LIMIT",
+    "SUMMARY_DEPTH_LIMIT",
+    "generation_summary",
+    "history_entry",
+    "record_failed_run",
+    "write_run_manifest",
+]
