@@ -1,16 +1,20 @@
 """The skeleton thinning helpers of ``app.editing.thinning`` (Qt-free, W1-T3, O2).
 
-``thin_raster`` (a skeleton file as Correct opens it) and the lazy scikit-image import moved
-here from ``app.gui.skeleton_graph_model``, which imports them back under the same names.
-``is_generated_as_opened`` says whether a skeleton is the generated one as Correct opens it:
-a skeleton Save writes a correction only when it is not.
+``thin_raster`` (a skeleton file as Correct opens it: upscaled bilinearly before the
+threshold, inverted when the background is white, thinned; a file at image size reopens
+unchanged) and the lazy scikit-image import live here; ``app.gui.skeleton_graph_model``
+imports them back under the same names. ``is_generated_as_opened`` says whether a skeleton is
+the generated one as Correct opens it: a skeleton Save writes a correction only when it is
+not. ``app.editing.thinning`` loading no PyQt6 is pinned by ``tests/test_correct_layering.py``.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import cv2
@@ -19,9 +23,10 @@ import pytest
 
 import app.gui.skeleton_graph_model as sgm
 from app.editing import thinning
-from app.editing.thinning import is_generated_as_opened, thin_raster
+from app.editing.thinning import _skeletonize_uint8, is_generated_as_opened, thin_raster
+from app.gui.skeleton_graph_model import SkeletonCorrectionModel
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = REPO_ROOT = Path(__file__).resolve().parents[1]
 PHOTO = (640, 480)  # (w, h)
 
 
@@ -38,20 +43,6 @@ def _generated(tmp_path) -> tuple[str, np.ndarray]:
     path = str(tmp_path / "a_fake.png")
     cv2.imwrite(path, gray)
     return path, gray
-
-
-def test_the_thinning_helpers_live_in_app_editing_and_load_no_qt():
-    probe = (
-        "import sys, app.editing.thinning; "
-        "print(sorted(m for m in sys.modules if m == 'PyQt6' or m.startswith('PyQt6.') "
-        "or m == 'skimage' or m.startswith('skimage.')))"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", probe], cwd=ROOT, capture_output=True, text=True, timeout=60
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "[]"
 
 
 def test_skeleton_graph_model_reexports_the_same_functions():
@@ -83,6 +74,20 @@ def test_an_unreadable_generated_file_counts_as_empty(tmp_path):
 
     assert is_generated_as_opened(empty, str(path), PHOTO)
     assert not is_generated_as_opened(empty + 255, str(path), PHOTO)
+
+
+def test_a_raster_with_a_white_background_opens_as_its_dark_lines():
+    # A skeleton file of another tool can be black lines on white: Correct opens its lines,
+    # not the skeleton of its background.
+    raster = np.zeros((60, 80), np.uint8)
+    cv2.line(raster, (5, 30), (75, 30), 255, 1)
+    cv2.line(raster, (40, 5), (40, 55), 255, 1)
+
+    white_lines = thin_raster(raster, (80, 60))
+    dark_lines = thin_raster(255 - raster, (80, 60))
+
+    assert int(np.count_nonzero(white_lines)) > 100
+    assert np.array_equal(dark_lines, white_lines)
 
 
 def test_the_values_of_the_mask_do_not_matter_only_where_it_is_set(tmp_path):
@@ -208,3 +213,107 @@ def test_the_upscale_equals_opencvs_bilinear_resize():
     for img, size in cases:
         want = cv2.resize(img, size, interpolation=cv2.INTER_LINEAR)
         assert np.array_equal(thinning.resize_linear_u8(img, size), want), (img.shape, size)
+
+
+# --------------------------------------------------------------------------------------
+# Lazy scikit-image (C4): the import waits for the first skeletonize or the prewarm
+# --------------------------------------------------------------------------------------
+
+
+def _run_python(code: str) -> subprocess.CompletedProcess:
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    return subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(code)],
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+
+def test_scikit_image_loads_on_the_first_skeletonize_not_at_import():
+    result = _run_python(
+        """
+        import sys
+        import app.gui.skeleton_graph_model as sgm
+        print("import", "skimage" in sys.modules)
+        model = sgm.SkeletonCorrectionModel()
+        model.set_empty((40, 30))
+        model.draw_polyline([(5, 5), (30, 20)], thickness=3)
+        print("edit", "skimage" in sys.modules)
+        model.skeletonize()
+        print("skeletonize", "skimage.morphology" in sys.modules)
+        """
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["import", "False", "edit", "False", "skeletonize", "True"]
+
+
+def test_prewarm_loads_scikit_image_once_from_a_worker_thread():
+    result = _run_python(
+        """
+        import builtins
+        import sys
+        import threading
+        import app.gui.skeleton_graph_model as sgm
+        worker = threading.Thread(target=sgm.prewarm_skeletonize)
+        worker.start()
+        worker.join(120)
+        print("prewarmed", "skimage.morphology" in sys.modules)
+        imported = []
+        real_import = builtins.__import__
+        def spy(name, *args, **kwargs):
+            imported.append(name)
+            return real_import(name, *args, **kwargs)
+        builtins.__import__ = spy
+        sgm.prewarm_skeletonize()
+        builtins.__import__ = real_import
+        print("again", sum(name.startswith("skimage") for name in imported))
+        model = sgm.SkeletonCorrectionModel()
+        model.set_empty((40, 30))
+        model.draw_polyline([(5, 5), (30, 20)], thickness=3)
+        model.skeletonize()
+        print("thin", int(model.mask.max()), int((model.mask > 0).sum()) < 40)
+        """
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.split() == ["prewarmed", "True", "again", "0", "thin", "255", "True"]
+
+
+# ----------------------------------------------- opening a small generated file
+def test_a_small_file_opens_upscaled_smoothly_as_one_line():
+    """The generated skeleton is small (SKELETON_OUTPUT_SIZE, 341 x 256) with ~2 px lines.
+    Opening it at image size (640 x 480) upscales the grey file bilinearly before
+    thresholding, so the line keeps its connectivity and its measured length: within 1 %
+    (bilinear +0.23 %; a nearest-neighbour staircase measures +2.19 %). The lengths are
+    ``root_length_mm`` values, each file with its own per-axis pixel pitch (W3-T8 review I1).
+    """
+    from app.config import SKELETON_OUTPUT_SIZE
+    from app.inference.metrics import root_length_mm
+
+    w, h = SKELETON_OUTPUT_SIZE
+    small = np.zeros((h, w), np.uint8)
+    cv2.line(small, (20, 20), (320, 236), 255, 2)
+    cv2.ellipse(small, (170, 128), (100, 70), 15, 0, 270, 255, 2)
+    model = SkeletonCorrectionModel()
+    model.load_from_raster(small, target_size=(640, 480))
+    mask = model.mask
+    assert mask.shape == (480, 640)
+    source = _skeletonize_uint8(small)
+    n_src, _ = cv2.connectedComponents(source, connectivity=8)
+    n_new, _ = cv2.connectedComponents((mask > 0).astype(np.uint8), connectivity=8)
+    assert n_new == n_src
+    assert abs(root_length_mm(mask) / root_length_mm(source) - 1.0) < 0.01
+
+
+def test_a_file_at_image_size_opens_unchanged():
+    """A correction saved at image resolution reopens pixel for pixel (no resize)."""
+    model = SkeletonCorrectionModel()
+    raster = np.zeros((60, 80), np.uint8)
+    cv2.line(raster, (5, 5), (70, 50), 255, 1)
+    cv2.line(raster, (5, 50), (40, 8), 255, 1)
+    model.load_from_raster(raster, target_size=(80, 60))
+    first = model.mask.copy()
+    model.load_from_raster(first, target_size=(80, 60))
+    assert np.array_equal(model.mask, first)

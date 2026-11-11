@@ -5,7 +5,8 @@ since a known skeletonize fixed point (the snapshot of the current action) inste
 the whole frame (plan step P5a-3, spec D24). These tests replay seeded random edits the
 way the skeleton tools make them (Polyline commit, eraser drag, Connect, branch delete,
 undo / redo) on three skeletons and compare every result with scikit-image run on the
-whole edited frame: there must be 0 mismatches, and the window path must be the rule.
+whole edited frame: there must be 0 mismatches, and the window path must be the rule. A
+window run that loses a pixel of its quiet band falls back to the whole frame.
 
 Always on: about 50 edits per case. With ``SPROUTS_PERF_TESTS=1``: 300 edits per case
 and a 2,800-edit run over the three cases.
@@ -223,6 +224,32 @@ def test_undo_redo_then_edit_stays_exact_on_the_window_path(bases, thinned):
     thinned.clear()
     model.skeletonize()
     assert thinned and (480, 640) not in thinned
+    assert np.array_equal(model.mask, _full_frame(edited))
+
+
+def test_a_window_run_that_loses_a_quiet_band_pixel_falls_back_to_the_full_frame(monkeypatch):
+    # The window result is written back only if the band just outside its core lost no
+    # pixel. Natural edits of a thin skeleton never trip that guard, so a stand-in window
+    # run deletes everything (a run that disagrees with the full frame); the full-frame run
+    # is the real thinning, which decides what is right.
+    model = SkeletonCorrectionModel()
+    thin = np.zeros((120, 160), np.uint8)
+    thin[60, 10:150] = 255  # crosses the window, its quiet band included
+    model.load_from_raster(thin, target_size=(160, 120))
+    model.push_undo()
+    model.draw_polyline([(70, 55), (90, 55)], thickness=3)
+    edited = model.mask.copy()
+    shapes: list[tuple[int, int]] = []
+
+    def wrong_window(mask: np.ndarray) -> np.ndarray:
+        shapes.append(mask.shape)
+        return _full_frame(mask) if mask.shape == (120, 160) else np.zeros_like(mask)
+
+    monkeypatch.setattr(sgm, "_skeletonize_uint8", wrong_window)
+
+    model.skeletonize()
+
+    assert len(shapes) == 2 and shapes[0] != (120, 160) and shapes[1] == (120, 160)
     assert np.array_equal(model.mask, _full_frame(edited))
 
 

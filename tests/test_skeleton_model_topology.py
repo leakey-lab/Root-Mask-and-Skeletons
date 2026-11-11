@@ -1,14 +1,18 @@
-"""Skeleton vectorization: termination on loops (UXE-01) and unchanged output elsewhere.
+"""Skeleton vectorization (``vectorize_skeleton``): loops, rings, the reference walk, own pixels.
 
 ``vectorize_skeleton`` walks the 1px skeleton from every node (endpoint or junction)
 to the next node. A closed loop that hangs off a single junction pixel used to send
 that walk back into its own start node, where it kept going round the loop forever
-and froze the Correct Skeleton editor.
+and froze the Correct Skeleton editor (UXE-01).
 
 The termination tests run the walk in a child process with a timeout, so a
-regression fails the test instead of hanging the suite. The equivalence tests pin
-the output for skeletons whose walks never return to their start node: there the
-fix must not change a single point.
+regression fails the test instead of hanging the suite. The equivalence tests compare
+the output with a plain reference walk (the code before the fix) for skeletons whose walks
+never return to their start node: the only test of the RDP simplification. A ring whose
+every pixel has two neighbours has no node, so no walk from a node reaches it: rings are
+traced after the node walks, so the polylines before them, and their indices, stay
+(S03-06; Select can then pick a ring next to other branches). Topology is display and pick
+only: never saved or measured.
 """
 
 from __future__ import annotations
@@ -90,6 +94,16 @@ def _degree(skel: np.ndarray) -> np.ndarray:
 def _pixels(where: np.ndarray) -> set[tuple[int, int]]:
     ys, xs = np.nonzero(where)
     return {(int(x), int(y)) for x, y in zip(xs, ys, strict=True)}
+
+
+def lines(*polylines, w: int = 640, h: int = 480) -> np.ndarray:
+    """A thinned 1 px skeleton (uint8 0/255) of the open ``polylines`` of ``(x, y)`` points
+    (as ``tests/skeleton_edit_support.lines``, without its Qt imports)."""
+    raster = np.zeros((h, w), np.uint8)
+    for points in polylines:
+        pts = np.array(points, np.int32).reshape(-1, 1, 2)
+        cv2.polylines(raster, [pts], False, 255, 1)
+    return _skeleton(raster)
 
 
 def _lollipop() -> np.ndarray:
@@ -449,3 +463,77 @@ def test_own_pixels_split_the_skeleton_without_its_junctions_by_branch(eps):
                 assert deg[poly[0][1], poly[0][0]] >= 3 and deg[poly[-1][1], poly[-1][0]] >= 3
             assert all(_dist_to_polyline(p, poly) <= eps + 1e-6 for p in own), key
         assert seen == _pixels(fg & (deg > 0) & (deg < 3)), f"{key}: a pixel in no branch"
+
+
+# --------------------------------------------------------------------------------------
+# Rings: traced after the node walks (S03-06)
+# --------------------------------------------------------------------------------------
+
+DIAMOND = [(400, 260), (440, 300), (400, 340), (360, 300), (400, 260)]  # a node-free ring
+SMALL = [(150, 360), (170, 380), (150, 400), (130, 380), (150, 360)]
+LINE = [(100, 100), (300, 100)]
+
+
+def _degrees(mask) -> np.ndarray:
+    on = (mask > 0).astype(np.int32)
+    padded = np.pad(on, 1)
+    h, w = on.shape
+    total = sum(
+        padded[1 + dy : 1 + dy + h, 1 + dx : 1 + dx + w]
+        for dy in (-1, 0, 1)
+        for dx in (-1, 0, 1)
+        if dy or dx
+    )
+    return np.where(on > 0, total, -1)
+
+
+def _polyline_pixels(polyline) -> set[tuple[int, int]]:
+    return {(int(x), int(y)) for x, y in polyline}
+
+
+def test_the_test_rings_have_no_node():
+    for ring in (DIAMOND, SMALL):
+        degree = _degrees(lines(ring))
+        assert set(np.unique(degree[degree >= 0]).tolist()) == {2}
+
+
+@pytest.mark.parametrize("eps", [0.0, 1.5])
+def test_a_ring_next_to_a_line_is_traced_after_the_lines_polylines(eps):
+    line_only = vectorize_skeleton(lines(LINE), simplify_epsilon=eps)
+    ring_mask = lines(DIAMOND)
+
+    topo = vectorize_skeleton(lines(LINE, DIAMOND), simplify_epsilon=eps)
+
+    assert topo.polylines[:-1] == line_only.polylines, "the node walks come first, unchanged"
+    assert topo.endpoints == line_only.endpoints and topo.junctions == line_only.junctions
+    ring = topo.polylines[-1]
+    assert ring[0] == ring[-1], "the ring is closed"
+    if eps == 0.0:
+        ys, xs = np.nonzero(ring_mask)
+        assert _polyline_pixels(ring) == set(zip(xs.tolist(), ys.tolist(), strict=True))
+
+
+def test_a_ring_next_to_a_stray_pixel_is_traced():
+    mask = lines(DIAMOND)
+    mask[50, 50] = 255  # an isolated pixel is a node (degree 0) with no polyline
+
+    topo = vectorize_skeleton(mask, simplify_epsilon=1.5)
+
+    assert len(topo.polylines) == 1 and topo.polylines[0][0] == topo.polylines[0][-1]
+
+
+def test_two_rings_and_a_line_give_both_rings():
+    topo = vectorize_skeleton(lines(LINE, DIAMOND, SMALL), simplify_epsilon=0.0)
+
+    rings = [p for p in topo.polylines if len(p) > 2 and p[0] == p[-1]]
+    assert len(rings) == 2
+    assert {len(_polyline_pixels(r)) for r in rings} == {
+        int(np.count_nonzero(lines(DIAMOND))),
+        int(np.count_nonzero(lines(SMALL))),
+    }
+
+
+def test_a_ring_alone_is_traced_as_before():
+    topo = vectorize_skeleton(lines(DIAMOND), simplify_epsilon=1.5)
+
+    assert len(topo.polylines) == 1 and topo.polylines[0][0] == topo.polylines[0][-1]

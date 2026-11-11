@@ -239,10 +239,3 @@ def test_the_cap_keeps_every_live_step_of_three_busy_layers():
 def test_a_per_layer_cap_needs_room_for_one_entry(per_layer):
     with pytest.raises(ValueError):
         EditJournal(per_layer=per_layer)
-
-
-def test_the_editing_package_exports_the_journal():
-    import app.editing
-
-    assert app.editing.EditJournal is EditJournal
-    assert "EditJournal" in app.editing.__all__

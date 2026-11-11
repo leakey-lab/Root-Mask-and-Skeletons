@@ -4,7 +4,8 @@ Builds 1 px skeletons from straight lines (thinned by scikit-image, so they are 
 editor opens), opens them in a real ``SkeletonLayer`` on an offscreen scene with a recording
 ``FakeHost``, and sends it clicks, double-clicks and keys as the canvas does (press,
 release, double-click, release). Used by ``test_skeleton_junction_edits.py``,
-``test_skeleton_pick_without_edit.py`` and ``test_skeleton_ring_pick.py``. ``apply`` replays
+``test_skeleton_pick_nearest_end.py``, ``test_skeleton_pick_without_edit.py`` and
+``test_skeleton_tools.py``. ``apply`` replays
 one golden op of ``tests/data/correct_goldens.json`` through the layer, for
 ``test_correct_skeleton_goldens.py`` and ``test_measure_gt_first.py``.
 """

@@ -78,24 +78,40 @@ def test_the_reach_is_constant_on_screen_within_its_clamps(make_layer, zoom, exp
     assert skeleton_tools.reach(layer, 10) == pytest.approx(expected)
 
 
+def _connect_drag(layer, start: tuple[int, int], end: tuple[int, int]) -> np.ndarray:
+    """A Connect drag from ``start`` to ``end``; the skeleton afterwards (a copy)."""
+    layer.press(QPoint(*start), NO_MOD)
+    layer.move(QPoint(*end), True)
+    layer.release(QPoint(*end))
+    return layer.model.mask.copy()
+
+
+def _joined_from_the_tip(mask: np.ndarray, end_x: int) -> bool:
+    """A line runs from the tip (299, 200) to the release at (``end_x``, 260): every row in
+    between has a pixel within one of the straight line (it is thinned after drawing)."""
+    rows = range(205, 256)
+    return all(mask[y, round(299 + (end_x - 299) * (y - 200) / 60) - 1 :][:3].any() for y in rows)
+
+
 def test_at_1600_percent_connect_grabs_an_endpoint_only_at_its_pixel(make_layer):
     layer = make_layer(16.0)  # the line's tips: (100, 200) and (299, 200)
     layer.set_tool("connect")
+    before = layer.model.mask.copy()
 
-    layer.press(QPoint(303, 200), NO_MOD)  # 4 image px = 64 screen px away
-    assert layer._tools["connect"].first is None
-    layer.release(QPoint(303, 200))
-    layer.press(QPoint(300, 200), NO_MOD)  # the next pixel
-    assert layer._tools["connect"].first == QPoint(299, 200)
-    layer.cancel_transient()
+    after = _connect_drag(layer, (303, 200), (303, 260))  # 4 image px = 64 screen px away
+
+    assert np.array_equal(after, before) and not layer.model.can_undo, "nothing was grabbed"
+    after = _connect_drag(layer, (300, 200), (300, 260))  # the next pixel
+    assert _joined_from_the_tip(after, 300) and layer.model.can_undo
 
 
 def test_at_100_percent_connect_still_grabs_from_ten_pixels(make_layer):
     layer = make_layer(1.0)
     layer.set_tool("connect")
-    layer.press(QPoint(309, 200), NO_MOD)
-    assert layer._tools["connect"].first == QPoint(299, 200)
-    layer.cancel_transient()
+
+    after = _connect_drag(layer, (309, 200), (309, 260))
+
+    assert _joined_from_the_tip(after, 309) and layer.model.can_undo
 
 
 def test_at_1600_percent_a_click_beside_a_handle_adds_a_point(make_layer):

@@ -6,7 +6,8 @@ branch, whose round cap at a junction also cut the first pixels of every other b
 there, so one Delete split a Y into two pieces and lowered the GT root length.
 
 Cases: a Y, an X of two diagonals, a + cross (a junction of five pixels), branches that run
-to the image edge, short spurs, an edited branch, and a click right on a junction. Each
+to the image edge, short spurs, an edited branch, a click right on a junction, and a ring
+next to a line (no junction at all). Each
 check: the other branches keep every pixel outside a 3 px box around the junction, and
 the skeleton stays as many pieces as it was.
 """
@@ -226,6 +227,24 @@ def test_the_picked_branch_without_a_junction_is_erased_whole(tmp_path):
     after = layer.model.mask
     assert not after[235:246, :].any()
     assert np.array_equal(after[:200], skeleton[:200]), "the other line is untouched"
+    layer.cancel_scheduled_render()
+
+
+DIAMOND = [(400, 260), (440, 300), (400, 340), (360, 300), (400, 260)]  # a node-free ring
+LINE = [(100, 100), (300, 100)]
+
+
+def test_select_picks_a_ring_next_to_a_line_and_delete_removes_only_the_ring(tmp_path):
+    # A ring has no node: Select could not pick it while another branch was in the image
+    # (S03-06); its own pixels are the whole ring.
+    skeleton = lines(LINE, DIAMOND)
+    layer, host = open_layer(tmp_path, skeleton)
+
+    pick(layer, 421, 279)  # on the ring's upper right side
+
+    assert key(layer, Qt.Key.Key_Delete) is True
+    assert np.array_equal(layer.model.mask, lines(LINE)), "the ring went, the line stayed"
+    assert edits(host) == 1
     layer.cancel_scheduled_render()
 
 

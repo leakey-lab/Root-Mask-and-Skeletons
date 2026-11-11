@@ -352,6 +352,7 @@ def _picked(*points) -> PolylineDraft:
         ([(300, 100), (300, 300)], (400, 200), (300, 100)),
         ([(300, 200), (100, 200)], (200, 300), (100, 200)),  # a tie on one row: the lower x
         ([(100, 200), (300, 200)], (200, 300), (100, 200)),
+        ([(100, 300), (300, 100)], (100, 100), (300, 100)),  # both axes differ: y decides
     ],
 )
 def test_facing_puts_the_end_nearest_the_pointer_last(points, pointer, last):

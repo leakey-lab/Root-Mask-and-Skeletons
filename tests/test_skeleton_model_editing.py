@@ -1,34 +1,32 @@
 """SkeletonCorrectionModel editing contract used by the skeleton editors.
 
-Covers dirty tracking (PE-01 / AR-02 / RB-05), the revision counter and cached
-topology/endpoints (PE-03), the eraser drag (PE-02), clear/erase_polyline (AR-12),
-the undo flags backed by SnapshotHistory (AR-11) and the hooks the Correct workspace
-uses (plan contract C4): ``on_action``, ``drop_redo``, ``take_changed_box`` and the
-lazy scikit-image import with its ``prewarm_skeletonize`` hook.
+Covers dirty tracking (PE-01 / AR-02 / RB-05; a raster loaded as an edit keeps the saved
+baseline, E1), the revision counter and cached topology (PE-03), the eraser drag (PE-02),
+clear/erase_polyline (AR-12), the undo flags backed by SnapshotHistory (AR-11) and the hooks
+the Correct workspace uses (plan contract C4): ``on_action``, ``drop_redo`` and
+``take_changed_box``. The endpoints are in ``test_skeleton_model_endpoints.py``, opening a
+file and the lazy scikit-image import in ``test_editing_thinning.py``.
 """
 
 from __future__ import annotations
 
-import math
-import os
-import subprocess
-import sys
-import textwrap
 from itertools import pairwise
-from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
 
 import app.gui.skeleton_graph_model as sgm
-from app.gui.skeleton_graph_model import (
-    SkeletonCorrectionModel,
-    _skeletonize_uint8,
-    vectorize_skeleton,
-)
+from app.gui.skeleton_graph_model import SkeletonCorrectionModel, vectorize_skeleton
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+W, H = 200, 150
+
+
+def _line(row: int, size: tuple[int, int] = (W, H)) -> np.ndarray:
+    w, h = size
+    raster_ = np.zeros((h, w), np.uint8)
+    raster_[row, 20 : w - 20] = 255
+    return raster_
 
 
 def _model_with_line(size=(60, 40)) -> SkeletonCorrectionModel:
@@ -105,6 +103,20 @@ def test_loading_a_new_document_discards_the_unsaved_state():
     model.set_empty((60, 40))
     assert model.has_unsaved_changes() is False
     assert model.can_undo is False
+
+
+def test_a_raster_loaded_as_an_edit_keeps_the_saved_baseline():
+    model = SkeletonCorrectionModel()
+    model.load_from_raster(_line(30), target_size=(W, H))
+    opened = model.mask.copy()
+
+    model.load_from_raster(_line(90), target_size=(W, H), saved=False)
+
+    assert model.has_unsaved_changes() and model.mask[90].any() and not model.can_undo
+    model.load_from_raster(opened, target_size=(W, H), saved=False)  # back to the baseline
+    assert not model.has_unsaved_changes()
+    model.load_from_raster(_line(90), target_size=(W, H))  # an open: the new baseline
+    assert not model.has_unsaved_changes()
 
 
 # --------------------------------------------------------------------------------------
@@ -393,47 +405,6 @@ def test_writing_the_mask_in_place_right_after_push_undo_is_seen(vectorize_calls
     assert model.has_unsaved_changes() is True
 
 
-def test_endpoints_of_the_cross_are_its_four_arm_tips():
-    model = SkeletonCorrectionModel()
-    model.mask = _cross()
-    assert sorted(model.endpoints()) == [(1, 5), (5, 1), (5, 9), (9, 5)]
-
-
-def test_endpoints_equal_the_vectorized_endpoints_on_random_skeletons():
-    rng = np.random.default_rng(3)
-    for _ in range(25):
-        model = SkeletonCorrectionModel()
-        model.set_empty((160, 120))
-        for _ in range(int(rng.integers(1, 8))):
-            x, y, ang = rng.uniform(0, 160), rng.uniform(0, 120), rng.uniform(0, 2 * math.pi)
-            pts = []
-            for _ in range(int(rng.integers(3, 20))):
-                ang += rng.normal(0, 0.5)
-                x, y = x + 6 * math.cos(ang), y + 6 * math.sin(ang)
-                pts.append((int(x), int(y)))
-            model.draw_polyline(pts, thickness=3)
-        model.skeletonize()
-        assert set(model.endpoints()) == set(vectorize_skeleton(model.mask).endpoints)
-
-
-def test_endpoints_never_run_the_full_vectorization(monkeypatch):
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("endpoints() must not vectorize the skeleton")
-
-    monkeypatch.setattr(sgm, "vectorize_skeleton", forbidden)
-    model = _model_with_line()
-    assert sorted(model.endpoints()) == [(5, 20), (50, 20)]
-
-
-def test_endpoints_are_cached_until_the_next_edit():
-    model = _model_with_line()
-    first = model.endpoints()
-    assert model.endpoints() is first
-    model.push_undo()
-    model.erase_circle((50, 20), 2)
-    assert model.endpoints() is not first
-
-
 def test_any_nonzero_pixel_counts_as_skeleton():
     model = SkeletonCorrectionModel()
     model.mask = (_cross() > 0).astype(np.uint8)  # 0/1 instead of 0/255
@@ -478,14 +449,16 @@ def test_is_empty_is_mask_any_negated_for_every_mask(dtype):
 def test_on_action_fires_once_per_pushed_snapshot_after_the_push():
     model = _model_with_line()
     seen = []
-    model.on_action = lambda: seen.append(len(model._undo_stack))
+    model.on_action = lambda: seen.append(model.can_undo)
     model.push_undo()
     model.erase_circle((20, 20), 3)
     model.skeletonize()
     model.undo()
     model.redo()
     model.push_undo()
-    assert seen == [1, 2]  # once per push, called after the snapshot is on the stack
+    # Once per push, not per undo or redo; the first call already sees the step it pushed
+    # (the history was empty before it).
+    assert seen == [True, True]
 
 
 def test_on_action_is_not_called_without_a_mask():
@@ -616,107 +589,3 @@ def test_take_changed_box_is_unknown_after_whole_mask_changes(name):
 
 def test_a_new_model_reports_an_unknown_box():
     assert SkeletonCorrectionModel().take_changed_box() is None
-
-
-# --------------------------------------------------------------------------------------
-# Lazy scikit-image (C4): the import waits for the first skeletonize or the prewarm
-# --------------------------------------------------------------------------------------
-
-
-def _run_python(code: str) -> subprocess.CompletedProcess:
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-    return subprocess.run(
-        [sys.executable, "-c", textwrap.dedent(code)],
-        cwd=str(REPO_ROOT),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-
-
-def test_scikit_image_loads_on_the_first_skeletonize_not_at_import():
-    result = _run_python(
-        """
-        import sys
-        import app.gui.skeleton_graph_model as sgm
-        print("import", "skimage" in sys.modules)
-        model = sgm.SkeletonCorrectionModel()
-        model.set_empty((40, 30))
-        model.draw_polyline([(5, 5), (30, 20)], thickness=3)
-        print("edit", "skimage" in sys.modules)
-        model.skeletonize()
-        print("skeletonize", "skimage.morphology" in sys.modules)
-        """
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["import", "False", "edit", "False", "skeletonize", "True"]
-
-
-def test_prewarm_loads_scikit_image_once_from_a_worker_thread():
-    result = _run_python(
-        """
-        import builtins
-        import sys
-        import threading
-        import app.gui.skeleton_graph_model as sgm
-        worker = threading.Thread(target=sgm.prewarm_skeletonize)
-        worker.start()
-        worker.join(120)
-        print("prewarmed", "skimage.morphology" in sys.modules)
-        imported = []
-        real_import = builtins.__import__
-        def spy(name, *args, **kwargs):
-            imported.append(name)
-            return real_import(name, *args, **kwargs)
-        builtins.__import__ = spy
-        sgm.prewarm_skeletonize()
-        builtins.__import__ = real_import
-        print("again", sum(name.startswith("skimage") for name in imported))
-        model = sgm.SkeletonCorrectionModel()
-        model.set_empty((40, 30))
-        model.draw_polyline([(5, 5), (30, 20)], thickness=3)
-        model.skeletonize()
-        print("thin", int(model.mask.max()), int((model.mask > 0).sum()) < 40)
-        """
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["prewarmed", "True", "again", "0", "thin", "255", "True"]
-
-
-# ----------------------------------------------- opening a small generated file
-def test_a_small_file_opens_upscaled_smoothly_as_one_line():
-    """The generated skeleton is small (SKELETON_OUTPUT_SIZE, 341 x 256) with ~2 px lines.
-    Opening it at image size (640 x 480) upscales the grey file bilinearly before
-    thresholding, so the line keeps its connectivity and its measured length: within 1 %
-    (bilinear +0.23 %; a nearest-neighbour staircase measures +2.19 %). The lengths are
-    ``root_length_mm`` values, each file with its own per-axis pixel pitch (W3-T8 review I1).
-    """
-    from app.config import SKELETON_OUTPUT_SIZE
-    from app.inference.metrics import root_length_mm
-
-    w, h = SKELETON_OUTPUT_SIZE
-    small = np.zeros((h, w), np.uint8)
-    cv2.line(small, (20, 20), (320, 236), 255, 2)
-    cv2.ellipse(small, (170, 128), (100, 70), 15, 0, 270, 255, 2)
-    model = SkeletonCorrectionModel()
-    model.load_from_raster(small, target_size=(640, 480))
-    mask = model.mask
-    assert mask.shape == (480, 640)
-    source = _skeletonize_uint8(small)
-    n_src, _ = cv2.connectedComponents(source, connectivity=8)
-    n_new, _ = cv2.connectedComponents((mask > 0).astype(np.uint8), connectivity=8)
-    assert n_new == n_src
-    assert abs(root_length_mm(mask) / root_length_mm(source) - 1.0) < 0.01
-
-
-def test_a_file_at_image_size_opens_unchanged():
-    """A correction saved at image resolution reopens pixel for pixel (no resize)."""
-    model = SkeletonCorrectionModel()
-    raster = np.zeros((60, 80), np.uint8)
-    cv2.line(raster, (5, 5), (70, 50), 255, 1)
-    cv2.line(raster, (5, 50), (40, 8), 255, 1)
-    model.load_from_raster(raster, target_size=(80, 60))
-    first = model.mask.copy()
-    model.load_from_raster(first, target_size=(80, 60))
-    assert np.array_equal(model.mask, first)
