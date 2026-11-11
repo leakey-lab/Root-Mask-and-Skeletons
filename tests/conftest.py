@@ -70,6 +70,7 @@ pytest.register_assert_rewrite(
     "tests.measure_support",
     "tests.skeleton_corpus_support",
     "tests.skeleton_edit_support",
+    "tests.viz_dash_helpers",
     "tests.window_project_support",
     "tests.window_support",
 )
