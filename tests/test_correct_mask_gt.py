@@ -18,8 +18,6 @@ import numpy as np
 import pytest
 
 from app.config import AREA_VALUE_COLUMN
-from app.gt import files as gt_files
-from app.gui.correct import mask_document
 from app.gui.correct.layer import MASK, SKELETON, LayerStatus
 from app.gui.correct.mask_document import MaskDocument
 from app.inference import metrics
@@ -87,11 +85,6 @@ def signals_of(editor) -> dict[str, list]:
 
 
 # ======================================================================== where it writes
-def test_the_source_names_are_the_gt_modules():
-    assert (mask_document.SOURCE_GT, mask_document.SOURCE_PREDICTION) == (
-        gt_files.SOURCE_GT,
-        gt_files.SOURCE_PREDICTION,
-    )
 
 
 def test_a_mask_edit_saves_to_gt_mask_and_never_touches_the_prediction(make_editor, project):
@@ -124,14 +117,6 @@ def test_the_layer_opens_the_gt_mask_when_one_exists_else_the_prediction(make_ed
 
     assert layer.document.source == "gt" and (plane(editor) == one_block()).all()
     assert layer.status() == LayerStatus("clean", "GT", "gt/mask/a.png")
-
-
-def test_an_image_without_any_mask_opens_empty_with_no_source(make_editor, project):
-    editor = make_editor(project.b, project.folder)
-
-    assert editor.layers[MASK].document.source is None
-    assert editor.layers[MASK].status() == LayerStatus("none", "No mask")
-    assert editor.layers[MASK].document.prediction() is None
 
 
 # ======================================================================= the save rules

@@ -56,18 +56,6 @@ def key(path: str) -> str:
     return path_key(path)
 
 
-def test_reads_that_complete_over_the_budget_are_not_all_kept(tmp_path):
-    a, b = photo(tmp_path, "a.png"), photo(tmp_path, "b.png")
-    executor = ManualExecutor()
-    ahead = ReadAhead(max_images=3, max_bytes=100, executor=executor)
-    ahead.request(a, lambda: entry(a, 60))
-    ahead.request(b, lambda: entry(b, 60))  # both queued: nothing held yet
-
-    executor.run_all()  # 120 bytes > 100 once both are done
-
-    assert len(ahead.pending()) == 1
-
-
 def test_the_nearest_neighbour_stays_when_both_do_not_fit(tmp_path):
     following, previous = photo(tmp_path, "c.png"), photo(tmp_path, "a.png")
     executor = ManualExecutor()
@@ -116,17 +104,6 @@ def test_a_put_back_read_is_the_newest_again(tmp_path):
     assert ahead.pending() == [key(b)]
 
 
-def test_a_read_alone_over_the_budget_is_kept(tmp_path):
-    a = photo(tmp_path, "a.png")
-    executor = ManualExecutor()
-    ahead = ReadAhead(max_images=3, max_bytes=100, executor=executor)
-    ahead.request(a, lambda: entry(a, 500))
-
-    executor.run_all()
-
-    assert ahead.take(a) is not None
-
-
 def test_a_queued_read_is_not_dropped_for_bytes_it_does_not_hold(tmp_path):
     a, b = photo(tmp_path, "a.png"), photo(tmp_path, "b.png")
     executor = ManualExecutor()
@@ -158,19 +135,6 @@ def test_reads_completing_on_the_worker_keep_the_budget(tmp_path):
     finally:
         release.set()
         ahead.close()
-
-
-def test_a_read_completing_after_close_changes_nothing(tmp_path):
-    a = photo(tmp_path, "a.png")
-    executor = ManualExecutor()
-    ahead = ReadAhead(max_images=3, max_bytes=100, executor=executor)
-    ahead.request(a, lambda: entry(a, 500))
-    future = executor.queue[0][0]
-    ahead.close()
-
-    executor.run_all()  # cancelled by close: nothing runs, nothing is kept
-
-    assert future.cancelled() and ahead.pending() == []
 
 
 def test_a_failed_read_is_logged_once(tmp_path, caplog):

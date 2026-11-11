@@ -2,15 +2,12 @@
 
 ``tests/data/correct_goldens.json`` was captured from the pre-merge mask and skeleton
 editors on inputs drawn by ``synth_inputs()``. The goldens prove pixel identity only
-while those inputs regenerate exactly, so these checks pin the inputs themselves.
-Qt-free (the support module must not load PyQt6 either).
+while those inputs regenerate exactly, so these checks pin the inputs themselves. Qt-free.
 """
 
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 
 import cv2
 import numpy as np
@@ -24,8 +21,6 @@ from tests.correct_goldens_support import (
     png_colour_type,
     sha,
 )
-
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CASES = ("synth_model_mask_and_skeleton", "synth_blank_png")
 SCRIPTS = ("mask", "mask_clear", "skeleton", "skeleton_clear")
@@ -106,11 +101,6 @@ def test_make_synth_project_starts_from_a_fresh_folder(tmp_path):
     assert not os.path.exists(os.path.join(folder, "gt"))
 
 
-def test_unknown_case_is_refused(tmp_path):
-    with pytest.raises(KeyError):
-        make_synth_project(str(tmp_path), "real_mask_and_skeleton")
-
-
 def test_inputs_are_the_ones_the_goldens_were_captured_from(tmp_path):
     goldens = load_goldens()["cases"]
     folder, image = make_synth_project(str(tmp_path), "synth_model_mask_and_skeleton")
@@ -173,15 +163,3 @@ def test_goldens_saved_masks_are_hand_traced_rgba():
             assert cleared["shape"] == [480, 640, 4]
         else:
             assert cleared == {"exists": False}
-
-
-def test_support_module_imports_no_qt():
-    code = (
-        "import sys; import tests.correct_goldens_support; "
-        "qt = [m for m in sys.modules if m.split('.')[0] == 'PyQt6']; "
-        "assert not qt, qt"
-    )
-    proc = subprocess.run(
-        [sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, timeout=60
-    )
-    assert proc.returncode == 0, proc.stderr

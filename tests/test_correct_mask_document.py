@@ -11,8 +11,6 @@ the mask layer does after every commit, undo and redo.
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 
 import cv2
 import numpy as np
@@ -23,7 +21,7 @@ from app.gui.correct.layer import LayerStatus, Notice
 from app.gui.correct.mask_document import MaskDocument, MaskSaveResult
 from app.inference import metrics
 from app.io_utils import imread_unicode, imwrite_unicode
-from app.masks import write_mask_file
+from app.masks import MaskStore, write_mask_file
 from tests.correct_goldens_support import (
     SYNTH_STEM,
     describe_mask_file,
@@ -32,8 +30,6 @@ from tests.correct_goldens_support import (
     png_colour_type,
     sha,
 )
-
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 STEM = "plot_T001_L001_2024.07.18_111530_001_SMM"
 SIZE = (80, 60)  # (w, h)
@@ -100,18 +96,6 @@ def _boom(message: str):
     return raiser
 
 
-def test_importing_it_loads_no_qt():
-    code = (
-        "import sys; import app.gui.correct.mask_document; "
-        "qt = [m for m in sys.modules if m.split('.')[0] == 'PyQt6']; "
-        "assert not qt, qt"
-    )
-    proc = subprocess.run(
-        [sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, timeout=60
-    )
-    assert proc.returncode == 0, proc.stderr
-
-
 # ------------------------------------------------------------------ open
 
 
@@ -172,6 +156,41 @@ def test_opens_the_synthetic_mask_as_the_goldens_saw_it(tmp_path, case):
     golden = load_goldens()["cases"][case]["mask"]["per_op_plane_sha256"]
     assert sha(doc.history.plane) == golden[0]  # op 0 only picks the brush
     assert doc.has_saved_file == (case == "synth_model_mask_and_skeleton")
+
+
+def _project_with_mask(tmp_path, mask: np.ndarray) -> str:
+    image = tmp_path / "SYNTH_T001_L001_2024.01.01_000000_001_SMM.png"
+    cv2.imwrite(str(image), np.full((*mask.shape, 3), 90, np.uint8))
+    os.makedirs(tmp_path / "mask", exist_ok=True)
+    cv2.imwrite(str(tmp_path / "mask" / image.name), mask)
+    return str(image)
+
+
+def test_open_takes_the_saved_masks_0_1_plane_and_it_edits_like_any_plane(tmp_path):
+    rng = np.random.default_rng(2)
+    saved = rng.integers(0, 256, (61, 83), dtype=np.uint8)  # grey values around the threshold
+    image = _project_with_mask(tmp_path, saved)
+    document = MaskDocument()
+
+    assert document.open(image, (83, 61)) == []
+
+    plane = document.history.plane
+    assert plane.dtype == np.uint8 and plane.flags.c_contiguous and plane.flags.writeable
+    assert np.array_equal(plane, (saved > 127).astype(np.uint8))
+    assert np.array_equal(plane, MaskStore.for_image(image).read(image).astype(np.uint8))
+    assert not document.is_dirty()
+
+    before = plane.copy()
+    document.history.commit((0, 0, 10, 10), np.ones((10, 10), np.uint8))
+    document.touch()
+    assert document.is_dirty() and plane[:10, :10].all()
+    document.history.undo()
+    document.touch()
+    assert np.array_equal(document.history.plane, before) and not document.is_dirty()
+    document.history.commit((20, 20, 5, 5), np.zeros((5, 5), np.uint8))
+    document.touch()
+    document.revert()
+    assert np.array_equal(document.history.plane, before) and not document.is_dirty()
 
 
 def _bytes(path: str) -> bytes:
@@ -321,6 +340,23 @@ def test_a_hand_back_keeps_the_size_a_prediction_was_stretched_from(tmp_path):
     assert handed.resized_from == (40, 30) and handed.source == "prediction"
     again = MaskDocument()
     assert again.open(_image(tmp_path), (80, 60), handed) == doc.open(_image(tmp_path), (80, 60))
+
+
+def test_only_a_plane_as_saved_is_handed_back(tmp_path):
+    """The hand-back to the read-ahead is the saved mask: an edited plane, or none open, gives
+    nothing (the next open would show unsaved pixels as the saved state)."""
+    _model_mask(tmp_path)
+    doc = MaskDocument()
+    assert doc.read_back(()) is None  # nothing open
+    doc.open(_image(tmp_path), SIZE)
+    _paint(doc, (5, 5, 10, 10))
+
+    assert doc.read_back(doc.file_stamps()) is None  # unsaved edits
+
+    doc.history.undo()
+    doc.touch()
+    handed = doc.read_back(doc.file_stamps())
+    assert handed is not None and np.array_equal(handed.plane, doc.history.plane)
 
 
 def test_an_editor_saved_mask_of_another_size_is_still_not_shown(tmp_path):

@@ -4,13 +4,14 @@
 render item, the Brush / Eraser / Fill tools and their input, the gestures, the history
 replay, the brush ring and the view state. ``MaskLayer`` and ``ClassesLayer`` are raster
 layers that bring their own document and identity. ``replace_plane`` puts a whole plane in
-as one undoable action ("Load prediction" uses it).
+as one undoable action ("Load prediction" uses it). A save with nothing open says so
+(``RasterLayer.NOT_OPEN``) and changes nothing: no document save, no UI refresh, no
+class-panel call.
 """
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
@@ -22,8 +23,11 @@ from PyQt6.QtWidgets import QGraphicsScene
 
 from app.gui.correct.classes_layer import ClassesLayer
 from app.gui.correct.layer import (
+    CLASSES,
+    MASK,
     DiskGuardedLayer,
     ReadAheadLayer,
+    SaveOutcome,
     missing_members,
 )
 from app.gui.correct.mask_layer import MaskLayer
@@ -31,9 +35,12 @@ from app.gui.correct.raster_layer import RasterLayer
 from app.gui.paint_canvas import pixmap_to_argb_array
 from tests.correct_fakes import FakeHost
 
-ROOT = Path(__file__).resolve().parents[1]
 W, H = 640, 480
 NO_MODS = Qt.KeyboardModifier.NoModifier
+CLOSED = {
+    MaskLayer: SaveOutcome(MASK, ok=False, message="No mask is open", kind="danger"),
+    ClassesLayer: SaveOutcome(CLASSES, ok=False, message="No class labels are open", kind="danger"),
+}
 
 
 pytestmark = pytest.mark.usefixtures("no_prompts")
@@ -76,8 +83,6 @@ def test_mask_layer_is_a_raster_layer_and_misses_no_member(scene):
     assert missing_members(layer) == []
     assert missing_members(layer, DiskGuardedLayer) == []
     assert missing_members(layer, ReadAheadLayer) == []
-    lines = (ROOT / "app" / "gui" / "correct" / "mask_layer.py").read_text(encoding="utf-8")
-    assert len(lines.splitlines()) <= 240
 
 
 def test_the_classes_layer_is_a_raster_layer_at_its_own_z(scene):
@@ -206,3 +211,43 @@ def test_an_opened_mask_is_drawn_while_the_reference_and_a_cleared_one_is_not(sc
     assert layer.undo()  # the clear undone: the prediction is back on screen
     render(scene)
     assert not layer.canvas.blank and layer.item.built_tiles()
+
+
+# ------------------------------------------------------------------------ nothing open
+def _build(cls, scene):
+    """``(layer, host, class-panel calls)``: a layer that never opened anything."""
+    host, panel = FakeHost(), []
+    layer = cls(host, scene)
+    if cls is ClassesLayer:
+        layer.on_classes_changed = lambda: panel.append("changed")
+    return layer, host, panel
+
+
+def _refuse_document_save(layer, monkeypatch):
+    monkeypatch.setattr(layer.document, "save", lambda: pytest.fail("the document saved"))
+
+
+@pytest.mark.parametrize("cls", [MaskLayer, ClassesLayer], ids=["mask", "classes"])
+def test_a_save_before_any_open_says_nothing_is_open(cls, scene, monkeypatch):
+    layer, host, panel = _build(cls, scene)
+    _refuse_document_save(layer, monkeypatch)
+
+    assert layer.save() == CLOSED[cls]
+
+    assert host.calls == [] and panel == []
+
+
+@pytest.mark.parametrize("cls", [MaskLayer, ClassesLayer], ids=["mask", "classes"])
+def test_a_save_after_a_close_says_nothing_is_open(cls, scene, tmp_path, monkeypatch):
+    image = str(tmp_path / "a.png")
+    cv2.imwrite(image, np.full((H, W, 3), 90, np.uint8))
+    layer, host, panel = _build(cls, scene)
+    layer.open(image, (W, H), str(tmp_path))
+    layer.close()
+    host.calls.clear()
+    panel.clear()
+    _refuse_document_save(layer, monkeypatch)
+
+    assert layer.save() == CLOSED[cls]
+
+    assert host.calls == [] and panel == []

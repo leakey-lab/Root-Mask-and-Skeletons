@@ -88,6 +88,56 @@ def test_a_photo_rewritten_after_its_read_is_not_current(tmp_path):
     assert not result.is_current()
 
 
+def test_a_photo_rewritten_while_it_is_decoded_is_never_current(tmp_path, monkeypatch):
+    """The stamp is taken before the decode: a file replaced during it (another program, a
+    sync) must not pass as the photo that was read, or a stale picture shows under its name."""
+    from app import enhancement
+
+    path = photo(tmp_path, value=90)
+    real = enhancement.imread_unicode
+
+    def decode_then_rewrite(*args, **kwargs):
+        decoded = real(*args, **kwargs)
+        photo(tmp_path, value=200)  # the file changes while the old pixels are in hand
+        bump(path)
+        return decoded
+
+    monkeypatch.setattr(enhancement, "imread_unicode", decode_then_rewrite)
+    ahead = ReadAhead(executor=InlineExecutor())
+
+    ahead.request(path, lambda: read_image(path, {}))
+    monkeypatch.undo()  # one rewrite only
+
+    assert ahead.pending() == [path_key(path)]  # the read finished: it is there, but stale
+    assert ahead.peek(path) is None and ahead.take(path) is None
+    result = read_image(path, {})  # read again, after the rewrite
+    assert int(result.photo[0, 0, 0]) == 200 and result.is_current()
+
+
+def test_a_given_photo_is_used_only_while_its_file_is_unchanged(tmp_path, monkeypatch):
+    """``read_image(photo=...)`` (the Library's decode) skips the decode only while the file
+    is the one that decode was made from; an older decode is decoded again."""
+    from app import enhancement
+
+    path = photo(tmp_path, value=90)
+    given = (file_stamp(path), enhancement.imread_unicode(path, enhancement.DECODE_FLAGS))
+    decodes = []
+    real = enhancement.imread_unicode
+    monkeypatch.setattr(
+        enhancement, "imread_unicode", lambda *a, **kw: decodes.append(a[0]) or real(*a, **kw)
+    )
+
+    same = read_image(path, {}, given)
+    assert same.photo is given[1] and decodes == []  # the file is the one decoded
+
+    photo(tmp_path, value=200)
+    bump(path)
+    newer = read_image(path, {}, given)
+
+    assert decodes == [path] and newer.photo is not given[1]
+    assert int(newer.photo[0, 0, 0]) == 200 and newer.is_current()
+
+
 # ------------------------------------------------------------------- ReadAhead
 def test_a_read_is_handed_over_once(tmp_path):
     path = photo(tmp_path)

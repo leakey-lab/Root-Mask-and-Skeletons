@@ -1,8 +1,8 @@
 """The layers' read-ahead hooks (``ReadAheadLayer``: ``read_ahead`` + ``open(ahead=)``) open
 exactly the documents a plain open gives, and never a stale one.
 
-The hooks belong to the mask and skeleton layers (cross-package requests of the neighbour
-read-ahead, KNOWN_ISSUES #6); until a layer has them its cases are skipped.
+The hooks belong to the mask and skeleton layers (the neighbour read-ahead, KNOWN_ISSUES #6);
+a layer without them fails these tests.
 """
 
 from __future__ import annotations
@@ -35,9 +35,9 @@ def project(tmp_path):
 
 
 def hooked(editor, layer_id: str):
+    """The layer, which must have the read-ahead hooks (a layer that lost them fails here)."""
     layer = editor.layers[layer_id]
-    if missing_members(layer, ReadAheadLayer):
-        pytest.skip(f"the {layer_id} layer has no read-ahead hook yet")
+    assert missing_members(layer, ReadAheadLayer) == [], f"the {layer_id} layer lost its hooks"
     return layer
 
 

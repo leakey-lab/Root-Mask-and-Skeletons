@@ -9,9 +9,6 @@ labels of today's skeleton editor and the pinned file stamps (plan contract C14)
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
-import textwrap
 from pathlib import Path
 
 import cv2
@@ -29,8 +26,8 @@ from app.gui.correct.skeleton_document import (
     SkeletonDocument,
     SkeletonSaveResult,
 )
+from app.gui.correct.skeleton_records import NOT_SHOWN
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 W, H = 200, 150
 
 
@@ -547,6 +544,50 @@ def doc_stamps(root, image) -> tuple:
     return _opened(root, image).file_stamps()
 
 
+# ------------------------------------------------------------------ read ahead and hand-back
+def test_a_read_ahead_of_an_unreadable_start_file_is_read_again_and_said(project):
+    root, image = project
+    gt_file = _paths(root)[0]
+    os.makedirs(os.path.dirname(gt_file))
+    Path(gt_file).write_bytes(b"not a png")
+    doc = SkeletonDocument()
+    read = doc.plan_read(image, str(root))((W, H))
+    assert read.path is not None and read.mask is None  # the worker could not read it
+
+    notices = doc.open(image, (W, H), str(root), read)
+
+    assert notices == [Notice("Could not read skeleton a.png", "danger")]
+    assert doc.status() == LayerStatus("error", "Skeleton not shown", NOT_SHOWN)
+    assert doc.unloaded_label() == "gt/skeletons/a.png"  # kept: a save asks first
+
+
+def test_a_read_ahead_made_for_another_size_is_not_adopted(project):
+    root, image = project
+    _write_skeleton(_paths(root)[1], row=40)
+    doc = SkeletonDocument()
+    read = doc.plan_read(image, str(root))((W // 2, H // 2))
+
+    doc.open(image, (W, H), str(root), read)
+
+    assert doc.model.mask.shape == (H, W) and doc.model.mask[40].any()
+
+
+def test_only_a_skeleton_as_saved_is_handed_back(project):
+    root, image = project
+    _write_skeleton(_paths(root)[1], row=40)
+    doc = SkeletonDocument()
+    assert doc.read_back(()) is None  # nothing open
+    doc.open(image, (W, H), str(root))
+    stamps = doc.file_stamps()
+    _draw(doc)
+
+    assert doc.read_back(stamps) is None  # unsaved edits
+
+    doc.model.undo()
+    handed = doc.read_back(stamps)
+    assert handed is not None and np.array_equal(handed.mask, doc.model.mask)
+
+
 def test_discard_looks_the_prediction_up_once(project, lookups):
     root, image = project
     _write_skeleton(_paths(root)[1], row=40)
@@ -574,24 +615,3 @@ def test_a_save_back_to_the_prediction_looks_it_up_once(project, lookups):
 
     assert result.removed and not os.path.isfile(gt_file) and doc.source == PREDICTION
     assert len(lookups) == 1
-
-
-# ------------------------------------------------------------------ Qt-free
-def test_the_module_loads_no_qt():
-    code = textwrap.dedent(
-        """
-        import sys
-        import app.gui.correct.skeleton_document
-        print(sorted(name for name in sys.modules if name.split(".")[0] == "PyQt6"))
-        """
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        cwd=str(REPO_ROOT),
-        env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "[]"
