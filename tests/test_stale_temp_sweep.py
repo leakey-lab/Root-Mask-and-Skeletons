@@ -5,6 +5,10 @@ target and swaps it in. A process killed in between left that file behind for go
 (the review's repro: ``.root_lengths.csv.78684f58.tmp``, 385 KB). Opening a project
 now sweeps its output folders for such files older than an hour, off the GUI thread.
 
+The per-user settings folder (the Enhance defaults, ``normalization_defaults.json``) is swept
+too, by ``EnhanceDefaultsStore.load()``: once per process, on a daemon thread, with the same
+age rule; ``load()`` never waits for it and never raises, even when no thread can start (R4).
+
 The GT store and registry had their own non-durable writers (``<path>.tmp``, no
 fsync, no lock retry); they now go through ``app.io_utils`` with the saved bytes
 unchanged, and their old ``<name>.tmp`` leftovers are swept from ``gt/``.
@@ -24,8 +28,9 @@ import numpy as np
 import pytest
 from PIL import Image, PngImagePlugin
 
-from app import io_utils
+from app import enhancement, io_utils
 from app.config import GT_BACKGROUND_ID, GT_META_CHUNK, GT_UNKNOWN_COLOR
+from app.enhancement import DEFAULTS_FILE_NAME, EnhanceDefaultsStore
 from app.gt.registry import default_registry, save_registry
 from app.gt.store import Tracing, empty_tracing, gt_path, read_tracing, write_tracing
 from app.io_utils import FileLockedError, atomic_open
@@ -39,12 +44,13 @@ def sweep(folder, **kwargs):
     return io_utils.sweep_stale_temp_files(folder, **kwargs)
 
 
-def _file(folder, name: str, *, age_s: float = 0.0) -> str:
-    """Create ``folder/name`` whose mtime is ``age_s`` seconds in the past."""
+def _file(folder, name: str, *, age_s: float = 0.0, text: str | None = None) -> str:
+    """Create ``folder/name`` whose mtime is ``age_s`` seconds in the past; its content is
+    ``text`` (UTF-8) when given, else the bytes of a partial write."""
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(str(folder), name)
     with open(path, "wb") as fh:
-        fh.write(b"partial write")
+        fh.write(b"partial write" if text is None else text.encode("utf-8"))
     if age_s:
         stamp = time.time() - age_s
         os.utime(path, (stamp, stamp))
@@ -296,6 +302,137 @@ def test_a_loaded_project_is_swept_on_a_daemon_thread_after_its_scan(app, tmp_pa
     thread.join(5)
     assert not any(os.path.exists(p) for p in stale)
     assert all(os.path.exists(p) for p in kept)
+
+
+# ------------------------------------------------------------------ the settings folder (R4)
+
+
+@pytest.fixture(autouse=True)
+def _fresh_sweep_state(monkeypatch):
+    # Each test sees a process in which no settings folder was swept yet.
+    monkeypatch.setattr(enhancement, "_swept_settings_dirs", set())
+
+
+def _store(folder):
+    factory = _file(
+        folder.parent / "factory", DEFAULTS_FILE_NAME, text=json.dumps({"clahe_tile": 9})
+    )
+    return EnhanceDefaultsStore(user_path=str(folder / DEFAULTS_FILE_NAME), factory_path=factory)
+
+
+def test_loading_the_defaults_sweeps_stale_temp_files_from_the_settings_folder(tmp_path):
+    folder = tmp_path / "SPROUTS"
+    stale = _file(folder, f".{DEFAULTS_FILE_NAME}.1a2b3c4d.tmp", age_s=2 * HOUR)
+    fresh = _file(folder, f".{DEFAULTS_FILE_NAME}.0badf00d.tmp", age_s=60)  # a save in progress
+    other = _file(folder, "notes.tmp", age_s=2 * HOUR)  # not an atomic-write temp name
+    store = _store(folder)
+
+    assert store.load().tile == 9  # seeded from the factory file, as before
+    store.sweep_thread.join(5)
+
+    assert not os.path.exists(stale)
+    assert os.path.exists(fresh) and os.path.exists(other)
+    assert os.path.exists(store.user_path)
+
+
+@pytest.mark.wallclock
+def test_the_sweep_runs_on_a_daemon_thread_and_load_never_waits_for_it(tmp_path, monkeypatch):
+    folder = tmp_path / "SPROUTS"
+    stale = _file(folder, f".{DEFAULTS_FILE_NAME}.1a2b3c4d.tmp", age_s=2 * HOUR)
+    release, calls = threading.Event(), []
+    real_sweep = enhancement.sweep_stale_temp_files
+
+    def held_sweep(swept_folder, **kwargs):
+        calls.append((swept_folder, threading.current_thread()))
+        release.wait(10)
+        return real_sweep(swept_folder, **kwargs)
+
+    monkeypatch.setattr(enhancement, "sweep_stale_temp_files", held_sweep)
+    store = _store(folder)
+    started = time.monotonic()
+    try:
+        store.load()
+        returned_after = time.monotonic() - started
+        deadline = time.monotonic() + 5
+        while not calls and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert os.path.exists(stale)  # still held: load() did not wait
+    finally:
+        release.set()
+    store.sweep_thread.join(5)
+
+    assert returned_after < 2.0
+    ((swept_folder, thread),) = calls
+    assert os.path.normcase(swept_folder) == os.path.normcase(str(folder))
+    assert thread is not threading.main_thread() and thread.daemon
+    assert not os.path.exists(stale)
+
+
+def test_the_settings_folder_is_swept_once_per_process(tmp_path, monkeypatch):
+    folder = tmp_path / "SPROUTS"
+    calls = []
+    monkeypatch.setattr(
+        enhancement, "sweep_stale_temp_files", lambda f, **kw: calls.append(f) or []
+    )
+
+    first = _store(folder)
+    first.load()
+    first.sweep_thread.join(5)
+    second = _store(folder)  # e.g. the Trace GT editor's controls after Correct's
+    second.load()
+    first.load()
+
+    assert len(calls) == 1
+    assert second.sweep_thread is None
+
+
+def test_a_missing_settings_folder_is_not_an_error(tmp_path):
+    store = EnhanceDefaultsStore(
+        user_path=str(tmp_path / "missing" / DEFAULTS_FILE_NAME),
+        factory_path=str(tmp_path / "no_factory.json"),
+    )
+    assert store.load() == enhancement.DEFAULT_SETTINGS
+    store.sweep_thread.join(5)
+    assert not (tmp_path / "missing").exists()  # sweeping creates nothing
+
+
+def _store_in(tmp_path):
+    return EnhanceDefaultsStore(
+        user_path=str(tmp_path / "SPROUTS" / DEFAULTS_FILE_NAME),
+        factory_path=str(tmp_path / "no_factory.json"),
+    )
+
+
+def test_load_never_raises_when_the_sweep_thread_cannot_start(tmp_path, monkeypatch, caplog):
+    def refuse(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    store = _store_in(tmp_path)
+
+    with caplog.at_level(logging.WARNING):
+        settings = store.load()
+
+    assert settings == enhancement.DEFAULT_SETTINGS
+    assert store.sweep_thread is None
+    assert "can't start new thread" in caplog.text
+
+
+def test_a_later_load_sweeps_once_a_thread_can_start_again(tmp_path, monkeypatch):
+    real_start = threading.Thread.start
+
+    def refuse(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    _store_in(tmp_path).load()
+    monkeypatch.setattr(threading.Thread, "start", real_start)
+
+    store = _store_in(tmp_path)
+    store.load()
+
+    assert store.sweep_thread is not None  # the folder was not marked as swept
+    store.sweep_thread.join(5)
 
 
 # ------------------------------------------------------------------ GT writers

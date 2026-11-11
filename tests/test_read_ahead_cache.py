@@ -226,3 +226,14 @@ def test_a_job_ending_after_close_changes_nothing():
     future.set_result(Sized(500))  # the job ends after close
 
     assert not future.cancelled() and ended == ["a"] and cache.pending() == []
+
+
+def test_a_queued_job_is_never_dropped_for_bytes():
+    """It holds nothing yet: over the byte budget, the finished entries go, not the job."""
+    executor = ManualExecutor()
+    cache = Cache(max_images=5, max_bytes=100, executor=executor)
+    queued = cache.request("next", Sized, 1)  # not run yet
+
+    cache.keep("shown", Sized(500))  # alone over the budget
+
+    assert cache.pending() == ["next", "shown"] and not queued.cancelled()

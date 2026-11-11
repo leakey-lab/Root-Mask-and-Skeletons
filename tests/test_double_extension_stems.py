@@ -93,39 +93,67 @@ def library(folder: str) -> ImageManager:
     return manager
 
 
-def test_x_png_and_x_png_jpg_keep_their_own_gt(make_editor, app, tmp_path):
+@pytest.fixture
+def saved(make_editor, tmp_path) -> SimpleNamespace:
+    """Images ``X.png`` and ``X.png.jpg`` with their predictions and X.png's three GT files;
+    the skeleton layer of X.png.jpg opened, a line drawn, saved. What the layer showed before
+    the edit is in ``opened``, what the save reported in ``saved``."""
     folder = str(tmp_path / "project")
     layout = ProjectLayout(folder)
     x_png = write_image(os.path.join(folder, "X.png"))
     x_jpg = write_image(os.path.join(folder, "X.png.jpg"), value=60)  # a converted copy
-    assert sorted(layout.scan_images()) == ["X", "X.png"]
+    scanned = sorted(layout.scan_images())
     for stem, row in (("X", 110), ("X.png", 60)):  # what Generate writes for each
         write_skeleton(os.path.join(layout.skeletons_dir, f"{stem}_fake.png"), row=row)
         write_mask(os.path.join(layout.mask_dir, f"{stem}.png"), box_plane())
     x_gt = gt_of_x(layout, x_png)
     before = {kind: read_bytes(path) for kind, path in x_gt.items()}
-    own_gt = os.path.join(layout.gt_skeletons_dir, "X.png.png")
-
-    # The skeleton layer of X.png.jpg opens its own prediction and saves its own GT file.
     editor = make_editor(x_jpg, folder)
     skeleton = editor.layers[SKELETON]
-    assert skeleton.document.source == "prediction"
-    assert skeleton.document.model.mask[60].any() and not skeleton.document.model.mask[110].any()
+    opened = SimpleNamespace(
+        source=skeleton.document.source,
+        row_60=skeleton.document.model.mask[60].any(),
+        row_110=skeleton.document.model.mask[110].any(),
+    )
     draw_line(editor)
-    saved = []
-    editor.skeleton_saved.connect(saved.append)
-    assert editor.save()
-    assert [os.path.normcase(p) for p in saved] == [os.path.normcase(own_gt)]
-    assert os.path.isfile(own_gt)
-    assert {kind: read_bytes(path) for kind, path in x_gt.items()} == before
+    reported: list[str] = []
+    editor.skeleton_saved.connect(reported.append)
+    ok = editor.save()
+    return SimpleNamespace(
+        folder=folder,
+        layout=layout,
+        x_png=x_png,
+        x_jpg=x_jpg,
+        scanned=scanned,
+        x_gt=x_gt,
+        before=before,
+        own_gt=os.path.join(layout.gt_skeletons_dir, "X.png.png"),
+        editor=editor,
+        skeleton=skeleton,
+        opened=opened,
+        saved=reported,
+        ok=ok,
+    )
 
-    # The Library: each image its own marks; the report of the save marks X.png.
-    manager = library(folder)
+
+def test_the_skeleton_layer_of_x_png_jpg_opens_and_saves_its_own_files(saved):
+    assert saved.scanned == ["X", "X.png"]
+    assert saved.opened.source == "prediction"
+    assert saved.opened.row_60 and not saved.opened.row_110
+    assert saved.ok
+    assert [os.path.normcase(p) for p in saved.saved] == [os.path.normcase(saved.own_gt)]
+    assert os.path.isfile(saved.own_gt)
+    assert {kind: read_bytes(path) for kind, path in saved.x_gt.items()} == saved.before
+
+
+def test_the_library_marks_each_image_by_its_own_gt(saved):
+    own_gt, x_gt = saved.own_gt, saved.x_gt
+    manager = library(saved.folder)
     assert manager.gt_skeleton_stems == {"X", "X.png"}
     manager.gt_skeleton_stems.discard("X.png")  # as before the save
-    editors.on_skeleton_saved(fake_window(manager), saved[0])
+    editors.on_skeleton_saved(fake_window(manager), saved.saved[0])
     assert manager.gt_skeleton_stems == {"X", "X.png"}
-    editors.sync_open_correction(fake_window(manager, x_jpg))
+    editors.sync_open_correction(fake_window(manager, saved.x_jpg))
     assert manager.gt_skeleton_stems == {"X", "X.png"}
     assert os.path.normcase(manager.gt_skeleton_path_for("X.png")) == os.path.normcase(own_gt)
     assert os.path.normcase(manager.gt_skeleton_path_for("X")) == os.path.normcase(x_gt["skeleton"])
@@ -134,16 +162,21 @@ def test_x_png_and_x_png_jpg_keep_their_own_gt(make_editor, app, tmp_path):
     manager.set_gt("X.png", "mask", False)
     assert manager.gt_mask_stems == {"X"}
 
-    # Measure: one row per image, each from its own GT file.
-    lengths = run_length(layout, app)
+
+def test_measure_gives_each_image_a_row_from_its_own_gt(saved, app):
+    lengths = run_length(saved.layout, app)
     assert sorted(lengths) == ["X", "X.png"]
     assert [lengths[s]["Source"] for s in ("X", "X.png")] == ["gt", "gt"]
     assert lengths["X"][LENGTH] != lengths["X.png"][LENGTH]
-    areas = run_area(layout, app)
+    areas = run_area(saved.layout, app)
     assert [areas[s]["Source"] for s in ("X", "X.png")] == ["gt", "prediction"]
 
-    # The metrics bar: each Library stem finds its own row and file.
-    index = MeasurementIndex(folder)
+
+def test_the_metrics_bar_finds_each_images_own_row_and_file(saved, app):
+    lengths = run_length(saved.layout, app)
+    areas = run_area(saved.layout, app)
+
+    index = MeasurementIndex(saved.folder)
     for stem in ("X", "X.png"):
         assert index.lookup(stem).length_mm == float(lengths[stem][LENGTH])
         assert index.lookup(stem).area_mm2 == float(areas[stem][AREA])
@@ -157,18 +190,20 @@ def test_x_png_and_x_png_jpg_keep_their_own_gt(make_editor, app, tmp_path):
     }
     assert index.outdated("X.png") == {"length": False, "area": False}
 
-    # Remove GT… on X.png.jpg removes its own file; X.png's GT stays.
+
+def test_remove_gt_on_x_png_jpg_removes_only_its_own_file(saved):
+    editor, skeleton, manager = saved.editor, saved.skeleton, library(saved.folder)
     confirm = Confirm()
     editor.actions.confirm_remove = confirm
     editor.remove_gt()
-    assert confirm.calls and not os.path.exists(own_gt)
-    assert {kind: read_bytes(path) for kind, path in x_gt.items()} == before
-    editors.on_gt_removed(fake_window(manager), x_jpg)
+    assert confirm.calls and not os.path.exists(saved.own_gt)
+    assert {kind: read_bytes(path) for kind, path in saved.x_gt.items()} == saved.before
+    editors.on_gt_removed(fake_window(manager), saved.x_jpg)
     assert manager.gt_skeleton_stems == {"X"}
     assert manager.gt_mask_stems == manager.gt_label_stems == {"X"}
 
     # X.png still opens its own GT skeleton.
-    editor.load_image(x_png, folder)
+    editor.load_image(saved.x_png, saved.folder)
     assert skeleton.document.source == "gt" and skeleton.document.model.mask[30].any()
 
 

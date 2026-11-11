@@ -70,15 +70,6 @@ def test_headless_gives_a_fresh_memory_store_each_time(app, no_user_settings):
     assert second.value("recent_projects", "[]") == "[]"  # nothing is shared
 
 
-def test_on_a_screen_it_is_the_users_settings_file(app, monkeypatch, tmp_path):
-    made = []
-    monkeypatch.setenv("SPROUTS_CONFIG_DIR", str(tmp_path))
-    monkeypatch.setattr(factory, "headless", lambda: False)
-    monkeypatch.setattr(factory, "ini_settings", lambda path: made.append(path) or "the user's")
-    assert app_settings() == "the user's"
-    assert made == [os.path.join(str(tmp_path), "settings.ini")]
-
-
 def test_the_memory_store_answers_what_the_stores_call():
     store = MemorySettings()
     assert store.value("window/geometry") is None

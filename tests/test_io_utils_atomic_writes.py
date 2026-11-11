@@ -1,4 +1,12 @@
-"""Foundation-core: atomic writes, locked-file errors and Unicode-safe image I/O."""
+"""``app.io_utils`` atomic writes: a save either replaces the whole file or leaves the old one.
+
+Promises: data goes to a hidden ``.<name>.<8 hex>.tmp`` sibling that no scanner lists and that
+fits wherever the target fits (MAX_PATH, 255 characters, 255 UTF-8 bytes); any failure keeps
+the previous file and removes the temp file (R7: also when the close fails on a full disk);
+a file held open by another program raises ``FileLockedError`` after short retries, a
+read-only file does not; an error names the file being saved, never the temp file (C6-05);
+``folder_not_writable`` tells a folder that takes no new files from one bad name (C6-01).
+"""
 
 from __future__ import annotations
 
@@ -7,9 +15,9 @@ import errno
 import os
 import stat
 import sys
+import threading
+import time
 
-import cv2
-import numpy as np
 import pytest
 
 from app import io_utils
@@ -18,8 +26,6 @@ from app.io_utils import (
     atomic_open,
     atomic_write_bytes,
     atomic_write_text,
-    imread_unicode,
-    imwrite_unicode,
 )
 
 UNICODE_DIRNAME = "Donn\u00e9es_\u6839\u7cfb"
@@ -125,6 +131,58 @@ def test_invalid_mode_is_rejected(tmp_path):
         pass
 
 
+# ------------------------------------------------------------------ a failing close or flush (R7)
+
+
+class _CloseFails:
+    """A file whose first ``close()`` closes it, then raises like a flush on a full disk."""
+
+    def __init__(self, fh):
+        self._fh = fh
+        self._failed = False
+
+    def __getattr__(self, name):
+        return getattr(self._fh, name)
+
+    def close(self):
+        self._fh.close()
+        if not self._failed:
+            self._failed = True
+            raise OSError(errno.ENOSPC, "No space left on device (simulated)")
+
+
+@pytest.fixture
+def close_fails(monkeypatch):
+    real_open = open
+    monkeypatch.setattr(
+        io_utils, "open", lambda *a, **k: _CloseFails(real_open(*a, **k)), raising=False
+    )
+
+
+def test_an_error_in_the_write_is_raised_and_the_temp_file_removed(tmp_path, close_fails):
+    target = tmp_path / "root_lengths.csv"
+    target.write_bytes(b"previous complete file")
+
+    with pytest.raises(ValueError, match="bad row"), atomic_open(target, "w") as fh:
+        fh.write("Image,Length (mm)\n")
+        raise ValueError("bad row")
+
+    assert os.listdir(tmp_path) == ["root_lengths.csv"]  # no temp file left behind
+    assert target.read_bytes() == b"previous complete file"
+
+
+def test_a_failing_flush_leaves_no_temp_file(tmp_path, monkeypatch, close_fails):
+    def flush_fails(fh):
+        raise OSError(errno.ENOSPC, "No space left on device (flush, simulated)")
+
+    monkeypatch.setattr(_CloseFails, "flush", flush_fails, raising=False)
+
+    with pytest.raises(OSError, match="flush, simulated"):
+        atomic_write_bytes(tmp_path / "mask.png", b"\x89PNG" + b"\0" * 64)
+
+    assert os.listdir(tmp_path) == []
+
+
 # ------------------------------------------------------------------ locked files
 
 
@@ -219,58 +277,6 @@ def test_real_excel_style_lock_raises_file_locked(tmp_path):
     assert _leftovers(tmp_path) == ["root_lengths.csv"]
 
 
-# ------------------------------------------------------------------ image I/O
-
-
-def _sample_image() -> np.ndarray:
-    img = np.zeros((48, 64, 3), dtype=np.uint8)
-    cv2.line(img, (2, 2), (60, 40), (255, 255, 255), 1)
-    img[5:9, 5:9] = (10, 200, 30)
-    return img
-
-
-def test_imwrite_then_imread_round_trips_on_unicode_path(tmp_path):
-    folder = tmp_path / UNICODE_DIRNAME
-    folder.mkdir()
-    path = folder / "24EFCAM1_T001_L045_2024.07.18_111618_001_SMM_fake.png"
-    img = _sample_image()
-    imwrite_unicode(path, img)
-    back = imread_unicode(path)
-    assert back is not None and np.array_equal(back, img)
-    gray = imread_unicode(str(path), cv2.IMREAD_GRAYSCALE)
-    assert gray.shape == img.shape[:2]
-
-
-def test_imread_unicode_matches_cv2_imread_on_ascii_path(tmp_path):
-    path = tmp_path / "plain.png"
-    cv2.imwrite(str(path), _sample_image())
-    for flags in (cv2.IMREAD_COLOR, cv2.IMREAD_GRAYSCALE, cv2.IMREAD_UNCHANGED):
-        assert np.array_equal(imread_unicode(path, flags), cv2.imread(str(path), flags))
-
-
-def test_imread_unicode_returns_none_for_missing_empty_or_corrupt(tmp_path):
-    assert imread_unicode(tmp_path / "missing.png") is None
-    (tmp_path / "empty.png").write_bytes(b"")
-    assert imread_unicode(tmp_path / "empty.png") is None
-    (tmp_path / "corrupt.png").write_bytes(b"not a png at all")
-    assert imread_unicode(tmp_path / "corrupt.png") is None
-    assert imread_unicode(tmp_path) is None  # a directory
-
-
-def test_imwrite_unicode_raises_on_encode_failure_and_leaves_no_file(tmp_path):
-    with pytest.raises(ValueError):
-        imwrite_unicode(tmp_path / "bad.unknownext", _sample_image())
-    assert _leftovers(tmp_path) == []
-
-
-def test_imwrite_unicode_passes_encoder_params(tmp_path):
-    img = _sample_image()
-    imwrite_unicode(tmp_path / "fast.png", img, [cv2.IMWRITE_PNG_COMPRESSION, 0])
-    imwrite_unicode(tmp_path / "small.png", img, [cv2.IMWRITE_PNG_COMPRESSION, 9])
-    assert (tmp_path / "fast.png").stat().st_size > (tmp_path / "small.png").stat().st_size
-    assert np.array_equal(imread_unicode(tmp_path / "fast.png"), img)
-
-
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows read-only attribute")
 def test_read_only_target_is_not_reported_as_locked(tmp_path, monkeypatch):
     import stat
@@ -294,89 +300,7 @@ def test_read_only_target_is_not_reported_as_locked(tmp_path, monkeypatch):
     assert io_utils.folder_not_writable(info.value) is None
 
 
-@pytest.mark.parametrize("platform", ["win32", "linux", "darwin"])
-def test_durable_writes_fsync_and_bulk_writes_can_skip_it(tmp_path, monkeypatch, platform):
-    synced, folders = [], []
-    monkeypatch.setattr(io_utils, "_fsync", synced.append)  # os.fsync, or macOS's barrier
-    monkeypatch.setattr(io_utils, "_sync_folder", folders.append)
-    monkeypatch.setattr(io_utils, "_current_platform", lambda: platform)
-    synced_folders = [] if platform == "win32" else [os.path.abspath(tmp_path)]
-    atomic_write_bytes(tmp_path / "hand_made.png", b"x")
-    assert len(synced) == 1
-    assert folders == synced_folders  # off Windows the rename is made durable too
-    atomic_write_bytes(tmp_path / "generated.png", b"y", durable=False)
-    atomic_write_text(tmp_path / "t.txt", "z", durable=False)
-    with atomic_open(tmp_path / "s.csv", "w", durable=False) as fh:
-        fh.write("a")
-    imwrite_unicode(tmp_path / "g.png", _sample_image(), durable=False)
-    assert len(synced) == 1
-    assert folders == synced_folders
-    assert (tmp_path / "generated.png").read_bytes() == b"y"
-    assert sorted(os.listdir(tmp_path)) == [
-        "g.png",
-        "generated.png",
-        "hand_made.png",
-        "s.csv",
-        "t.txt",
-    ]
-
-
-def test_the_folder_is_synced_after_the_swap_and_never_fails_a_save(tmp_path, monkeypatch):
-    events = []
-    real_replace = os.replace
-    monkeypatch.setattr(io_utils, "_current_platform", lambda: "linux")
-    monkeypatch.setattr(io_utils.os, "fsync", lambda fd: events.append("fsync"))
-    monkeypatch.setattr(
-        io_utils.os, "replace", lambda a, b: events.append("replace") or real_replace(a, b)
-    )
-    monkeypatch.setattr(io_utils, "_sync_folder", lambda folder: events.append(folder))
-    atomic_write_bytes(tmp_path / "a.png", b"old")
-    assert events == ["fsync", "replace", os.path.abspath(tmp_path)]
-
-    def refuse(*_args):
-        raise OSError(errno.EINVAL, "Invalid argument")
-
-    monkeypatch.undo()
-    monkeypatch.setattr(io_utils, "_current_platform", lambda: "linux")
-    monkeypatch.setattr(io_utils.os, "open", refuse)  # the folder cannot be opened
-    atomic_write_bytes(tmp_path / "a.png", b"new")
-    assert (tmp_path / "a.png").read_bytes() == b"new"
-    assert _leftovers(tmp_path) == ["a.png"]
-
-
-def test_a_folder_sync_never_raises(tmp_path):
-    io_utils._sync_folder(str(tmp_path))  # on Windows a folder cannot be opened: no error
-    io_utils._sync_folder(str(tmp_path / "missing"))
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="the folder fsync of Linux and macOS")
-def test_posix_saves_fsync_the_file_then_swap_then_fsync_the_folder(tmp_path, monkeypatch):
-    events = []
-    # The real sync of this platform: os.fsync on Linux, F_BARRIERFSYNC on macOS (X1-05).
-    real_fsync, real_replace = io_utils._fsync, os.replace
-
-    def fsync(fd):
-        events.append("folder" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file")
-        real_fsync(fd)
-
-    monkeypatch.setattr(io_utils, "_fsync", fsync)
-    monkeypatch.setattr(os, "replace", lambda a, b: events.append("replace") or real_replace(a, b))
-    atomic_write_bytes(tmp_path / "a.png", b"x")
-    assert events == ["file", "replace", "folder"]
-
-    def refuse_folders(fd):
-        if stat.S_ISDIR(os.fstat(fd).st_mode):
-            raise OSError(errno.EINVAL, "Invalid argument")  # a file system without it
-        real_fsync(fd)
-
-    monkeypatch.setattr(io_utils, "_fsync", refuse_folders)
-    atomic_write_bytes(tmp_path / "a.png", b"new")
-    assert (tmp_path / "a.png").read_bytes() == b"new"
-    assert _leftovers(tmp_path) == ["a.png"]
-    events.clear()
-    monkeypatch.setattr(io_utils, "_fsync", fsync)
-    atomic_write_bytes(tmp_path / "b.png", b"y", durable=False)
-    assert events == ["replace"]  # a bulk write syncs nothing
+# ------------------------------------------------------------------ temp names that fit (O21, X1)
 
 
 def test_temp_name_fits_255_utf8_bytes_on_posix(tmp_path):
@@ -420,6 +344,100 @@ def test_a_surrogate_escaped_name_is_written_atomically(tmp_path):
         pytest.skip("this file system cannot hold a non-UTF-8 name")
     assert target.read_bytes() == b"data"
     assert _leftovers(tmp_path) == [target.name]
+
+
+_MAX_PATH = 259  # Windows MAX_PATH less the terminating NUL
+
+
+_NAME = "24EFCAM1_T001_L011_2024.07.18_111618_001_SMM_fake.png"
+
+
+def _padded_folder(base: str, length: int) -> str:
+    """A folder path (not created) whose absolute form is exactly ``length`` characters."""
+    base = os.path.abspath(base)
+    need = length - len(base) - 1
+    assert need > 0
+    parts, left = [], need
+    while left > 0:
+        chunk = min(left, 40)
+        if left - chunk == 1:  # never leave room for a lone separator
+            chunk -= 1
+        parts.append("d" * chunk)
+        left -= chunk + 1
+    folder = os.path.join(base, *parts)
+    assert len(folder) == length, (len(folder), length)
+    return folder
+
+
+def test_a_file_name_near_the_255_character_limit_is_written_atomically(tmp_path):
+    target = tmp_path / ("a" * 246 + ".png")  # 250 characters: a valid file name
+    with open(target, "wb") as fh:  # a plain write works...
+        fh.write(b"plain")
+
+    io_utils.atomic_write_bytes(target, b"atomic")  # ...and so must the atomic one
+
+    assert target.read_bytes() == b"atomic"
+    assert os.listdir(tmp_path) == [target.name]  # no temp file left behind
+
+
+@pytest.mark.parametrize("length", [200, 240, 245, 246, 250, 255, 259])
+def test_the_temp_path_fits_wherever_the_target_path_fits(tmp_path, length):
+    folder = _padded_folder(str(tmp_path), length - len(_NAME) - 1)
+    target = os.path.join(folder, _NAME)
+    assert len(target) == length
+
+    temp = io_utils._temp_path(target)
+
+    assert len(os.path.abspath(temp)) <= _MAX_PATH
+    assert os.path.dirname(temp) == folder  # a sibling: os.replace stays on one volume
+    name = os.path.basename(temp)
+    assert name.startswith(".") and name.endswith(".tmp")  # hidden from every scanner
+    assert io_utils._is_temp_name(name)  # the stale-temp sweep still finds it
+
+
+def test_a_short_path_keeps_the_whole_target_name_in_the_temp_name(tmp_path):
+    target = os.path.join(str(tmp_path), _NAME)
+
+    name = os.path.basename(io_utils._temp_path(target))
+
+    head, token, suffix = name.rsplit(".", 2)
+    assert head == "." + _NAME and suffix == "tmp" and len(token) == 8
+
+
+def test_a_path_longer_than_max_path_keeps_the_whole_target_name(tmp_path):
+    # Such a target exists only where long paths are enabled: nothing to shorten for.
+    folder = _padded_folder(str(tmp_path), 300)
+    name = os.path.basename(io_utils._temp_path(os.path.join(folder, _NAME)))
+    assert name.startswith("." + _NAME + ".")
+
+
+def test_a_stale_shortened_temp_file_is_swept(tmp_path):
+    target = tmp_path / ("b" * 246 + ".png")
+    temp = io_utils._temp_path(str(target))
+    with open(temp, "wb") as fh:
+        fh.write(b"left by a killed save")
+    old = time.time() - 2 * 3600
+    os.utime(temp, (old, old))
+
+    removed = io_utils.sweep_stale_temp_files(tmp_path)
+
+    assert removed == [temp] and not os.path.exists(temp)
+
+
+def test_a_near_max_path_target_is_written_atomically(tmp_path):
+    folder = _padded_folder(str(tmp_path), _MAX_PATH - len(_NAME) - 1)
+    try:
+        os.makedirs(folder)
+    except OSError as exc:  # pragma: no cover - the folder itself is within MAX_PATH
+        pytest.skip(f"cannot create the test folder: {exc}")
+    target = os.path.join(folder, _NAME)
+    assert len(target) == _MAX_PATH
+
+    io_utils.atomic_write_bytes(target, b"png bytes")
+
+    with open(target, "rb") as fh:
+        assert fh.read() == b"png bytes"
+    assert os.listdir(folder) == [_NAME]
 
 
 # ------------------------------------------------------------------ errors name the target (C6-05)
@@ -601,110 +619,83 @@ def test_folder_not_writable_error_survives_pickling():
     assert (back.folder, back.errno, str(back)) == (err.folder, err.errno, str(err))
 
 
-# ------------------------------------------------------------------ macOS barrier sync (X1-05)
+# ------------------------------------------------------------------ interrupts, readers, racing writers
 
 
-class _FakeFcntl:
-    """Stands in for macOS's ``fcntl`` module; ``fail`` makes the call fail like SMB does."""
+@pytest.mark.parametrize("where", ["block", "swap"])
+def test_an_interrupt_keeps_the_old_file_removes_the_temp_file_and_propagates(
+    tmp_path, monkeypatch, where
+):
+    """Ctrl+C in the middle of a save, or a worker's SystemExit at the swap: the previous file
+    stays, no hidden temp file (and no open handle) is left, the interrupt itself goes on."""
+    target = tmp_path / "root_lengths.csv"
+    target.write_bytes(b"old complete file")
+    interrupt = KeyboardInterrupt() if where == "block" else SystemExit(1)
+    if where == "swap":
 
-    def __init__(self, *, constant: int | None = None, fail: bool = False) -> None:
-        self.calls: list[tuple[int, int]] = []
-        self.fail = fail
-        if constant is not None:
-            self.F_BARRIERFSYNC = constant
+        def interrupted_replace(src, dst):
+            raise interrupt
 
-    def fcntl(self, fd: int, cmd: int, arg: int = 0) -> int:
-        self.calls.append((fd, cmd))
-        if self.fail:
-            raise OSError(errno.ENOTSUP, "Operation not supported")
-        return 0
+        monkeypatch.setattr(io_utils.os, "replace", interrupted_replace)
 
+    with pytest.raises(type(interrupt)) as info, atomic_open(target, "w") as fh:
+        fh.write("partial")
+        if where == "block":
+            raise interrupt
 
-def _on(monkeypatch, platform: str, fake: _FakeFcntl | None) -> list[int]:
-    """Pretend to run on ``platform`` with ``fake`` as fcntl; returns the ``os.fsync`` calls."""
-    synced: list[int] = []
-    monkeypatch.setattr(io_utils, "_current_platform", lambda: platform)
-    monkeypatch.setattr(io_utils.os, "fsync", synced.append)
-    # None in sys.modules makes "import fcntl" fail, as on Windows.
-    monkeypatch.setitem(sys.modules, "fcntl", fake)
-    return synced
-
-
-def test_macos_durable_saves_sync_with_a_barrier(tmp_path, monkeypatch):
-    """Python's fcntl has no F_BARRIERFSYNC (3.14), so <sys/fcntl.h>'s 85 is used."""
-    fake = _FakeFcntl()
-    synced = _on(monkeypatch, "darwin", fake)
-    monkeypatch.setattr(io_utils, "_sync_folder", lambda folder: None)
-    atomic_write_bytes(tmp_path / "a.png", b"x")
-    assert [cmd for _fd, cmd in fake.calls] == [85]
-    assert synced == []  # the barrier replaces the plain fsync
-    assert (tmp_path / "a.png").read_bytes() == b"x"
-    assert _leftovers(tmp_path) == ["a.png"]
+    assert info.value is interrupt
+    assert target.read_bytes() == b"old complete file"
+    assert _leftovers(tmp_path) == ["root_lengths.csv"]
 
 
-def test_a_python_that_exports_the_barrier_constant_is_followed(tmp_path, monkeypatch):
-    fake = _FakeFcntl(constant=1085)
-    synced = _on(monkeypatch, "darwin", fake)
-    monkeypatch.setattr(io_utils, "_sync_folder", lambda folder: None)
-    atomic_write_bytes(tmp_path / "a.png", b"x")
-    assert [cmd for _fd, cmd in fake.calls] == [1085] and synced == []
+def test_while_a_save_runs_the_target_holds_the_previous_complete_file(tmp_path):
+    target = tmp_path / "root_areas.csv"
+    target.write_bytes(b"previous complete file")
+
+    with atomic_open(target, "wb") as fh:
+        fh.write(b"new data, not yet swapped in")
+        fh.flush()
+        seen_during = target.read_bytes()  # what a reader (the metrics bar) opens now
+
+    assert seen_during == b"previous complete file"
+    assert target.read_bytes() == b"new data, not yet swapped in"
 
 
-def test_macos_folder_sync_uses_the_barrier_too(tmp_path, monkeypatch):
-    fake = _FakeFcntl()
-    synced = _on(monkeypatch, "darwin", fake)
-    closed = []
-    monkeypatch.setattr(io_utils.os, "open", lambda path, flags: 99)
-    monkeypatch.setattr(io_utils.os, "close", closed.append)
-    io_utils._sync_folder(str(tmp_path))
-    assert fake.calls == [(99, 85)] and synced == [] and closed == [99]
+def test_a_new_target_does_not_exist_until_its_save_ends(tmp_path):
+    target = tmp_path / "mask.png"
+
+    with atomic_open(target, "wb") as fh:
+        fh.write(b"png")
+        exists_during = target.exists()
+
+    assert not exists_during
+    assert target.read_bytes() == b"png"
 
 
-def test_a_file_system_without_the_barrier_gets_the_plain_fsync(tmp_path, monkeypatch):
-    fake = _FakeFcntl(fail=True)
-    synced = _on(monkeypatch, "darwin", fake)
-    monkeypatch.setattr(io_utils, "_sync_folder", lambda folder: None)
-    atomic_write_bytes(tmp_path / "a.png", b"x")
-    assert len(fake.calls) == 1
-    assert synced == [fake.calls[0][0]]  # the same file, synced the plain way
-    assert (tmp_path / "a.png").read_bytes() == b"x"
+def test_two_writers_of_one_file_leave_one_whole_file(tmp_path):
+    """Two threads save one file 50 times each (an editor save racing a hand-back): the file
+    is always one writer's complete data, never a mix, and no temp file is left. A save may
+    fail only as a lock (the other writer's swap on Windows), never otherwise. (What a reader
+    sees during a save: ``test_while_a_save_runs_the_target_holds_the_previous_complete_file``.)"""
+    target = tmp_path / "mask.png"
+    payloads = (b"a" * 200_000, b"b" * 200_000)
+    failures: list[BaseException] = []
 
+    def write(data: bytes) -> None:
+        for _ in range(50):
+            try:
+                atomic_write_bytes(target, data, durable=False)
+            except FileLockedError:
+                pass  # the promised answer to a file another writer holds
+            except BaseException as exc:  # noqa: BLE001 - recorded, asserted below
+                failures.append(exc)
 
-def test_without_fcntl_a_mac_save_still_syncs(tmp_path, monkeypatch):
-    synced = _on(monkeypatch, "darwin", None)
-    monkeypatch.setattr(io_utils, "_sync_folder", lambda folder: None)
-    atomic_write_bytes(tmp_path / "a.png", b"x")
-    assert len(synced) == 1
+    writers = [threading.Thread(target=write, args=(data,)) for data in payloads]
+    for thread in writers:
+        thread.start()
+    for thread in writers:
+        thread.join()
 
-
-@pytest.mark.parametrize("platform", ["win32", "linux"])
-def test_windows_and_linux_keep_the_plain_fsync(tmp_path, monkeypatch, platform):
-    fake = _FakeFcntl()
-    synced = _on(monkeypatch, platform, fake)
-    monkeypatch.setattr(io_utils, "_sync_folder", lambda folder: None)
-    atomic_write_bytes(tmp_path / "a.png", b"x")
-    assert fake.calls == [] and len(synced) == 1
-
-
-def test_bulk_writes_sync_nothing_on_macos(tmp_path, monkeypatch):
-    fake = _FakeFcntl()
-    synced = _on(monkeypatch, "darwin", fake)
-    atomic_write_bytes(tmp_path / "a.png", b"x", durable=False)
-    assert fake.calls == [] and synced == []
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="the real F_BARRIERFSYNC of macOS")
-def test_a_real_mac_save_issues_the_barrier(tmp_path, monkeypatch):
-    import fcntl
-
-    calls = []
-    real_fcntl = fcntl.fcntl
-
-    def spy(fd, cmd, *args):
-        calls.append(cmd)
-        return real_fcntl(fd, cmd, *args)
-
-    monkeypatch.setattr(fcntl, "fcntl", spy)
-    atomic_write_bytes(tmp_path / "a.png", b"x")
-    assert calls and calls[0] == getattr(fcntl, "F_BARRIERFSYNC", 85)
-    assert (tmp_path / "a.png").read_bytes() == b"x"
+    assert failures == []
+    assert target.read_bytes() in payloads
+    assert _leftovers(tmp_path) == ["mask.png"]

@@ -1,7 +1,16 @@
-"""Foundation-core: provenance records and sidecars (FAIR4RS R1.2)."""
+"""``app.provenance``: provenance records, sidecars and run manifests (FAIR4RS R1.2).
+
+Promises: a record's shape and ISO-8601 Z time; models named by SHA-256 (streamed, memoised by
+size and mtime); the git commit read without a subprocess (loose ref, packed-refs, worktree,
+detached HEAD, ``build_info.json``); runtime facts only from modules already imported; sidecars
+and manifests written atomically next to the output and invisible to scanners; ``read_sidecar``
+and ``csv_calibration`` give None for a missing or broken sidecar; ``portable_path`` never
+leaks folders outside the root.
+"""
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import hashlib
 import json
@@ -13,10 +22,12 @@ import subprocess
 import sys
 import types
 
+import numpy as np
 import pytest
 
 import app
 from app import config, provenance
+from app.inference import measure_run
 from app.provenance import (
     SCHEMA,
     app_info,
@@ -31,10 +42,9 @@ from app.provenance import (
 )
 
 SHA_A = "a" * 40
+
+
 SHA_B = "b" * 40
-
-
-# ------------------------------------------------------------------ record
 
 
 def test_build_record_shape():
@@ -80,9 +90,6 @@ def test_models_are_identified_by_hash(tmp_path, monkeypatch):
     assert record["models"]["gone"] == {"path": "no.pth", "sha256": None, "size": None}
 
 
-# ------------------------------------------------------------------ hashing
-
-
 def test_file_sha256_streams_and_memoizes(tmp_path, monkeypatch):
     path = tmp_path / "big.bin"
     data = os.urandom(3 * 1024 * 1024 + 17)
@@ -107,9 +114,6 @@ def test_file_sha256_streams_and_memoizes(tmp_path, monkeypatch):
 def test_file_sha256_of_missing_file_is_none(tmp_path):
     assert file_sha256(tmp_path / "missing.pth") is None
     assert file_sha256(tmp_path) is None
-
-
-# ------------------------------------------------------------------ git
 
 
 def _fake_repo(root: pathlib.Path) -> pathlib.Path:
@@ -176,9 +180,6 @@ def test_git_commit_matches_git_rev_parse_for_this_checkout():
     if proc.returncode != 0:
         pytest.skip("not a git checkout")
     assert git_commit(config.PROJECT_ROOT) == proc.stdout.strip()
-
-
-# ------------------------------------------------------------------ runtime
 
 
 def test_runtime_info_reports_only_already_imported_packages(monkeypatch):
@@ -251,9 +252,6 @@ def test_runtime_info_reads_a_resolved_inference_runtime(monkeypatch):
     }
 
 
-# ------------------------------------------------------------------ sidecars
-
-
 def test_sidecar_round_trip_is_atomic_and_scanner_safe(tmp_path):
     output = tmp_path / "root_lengths.csv"
     output.write_text("Image\n", encoding="utf-8")
@@ -292,3 +290,87 @@ def test_names_digest_identifies_an_input_set_regardless_of_order():
     assert a == provenance.names_digest(("c.jpg", "a.jpg", "b.jpg"))
     assert a == hashlib.sha256(b"a.jpg\nb.jpg\nc.jpg").hexdigest()
     assert a != provenance.names_digest(["a.jpg", "b.jpg"])
+
+
+# ---------------------------------------- reading a sidecar back (received from A2)
+
+
+def test_read_sidecar_and_csv_calibration(tmp_path):
+    csv_path = tmp_path / "root_lengths.csv"
+    assert provenance.read_sidecar(csv_path) is None
+    assert measure_run.csv_calibration(str(csv_path)) is None
+
+    provenance.write_sidecar(
+        csv_path, {"calibration": {"fov_width_mm": 18.0, "fov_height_mm": 13.5}}
+    )
+    assert provenance.read_sidecar(csv_path)["calibration"]["fov_height_mm"] == 13.5
+    assert measure_run.csv_calibration(str(csv_path)) == {
+        "fov_width_mm": 18.0,
+        "fov_height_mm": 13.5,
+    }
+
+    sidecar = provenance.sidecar_path(csv_path)
+    for text in (
+        "{broken",
+        "[1, 2]",
+        '{"calibration": "x"}',
+        '{"calibration": {"fov_width_mm": 1}}',
+    ):
+        with open(sidecar, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        assert measure_run.csv_calibration(str(csv_path)) is None
+        if text in ("{broken", "[1, 2]"):  # not a JSON object: no record at all
+            assert provenance.read_sidecar(csv_path) is None
+
+
+# ------------------------------------------------------------------ added
+
+
+def test_a_sidecar_that_is_not_utf8_reads_as_none(tmp_path):
+    csv_path = tmp_path / "root_areas.csv"
+    with open(provenance.sidecar_path(csv_path), "wb") as fh:
+        fh.write(b'{"calibration": "\xff\xfe"}')
+
+    assert provenance.read_sidecar(csv_path) is None
+    assert provenance.csv_calibration(str(csv_path)) is None
+
+
+def test_the_fallback_record_has_exactly_the_full_records_keys():
+    """A reader of the run manifest gets the same keys whichever record was written (R5):
+    the oracle is ``build_record`` itself, so a key added there is required here too."""
+    full = build_record("mask_generation", outputs={"status": "completed"})
+    fallback = provenance.minimal_record(
+        "mask_generation", outputs={"status": "completed"}, reason="OSError: no"
+    )
+
+    assert set(fallback) == set(full) | {"provenance_error"}
+    assert fallback["git_commit"] is None and fallback["provenance_error"] == "OSError: no"
+
+
+@dataclasses.dataclass
+class _Box:
+    width: int
+    height: int
+
+
+def test_records_hold_numpy_sets_paths_and_dataclasses_as_json_values(tmp_path):
+    output = tmp_path / "root_lengths.csv"
+    parameters = {
+        "count": np.int64(5),
+        "threshold": np.float32(0.5),
+        "stems": {"b", "a"},
+        "folder": pathlib.PurePosixPath("mask/run"),
+        "box": _Box(341, 256),
+    }
+
+    write_sidecar(output, build_record("root_length", parameters=parameters))
+    loaded = json.loads(pathlib.Path(sidecar_path(output)).read_text(encoding="utf-8"))
+
+    assert loaded["parameters"] == {
+        "count": 5,
+        "threshold": 0.5,
+        "stems": ["a", "b"],
+        "folder": "mask/run",
+        "box": {"width": 341, "height": 256},
+    }
+    assert isinstance(loaded["parameters"]["count"], int)

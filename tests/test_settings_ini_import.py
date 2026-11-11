@@ -8,7 +8,6 @@ on Linux) is never opened here: each test hands :func:`app.settings.ini_settings
 
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
@@ -22,7 +21,6 @@ from app.gui.device_check import device_check_enabled
 from app.gui.recent_projects import RecentProjectsStore
 from app.gui.window_state import WindowStateStore
 from app.settings import IMPORT_KEY, MemorySettings, app_settings, ini_settings, native_settings
-from app.user_paths import SETTINGS_FILE_NAME, user_settings_file
 
 INI = QSettings.Format.IniFormat
 NO_ERROR = QSettings.Status.NoError
@@ -383,24 +381,6 @@ def test_what_the_stores_write_reads_back_from_the_file(tmp_path):
 
 
 # ------------------------------------------------------------------- where the file is
-def test_the_file_is_settings_ini_in_the_user_config_folder(monkeypatch, tmp_path):
-    monkeypatch.setenv("SPROUTS_CONFIG_DIR", str(tmp_path / "cfg"))
-    assert SETTINGS_FILE_NAME == "settings.ini"
-    assert user_settings_file() == os.path.join(str(tmp_path / "cfg"), "settings.ini")
-    assert not (tmp_path / "cfg").exists()  # asking for the path creates nothing
-
-
-def test_on_linux_the_file_shares_the_one_config_folder(monkeypatch, tmp_path):
-    """One folder: the settings next to the Enhance defaults in ``~/.config/sprouts``, not
-    a second ``~/.config/LeakeyLab``."""
-    from app import user_paths
-
-    monkeypatch.delenv("SPROUTS_CONFIG_DIR", raising=False)
-    monkeypatch.setattr(user_paths.sys, "platform", "linux")
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
-    assert user_settings_file() == os.path.join(
-        str(tmp_path / ".config"), "sprouts", "settings.ini"
-    )
 
 
 def test_on_a_screen_the_app_store_is_the_file_with_the_import(app, monkeypatch, tmp_path):

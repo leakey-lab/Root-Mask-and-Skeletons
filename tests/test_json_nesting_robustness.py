@@ -207,3 +207,16 @@ def test_the_class_labels_open_empty_for_a_deeply_nested_meta_chunk(page, tmp_pa
     assert not page.layers[CLASSES].document.history.plane.any()
     with open(path, "rb") as fh:
         assert fh.read() == before  # left as is unless the user saves
+
+
+@pytest.mark.parametrize("kind", sorted(NESTED))
+def test_a_deeply_nested_provenance_sidecar_reads_as_none(tmp_path, kind):
+    # The metrics bar reads each CSV's sidecar for its calibration: a broken one is "none".
+    from app import provenance
+
+    csv_path = tmp_path / "root_lengths.csv"
+    with open(provenance.sidecar_path(csv_path), "w", encoding="utf-8") as fh:
+        fh.write(NESTED[kind])
+
+    assert provenance.read_sidecar(csv_path) is None
+    assert provenance.csv_calibration(str(csv_path)) is None

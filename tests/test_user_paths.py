@@ -1,4 +1,6 @@
-"""Foundation-core: per-user folders for settings, data and logs (never the repo)."""
+"""``app.user_paths``: per-user folders for settings, data and logs (never the repo), and
+the settings file in the config folder.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +9,13 @@ import os
 import pytest
 
 from app import user_paths
-from app.user_paths import user_config_dir, user_data_dir, user_log_dir
+from app.user_paths import (
+    SETTINGS_FILE_NAME,
+    user_config_dir,
+    user_data_dir,
+    user_log_dir,
+    user_settings_file,
+)
 
 _ENV = (
     "SPROUTS_CONFIG_DIR",
@@ -85,3 +93,26 @@ def test_default_location_is_outside_the_repository(clean_env):
     repo = os.path.dirname(os.path.dirname(os.path.abspath(user_paths.__file__)))
     path = os.path.abspath(user_config_dir(ensure=False))
     assert not os.path.normcase(path).startswith(os.path.normcase(repo) + os.sep)
+
+
+# ------------------------------------------------------------------ the settings file (#45)
+
+
+def test_the_file_is_settings_ini_in_the_user_config_folder(monkeypatch, tmp_path):
+    monkeypatch.setenv("SPROUTS_CONFIG_DIR", str(tmp_path / "cfg"))
+    assert SETTINGS_FILE_NAME == "settings.ini"
+    assert user_settings_file() == os.path.join(str(tmp_path / "cfg"), "settings.ini")
+    assert not (tmp_path / "cfg").exists()  # asking for the path creates nothing
+
+
+def test_on_linux_the_file_shares_the_one_config_folder(monkeypatch, tmp_path):
+    """One folder: the settings next to the Enhance defaults in ``~/.config/sprouts``, not
+    a second ``~/.config/LeakeyLab``."""
+    from app import user_paths
+
+    monkeypatch.delenv("SPROUTS_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(user_paths.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
+    assert user_settings_file() == os.path.join(
+        str(tmp_path / ".config"), "sprouts", "settings.ini"
+    )

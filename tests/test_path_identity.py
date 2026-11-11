@@ -94,3 +94,25 @@ def test_the_display_read_ahead_key_is_the_path_key(monkeypatch):
     ahead.keep("/Data/T1.png", ("/Data/T1.png", 1, 1), np.zeros((2, 2), np.uint8))
     assert ahead.holds("/data/t1.png")
     ahead.close()
+
+
+# ------------------------------------------------------------------ same_file
+
+
+def test_same_file_needs_two_names():
+    assert not same_file("", "")
+    assert not same_file("a.png", "")
+    assert not same_file("", "a.png")
+
+
+def test_same_file_compares_two_spellings_of_one_path(tmp_path):
+    path = tmp_path / "a.png"
+    other = tmp_path.parent / tmp_path.name / ".." / tmp_path.name / "a.png"
+    assert same_file(str(path), str(other))
+    assert not same_file(str(path), str(tmp_path / "b.png"))
+
+
+def test_darwin_keys_fold_sharp_s_as_apfs_does():
+    # The full casefold: "Straße" and "STRASSE" are one name to the key (it errs on "same").
+    assert path_key("/x/Straße.png", "darwin") == path_key("/x/STRASSE.png", "darwin")
+    assert path_key("/x/Straße.png", "linux") != path_key("/x/STRASSE.png", "linux")

@@ -1,4 +1,4 @@
-"""Foundation-core: one image-name parser for the library, the CSVs and the dashboards.
+"""``app.naming``: one image-name parser for the library, the CSVs and the dashboards.
 
 ``_legacy_metrics`` and ``_legacy_image_manager`` are verbatim copies of the two
 parsers this module replaces (app/inference/metrics.py and
@@ -15,7 +15,7 @@ import re
 
 import pytest
 
-from app.naming import ImageName, image_stem, parse_image_name
+from app.naming import ImageName, image_stem, parse_image_name, stem_key
 from tests.real_data import real_data_dir
 
 REAL_DATA = real_data_dir()
@@ -55,7 +55,6 @@ def _legacy_tuple(name: str) -> tuple:
     return (info["tube_number"], info["length_position"], info["date"], info["time"])
 
 
-# Canonical-style names: real camera output plus plausible variants.
 CANONICAL = [
     "24EFCAM1_T001_L011_2024.07.18_111618_001_SMM",
     "24EFCAM2_T088_L100_2024.08.27_100639_001_SMM",
@@ -197,3 +196,17 @@ def test_fast_path_agrees_with_general_parser(name):
     from app.naming import _parse_tokens, image_stem
 
     assert parse_image_name(name) == _parse_tokens(image_stem(name))
+
+
+# ------------------------------------------------------------------ stem_key (O7)
+
+
+def test_stem_key_lowers_and_does_not_casefold():
+    assert stem_key("A_T001") == "a_t001" and stem_key("straße") != stem_key("strasse")
+
+
+@pytest.mark.parametrize("name", [".png", "..png", ".JPG"])
+def test_a_name_that_is_only_dots_and_an_extension_keeps_its_name(name):
+    # The scan skips such a file (no stem before the extension); the stem is not emptied.
+    assert image_stem(name) == name
+    assert image_stem(f"D:/data/{name}") == name

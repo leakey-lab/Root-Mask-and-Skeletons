@@ -1,4 +1,4 @@
-"""Foundation-core: ProjectLayout pins every on-disk naming convention of the app.
+"""``app.project_layout.ProjectLayout`` pins every on-disk naming convention of the app.
 
 Each expected path below is the formula the current writer/reader uses (file
 references in the comments), so a drift between ProjectLayout and the code it
@@ -8,12 +8,13 @@ replaces fails here.
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import pytest
 
 import app.project_layout as pl
 from app.gt import store as gt_store
-from app.project_layout import ProjectLayout
+from app.project_layout import ProjectLayout, project_layout_of
 
 STEM = "24EFCAM1_T001_L045_2024.07.18_111618_001_SMM"
 
@@ -28,9 +29,6 @@ def _touch(path) -> str:
 @pytest.fixture
 def layout(tmp_path) -> ProjectLayout:
     return ProjectLayout(str(tmp_path))
-
-
-# ------------------------------------------------------------------ identity / stems
 
 
 def test_root_is_normalised_and_layout_is_hashable(tmp_path):
@@ -70,23 +68,21 @@ def test_folders(layout, tmp_path):
     assert layout.gt_dir == os.path.join(root, "gt")
 
 
-# ------------------------------------------------------------------ masks
+@pytest.mark.parametrize("given", ["stem", "file name", "image path"])
+@pytest.mark.parametrize("root", ["absolute", "relative"])
+def test_mask_path_is_mask_slash_stem_png(tmp_path, root, given):
+    """``<root>/mask/<stem>.png`` (docs/DATA_DICTIONARY.md), what generation writes and
+    Measure reads, for a stem, a file name or an image path; a relative root (an image in
+    the working directory) stays relative."""
+    folder = str(tmp_path) if root == "absolute" else ""
+    value = {
+        "stem": STEM,
+        "file name": f"{STEM}.jpg",
+        "image path": os.path.join(folder, f"{STEM}.jpg"),
+    }[given]
+    layout = ProjectLayout.for_image(os.path.join(folder, f"{STEM}.jpg"))
 
-
-def test_mask_path_matches_mask_editor_save_path(tmp_path, layout):
-    # mask_tracing_interface._mask_save_path: normpath(join(dirname(image)/"mask", stem + ".png"))
-    image = os.path.join(str(tmp_path), f"{STEM}.jpg")
-    editor = os.path.normpath(
-        os.path.join(os.path.join(os.path.dirname(image), "mask"), STEM + ".png")
-    )
-    assert layout.mask_path(STEM) == editor
-    assert layout.mask_path(image) == editor  # a path or file name works too
-
-
-def test_mask_path_for_relative_root_matches_editor():
-    image = f"{STEM}.jpg"  # dirname == "" (image in the working directory)
-    editor = os.path.normpath(os.path.join(os.path.join("", "mask"), STEM + ".png"))
-    assert ProjectLayout.for_image(image).mask_path(STEM) == editor
+    assert layout.mask_path(value) == os.path.normpath(os.path.join(folder, "mask", STEM + ".png"))
 
 
 def test_find_mask_prefers_png_then_legacy_extensions(layout):
@@ -136,9 +132,6 @@ def test_scans_of_missing_folders_are_empty(layout):
     assert layout.scan_gt_skeletons() == {}
 
 
-# ------------------------------------------------------------------ skeletons
-
-
 def test_skeleton_path_matches_inference_output(tmp_path, layout):
     # generate_skeleton_handler: output_dir = normpath(join(input_dir, "skeletons"));
     # skeleton_inference.run_inference: join(output_dir, f"{img_name}_fake.png").
@@ -172,9 +165,6 @@ def test_gt_mask_and_skeleton_paths_sit_under_gt(tmp_path, layout):
     assert layout.gt_skeleton_path(f"{STEM}.jpg") == os.path.join(
         root, "gt", "skeletons", f"{STEM}.png"
     )
-
-
-# ------------------------------------------------------------------ metric CSVs
 
 
 def test_find_lengths_csv_skeletons_then_the_project_folder(layout, tmp_path):
@@ -224,10 +214,17 @@ def test_mask_candidates_follow_the_editor_lookup_order(layout):
     assert layout.mask_candidates(STEM)[0] == layout.mask_path(STEM)
 
 
-def test_mask_path_matches_mask_generation_output(tmp_path, layout):
-    # mask_generation_handler: output_dir = join(input_dir, "mask");
-    # MaskGenerationThread saves join(output_dir, splitext(filename)[0] + ".png").
-    filename = f"{STEM}.jpg"
-    output_dir = os.path.join(str(tmp_path), "mask")
-    generated = os.path.join(output_dir, os.path.splitext(filename)[0] + ".png")
-    assert layout.mask_path(filename) == os.path.normpath(generated)
+def test_project_layout_of_names_the_open_folder_else_the_first_images(tmp_path):
+    """Generate, Measure, Visualize and the window resolve the project here: the folder the
+    Library opened wins, then the folder of its first image; nothing loaded is None."""
+    opened, other = str(tmp_path / "opened"), str(tmp_path / "other")
+    images = {STEM: os.path.join(other, f"{STEM}.jpg")}
+
+    assert project_layout_of(SimpleNamespace(original_folder=opened, images=images)) == (
+        ProjectLayout(opened)
+    )
+    assert project_layout_of(SimpleNamespace(original_folder=None, images=images)) == (
+        ProjectLayout(other)
+    )
+    assert project_layout_of(SimpleNamespace(original_folder="", images={})) is None
+    assert project_layout_of(object()) is None

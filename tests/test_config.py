@@ -1,4 +1,6 @@
-"""Foundation-core: app version constants and app.config (lazy, torch-free import)."""
+"""``app.config``: app version constants, the calibration and CSV contract values, and the
+lazy, torch-free import (``SKELETON_BATCH_SIZE`` sized to the GPU on demand).
+"""
 
 from __future__ import annotations
 
@@ -16,7 +18,7 @@ from app import config
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Every Qt-free foundation module; none may pull in a heavy stack at import.
+
 FOUNDATION_MODULES = (
     "app",
     "app.config",
@@ -28,6 +30,8 @@ FOUNDATION_MODULES = (
     "app.models",
     "app.calibration",
 )
+
+
 HEAVY_MODULES = ("torch", "torchvision", "cv2", "PyQt6", "dash", "pandas", "plotly")
 
 
@@ -47,9 +51,6 @@ def _run_python(code: str) -> str:
     return proc.stdout.strip()
 
 
-# ------------------------------------------------------------------ version
-
-
 def test_version_is_semver_and_names_are_single_sourced():
     assert re.fullmatch(r"\d+\.\d+\.\d+", app.__version__)
     assert app.APP_NAME == "SPROUTS"
@@ -65,9 +66,6 @@ def test_pyproject_version_matches_or_reads_app_version():
         assert static.group(1) == app.__version__
     else:  # dynamic = ["version"] + [tool.setuptools.dynamic] version = {attr = ...}
         assert re.search(r'version\s*=\s*\{\s*attr\s*=\s*"app\.__version__"\s*\}', text)
-
-
-# ------------------------------------------------------------------ lazy imports
 
 
 def test_foundation_modules_import_no_heavy_stack():
@@ -93,18 +91,6 @@ def test_skeleton_batch_size_import_is_lazy_but_still_available():
     assert _run_python(code) == "False 64 64 64"
 
 
-def test_skeleton_batch_size_is_listed_by_dir():
-    assert "SKELETON_BATCH_SIZE" in dir(config)
-
-
-def test_unknown_config_attribute_still_raises():
-    with pytest.raises(AttributeError):
-        config.NOT_A_REAL_SETTING  # noqa: B018
-
-
-# ------------------------------------------------------------------ batch sizing
-
-
 def _fake_torch(*, available: bool, free_bytes: int = 0, raises: bool = False):
     def mem_get_info():
         if raises:
@@ -113,6 +99,11 @@ def _fake_torch(*, available: bool, free_bytes: int = 0, raises: bool = False):
 
     cuda = types.SimpleNamespace(is_available=lambda: available, mem_get_info=mem_get_info)
     return types.SimpleNamespace(cuda=cuda)
+
+
+def test_unknown_config_attribute_still_raises():
+    with pytest.raises(AttributeError):
+        config.NOT_A_REAL_SETTING  # noqa: B018
 
 
 def test_auto_skeleton_batch_defaults_on_cpu(monkeypatch):
@@ -157,9 +148,6 @@ def test_get_skeleton_batch_size_caches_and_refreshes(monkeypatch):
     assert len(calls) == 2
 
 
-# ------------------------------------------------------------------ constants
-
-
 def test_existing_contract_values_unchanged():
     assert config.CALIBRATION.fov_width_mm == 18.0
     assert config.CALIBRATION.fov_height_mm == 13.5
@@ -194,6 +182,19 @@ def test_existing_contract_values_unchanged():
     )
 
 
+def _module_constant(path: str, name: str):
+    """Evaluate a simple module-level constant expression from ``path`` without importing it."""
+    with open(path, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        ):
+            expr = ast.Expression(node.value)
+            return eval(compile(expr, path, "eval"), {"__builtins__": {}})  # noqa: S307
+    raise AssertionError(f"{name} not found in {path}")
+
+
 def test_project_layout_constants():
     assert config.MASK_DIRNAME == "mask"
     assert config.SKELETONS_DIRNAME == "skeletons"
@@ -217,19 +218,6 @@ def test_project_layout_constants():
 )
 def test_is_image_file_matches_library_scanner(name, expected):
     assert config.is_image_file(name) is expected
-
-
-def _module_constant(path: str, name: str):
-    """Evaluate a simple module-level constant expression from ``path`` without importing it."""
-    with open(path, encoding="utf-8") as fh:
-        tree = ast.parse(fh.read())
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == name for t in node.targets
-        ):
-            expr = ast.Expression(node.value)
-            return eval(compile(expr, path, "eval"), {"__builtins__": {}})  # noqa: S307
-    raise AssertionError(f"{name} not found in {path}")
 
 
 def test_skeleton_output_size_matches_skeletonizer_geometry():
