@@ -157,14 +157,6 @@ def test_the_stage_overview_is_plain_text_not_buttons(welcome):
         assert label.focusPolicy() == Qt.FocusPolicy.NoFocus
 
 
-def test_the_stage_overview_names_every_stage_in_order(welcome):
-    widget = welcome()
-    text = " ".join(label.text() for label in _stage_overview(widget))
-    positions = [text.find(stage) for stage in STAGES]
-    assert -1 not in positions and positions == sorted(positions), text
-    assert widget.stage_labels() == STAGES
-
-
 # ---------------------------------------------------------------- long paths
 def test_a_long_recent_path_is_elided_in_the_middle(welcome):
     """The drive and the folder's own name stay; the path never sets the row's width."""

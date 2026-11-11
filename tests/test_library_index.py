@@ -3,17 +3,15 @@
 Offscreen and file-free: names are synthetic, so the 46k perf smoke runs on CI too.
 """
 
-import os
 import time
 
+import numpy as np
 import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (
-    QApplication,
     QLabel,
     QLineEdit,
-    QStyleOptionViewItem,
     QTreeWidget,
     QTreeWidgetItem,
 )
@@ -145,22 +143,43 @@ def test_index_resyncs_after_the_tree_is_rebuilt_by_hand(app):
 @pytest.mark.parametrize("query", ["", "t002", "2024.08.07", "zzz"])
 def test_a_build_holds_what_a_walk_of_the_tree_reads(app, query):
     """build() keeps the names and hidden states of the rows it made (no read back through
-    Qt, S06-07): they equal what a walk of the tree reads, also re-opened under a search."""
+    Qt, S06-07): its answers equal those of a re-read of the tree, also re-opened under a
+    search, and the next search change starts from the right state."""
     names = [*synth_names(), "loose_b", "loose_a"]
-    tree, index = _built(app, names)
+    tree, index = _built(app, names, path_of=lambda n: f"D:/p/{n}.jpg")
     index.apply_filter(query)
     index.build(build_hierarchy(names))
-    built = (list(index._leaves), dict(index._pos), list(index._leaf_hidden))
-    built_groups, built_keys = list(index._group_hidden), list(index._keys)
 
-    index._dirty = True
-    index._ensure()  # re-reads every row through Qt
+    def group_rows_hidden() -> list[bool]:
+        hidden, rows = [], [tree.topLevelItem(i) for i in range(tree.topLevelItemCount())]
+        while rows:
+            row = rows.pop()
+            if row.childCount():
+                hidden.append(row.isHidden())
+                rows.extend(row.child(i) for i in range(row.childCount()))
+        return hidden
 
-    assert all(a is b for a, b in zip(built[0], index._leaves, strict=True))
-    assert built[1:] == (index._pos, index._leaf_hidden)
-    assert (built_groups, built_keys) == (index._group_hidden, index._keys)
-    assert built[2] == [leaf.isHidden() for leaf in index.leaves()]
-    assert any(built[2]) == bool(query) and any(built_groups) == bool(query)
+    def answers():
+        leaves = index.leaves()
+        stems = [leaf.data(0, USER) for leaf in leaves]
+        return (
+            stems,
+            [leaf.isHidden() for leaf in leaves],
+            [index.position_of(stem) for stem in stems],
+            [index.neighbours(stem, 2) for stem in stems],
+            [(index.step(leaf, 1), index.step(leaf, -1)) for leaf in leaves],
+            group_rows_hidden(),
+        )
+
+    built = answers()
+    assert any(built[1]) == bool(query) and any(built[5]) == bool(query)
+    tree.addTopLevelItem(QTreeWidgetItem(["blank"]))  # a row insert and remove: the index
+    tree.takeTopLevelItem(tree.topLevelItemCount() - 1)  # re-reads every row through Qt
+    assert answers() == built
+
+    index.build(build_hierarchy(names))  # the fresh rows again, under the search
+    index.apply_filter("")
+    assert not any(leaf.isHidden() for leaf in index.leaves()) and not any(group_rows_hidden())
 
 
 def test_filter_matches_the_stem_not_only_the_label(app):
@@ -192,77 +211,6 @@ def test_filter_no_match_and_clear(app):
     assert index.apply_filter("") == len(index.leaves())
     assert not any(leaf.isHidden() for leaf in index.leaves())
     assert not tree.topLevelItem(0).isHidden()
-
-
-def test_tooltip_names_the_full_stem_path_and_status(app):
-    name = _name(1, 11)
-    tree, index = _built(
-        app,
-        [name],
-        path_of=lambda n: f"D:/p/{n}.jpg",
-        mask_state=lambda n: "prediction",
-        skeleton_state=lambda n: "none",
-    )
-    text = index.tooltip_for(name)
-    assert name in text and f"D:/p/{name}.jpg" in text and "Mask: prediction" in text
-
-
-def test_status_is_drawn_by_the_delegate_from_the_providers(app):
-    masked = set()
-    name = _name(1, 11)
-    tree, index = _built(app, [name], mask_state=lambda n: "prediction" if n in masked else "none")
-    delegate = tree.itemDelegate()
-    model_index = tree.indexFromItem(index.item_for(name))
-
-    def icon_key():
-        option = QStyleOptionViewItem()
-        delegate.initStyleOption(option, model_index)
-        assert not option.icon.isNull()
-        return option.icon.cacheKey()
-
-    before = icon_key()
-    masked.add(name)
-    index.refresh_status(name)
-    assert icon_key() != before
-    # group rows keep their own icon
-    option = QStyleOptionViewItem()
-    delegate.initStyleOption(option, tree.indexFromItem(tree.topLevelItem(0)))
-    assert option.icon.cacheKey() == tree.topLevelItem(0).icon(0).cacheKey()
-
-
-def test_status_icon_renders_under_the_app_stylesheet(app):
-    """ForegroundRole is ignored under the app QSS (UI-09); the status badge is not."""
-    from PyQt6.QtGui import QColor
-
-    from app.gui.widgets import tokens
-
-    qss_path = os.path.join(
-        os.path.dirname(__file__), "..", "resources", "themes", "dark_theme.qss"
-    )
-    with open(qss_path, encoding="utf-8") as fh:
-        qss = fh.read()
-    name = _name(1, 11)
-    tree, index = _built(app, [name], mask_state=lambda n: "prediction")
-    tree.setStyleSheet(qss)
-    tree.resize(320, 200)
-    tree.expandAll()
-    tree.show()
-    QApplication.processEvents()
-    img = tree.viewport().grab().toImage()
-    rect = tree.visualItemRect(index.item_for(name))
-    target = QColor(tokens.MASK)
-    hits = 0
-    for x in range(rect.left(), min(rect.right(), rect.left() + 120)):
-        for y in range(rect.top(), rect.bottom()):
-            c = img.pixelColor(x, y)
-            if (
-                abs(c.red() - target.red()) < 40
-                and abs(c.green() - target.green()) < 40
-                and abs(c.blue() - target.blue()) < 40
-            ):
-                hits += 1
-    tree.close()
-    assert hits > 5
 
 
 @pytest.mark.wallclock
@@ -313,3 +261,106 @@ def test_search_controller_reports_no_match(app):
     edit.setText("zzz")
     QTest.qWait(80)
     assert label.text() == "No images match “zzz”"
+
+
+# ------------------------------------------------------------------ the tree's order
+def _rows_below(item) -> list[str]:
+    return [item.child(i).text(0) for i in range(item.childCount())]
+
+
+def test_the_tree_orders_tubes_naturally_and_puts_no_tube_and_no_date_last(app):
+    names = [
+        _name(10, 11),
+        _name(2, 11),
+        _name(1, 11),
+        "24EFCAM1_L011_2024.07.18_111530_001_SMM",  # no tube
+        "24EFCAM1_T002_L012_001_SMM",  # no date
+    ]
+    tree, _index = _built(app, names)
+    field = tree.topLevelItem(0)
+    assert _rows_below(field) == ["T1", "T2", "T10", "No Tube"]
+    assert _rows_below(field.child(1)) == ["2024.07.18 · 1 image", "No Date · 1 image"]
+
+
+def _reference_order(names):
+    """The library order, worked out from the parsed parts alone (not the index's code)."""
+    from app.naming import parse_image_name
+
+    def key(name):
+        info = parse_image_name(name)
+        return (
+            info.field or "Unknown",
+            info.tube is None,
+            info.tube or 0,
+            info.date is None,
+            info.date or "",
+            float("inf") if info.position is None else info.position,
+            name,
+        )
+
+    return sorted(names, key=key)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_the_tree_lists_every_image_once_in_the_reference_order(app, seed):
+    rng = np.random.default_rng(seed)
+    names = set()
+    for _ in range(int(rng.integers(20, 120))):
+        field = ["24EFCAM1", "25ROSCAM2"][int(rng.integers(2))]
+        parts = [field]
+        if rng.random() < 0.9:
+            parts.append(f"T{int(rng.integers(1, 25)):03d}")
+        if rng.random() < 0.9:
+            parts.append(f"L{int(rng.integers(1, 120)):03d}")
+        if rng.random() < 0.8:
+            parts += [["2024.07.18", "2024.08.07", "2025.06.01"][int(rng.integers(3))], "111530"]
+        parts += [f"{int(rng.integers(1, 999)):03d}", "SMM"]
+        names.add("_".join(parts))
+    names.add("plain_name")
+
+    tree, index = _built(app, sorted(names, key=lambda _n: rng.random()))
+
+    assert [leaf.data(0, USER) for leaf in index.leaves()] == _reference_order(names)
+    groups = [tree.topLevelItem(i) for i in range(tree.topLevelItemCount())]
+    while groups:
+        group = groups.pop()
+        children = [group.child(i) for i in range(group.childCount())]
+        if children and children[0].data(0, USER):  # a date row: it counts its images
+            assert group.text(0).endswith(count_label(len(children))), group.text(0)
+        else:
+            groups.extend(children)
+
+
+# ------------------------------------------------------------------ search and hidden rows
+def test_with_a_search_the_keys_and_paging_reach_only_shown_rows(app):
+    tree, index = _built(app)
+    tree.expandAll()
+    tree.show()
+    hidden = _leaf(index, "24EFCAM1_T001_L012_2024.07.18")
+    tree.setCurrentItem(hidden)
+    assert index.apply_filter("_l013_") == 6
+
+    assert hidden.isHidden()
+    assert index.step(hidden, 1) is _leaf(index, "24EFCAM1_T001_L013_2024.07.18")
+    tree.setCurrentItem(index.leaves(visible_only=True)[0])
+    for _ in range(12):
+        QTest.keyClick(tree, Qt.Key.Key_Down)
+        assert not tree.currentItem().isHidden(), tree.currentItem().text(0)
+    tree.setCurrentItem(tree.topLevelItem(0))
+    tree.keyboardSearch("L")
+    assert tree.currentItem().text(0).startswith("L13 · ")
+    tree.close()
+
+
+def test_a_broad_search_does_not_expand_every_group(app, monkeypatch):
+    from app.gui import library_index
+
+    monkeypatch.setattr(library_index, "EXPAND_MATCHES_LIMIT", 5)
+    tree, index = _built(app)
+    dates = [_leaf(index, f"24EFCAM1_T001_L011_{d}").parent() for d in ("2024.07.18", "2024.08.07")]
+    tree.collapseAll()
+
+    assert index.apply_filter("t001") == 10  # more than the limit: left as they are
+    assert not any(date.isExpanded() for date in dates)
+    assert index.apply_filter("t001_l011") == 2  # within it: every match on screen
+    assert all(date.isExpanded() and date.parent().isExpanded() for date in dates)

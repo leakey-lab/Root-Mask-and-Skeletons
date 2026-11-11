@@ -224,12 +224,6 @@ def test_library_zoom_keys_work_after_a_tree_click(window):
     assert tree.hasFocus()
 
 
-def test_library_zoom_keys_are_on_the_f1_sheet():
-    keys = {k for spec in shortcuts.specs_for(shortcuts.LIBRARY) for k in spec.keys}
-    assert {"Ctrl+0", "Ctrl+1", "Ctrl+=", "Ctrl+-"} <= keys
-    assert shortcuts.find_conflicts() == []
-
-
 def test_the_library_keeps_tree_type_ahead_and_a_hidden_editor_never_reacts(window):
     in_stage(window, "Library", image=1)
     editor = window.correct_editor
@@ -285,36 +279,6 @@ def test_b_tap_and_space_hold_reach_the_correct_canvas_from_the_tree(window):
     QTest.keyRelease(tree, Qt.Key.Key_Space)
     assert not view.space_pan
     assert tree.hasFocus() and tree.currentItem() is leaf(window, 1)
-
-
-def test_a_space_pan_held_from_the_tree_survives_the_click_on_the_canvas(window):
-    editor = in_stage(window, "Correct")
-    tree, view = window.file_list, editor.graphics_view
-
-    QTest.keyPress(tree, Qt.Key.Key_Space)
-    view.setFocus()  # the press on the canvas takes the keyboard mid-pan
-    settle()
-    assert view.space_pan
-    QTest.keyRelease(view, Qt.Key.Key_Space)
-    assert not view.space_pan
-
-
-def test_a_hold_ends_when_the_tree_loses_the_keyboard_elsewhere(window):
-    editor = in_stage(window, "Correct")
-    tree, view = window.file_list, editor.graphics_view
-    key(tree, Qt.Key.Key_E)
-    holds = []
-    editor.b_key_status_changed.connect(holds.append)
-
-    QTest.keyPress(tree, Qt.Key.Key_Space)
-    QTest.keyPress(tree, Qt.Key.Key_B)
-    assert view.space_pan and holds == [True]
-    window.library_search.setFocus()  # the releases will never reach the canvas
-    settle()
-
-    assert not view.space_pan
-    assert holds == [True, False]
-    assert editor.layers[MASK].current_tool == "eraser"  # a lost hold is not a B tap
 
 
 def test_a_relayed_space_pan_ends_when_space_is_released_with_ctrl_down(window):

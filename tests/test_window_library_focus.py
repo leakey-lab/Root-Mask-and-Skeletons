@@ -34,7 +34,7 @@ from tests.window_project_support import (
     open_project,
     select,
 )
-from tests.window_support import build_window, quiet_window
+from tests.window_support import build_window, open_folder, quiet_window, write_photos
 
 ALT = Qt.KeyboardModifier.AltModifier
 #: The dashboard classes the controller builds, resolved on ``visualization_manager``.
@@ -262,3 +262,113 @@ def test_a_dashboard_opened_while_the_window_is_inactive_has_the_focus_on_return
         other.close()
         other.deleteLater()
         del other
+
+
+# ================================================================ after a folder opens
+
+
+STEMS = [f"24EFCAM1_T001_L0{d}_2024.07.18_1115{d}_001_SMM" for d in (11, 12, 13)]
+
+
+@pytest.fixture
+def active_window(app, tmp_path):
+    made = [build_window(tmp_path / "s.ini", show=False)]
+    made[0].show()
+    made[0].activateWindow()
+    assert QTest.qWaitForWindowActive(made[0], 3000)
+    yield made[0]
+    delete_widgets(made, prepare=quiet_window)
+    QApplication.processEvents()
+
+
+def _open(active_window, folder) -> None:
+    open_folder(active_window, write_photos(folder, STEMS), len(STEMS))
+    settle()
+
+
+def test_the_tree_has_the_keyboard_once_a_folder_opens(active_window, tmp_path):
+    _open(active_window, tmp_path / "p")
+
+    assert QApplication.focusWidget() is active_window.file_list
+    assert not active_window.ribbon_buttons["Library"].hasFocus()
+
+
+def test_down_then_steps_into_the_library(active_window, tmp_path):
+    _open(active_window, tmp_path / "p")
+    active_window.file_list.expandAll()
+
+    names = []
+    for _ in range(5):  # through the field, tube and date rows to the images
+        QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Down)
+        item = active_window.file_list.currentItem()
+        names.append(item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None)
+
+    assert STEMS[0] in names  # the arrows browse the images, not the stage buttons
+    assert QApplication.focusWidget() is active_window.file_list
+
+
+# ======================================================= Tab order and accessible names
+
+
+@pytest.fixture
+def opened_window(app, tmp_path, no_prompts):
+    folder = write_photos(tmp_path / "project", STEMS)
+    made = [build_window(tmp_path / "s.ini", show=False)]
+    mw = made[0]
+    mw.show()
+    mw.activateWindow()
+    assert QTest.qWaitForWindowActive(mw, 3000)
+    open_folder(mw, folder, len(STEMS))
+    del mw
+    yield made[0]
+    delete_widgets(made, prepare=quiet_window)
+    QApplication.processEvents()
+
+
+def _tab_walk(start, steps: int) -> list:
+    start.setFocus(Qt.FocusReason.TabFocusReason)
+    QApplication.processEvents()
+    seen = [QApplication.focusWidget()]
+    for _ in range(steps):
+        QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Tab)
+        QApplication.processEvents()
+        seen.append(QApplication.focusWidget())
+    return seen
+
+
+def test_tab_follows_the_top_bar_then_the_library_then_the_canvas(opened_window):
+    mw = opened_window
+    seg = mw.action_bar_view_seg
+    walk = _tab_walk(mw.ribbon_buttons["Library"], 7)
+    assert walk == [
+        mw.ribbon_buttons["Library"],
+        seg.button(seg.value()),
+        mw.topbar_load_button,
+        mw.library_search,
+        mw.expand_all_button,
+        mw.collapse_all_button,
+        mw.file_list,
+        mw.display_controller.magnifying_view,
+    ]
+
+
+def test_the_measure_stage_actions_come_after_its_stage_button(opened_window):
+    mw = opened_window
+    mw.ribbon_buttons["Measure"].click()
+    QApplication.processEvents()
+    walk = _tab_walk(mw.ribbon_buttons["Measure"], 3)
+    assert walk == [
+        mw.ribbon_buttons["Measure"],
+        mw.calculate_length_button,
+        mw.calculate_area_button,
+        mw.topbar_load_button,
+    ]
+
+
+def test_library_controls_have_accessible_names(opened_window):
+    mw = opened_window
+    assert mw.library_search.accessibleName() == "Search images"
+    assert mw.expand_all_button.accessibleName() == "Expand all groups"
+    assert mw.collapse_all_button.accessibleName() == "Collapse all groups"
+    assert mw.file_list.accessibleName() == "Image library"
+    assert mw.display_controller.magnifying_view.accessibleName() == "Image display"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from types import SimpleNamespace
 
@@ -10,6 +11,8 @@ from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
 from app import __version__, provenance
 from app.gui import about_dialog
 from app.models import ModelStatus
+from tests.qt_teardown import delete_widgets
+from tests.qt_wait import wait_until
 
 CFF = """\
 cff-version: 1.2.0
@@ -207,3 +210,77 @@ def test_one_rule_decides_that_a_recorded_field_of_view_differs(app, tmp_path):
         assert ("this app now uses" in export) is differs
         assert ("This app now uses" in tip) is differs
         assert (row is not None) is differs
+
+
+# ------------------------------------------------------------------ weights that differ
+OWN_DIGEST = "ab12cd34ef56" + "7" * 52  # not a published digest
+
+
+def _model_lines(text: str) -> dict[str, str]:
+    return {
+        line.split(":", 1)[0]: line.split(": ", 1)[1]
+        for line in text.splitlines()
+        if line.startswith("Model ")
+    }
+
+
+def test_details_name_different_weights_by_their_own_digest_and_missing_ones():
+    """The block a methods section copies: weights that differ from the published file are
+    named as such with the digest of the file in use, never the published one."""
+    from app.models import MODELS
+
+    mask, skeleton = MODELS["mask"], MODELS["skeleton"]
+    assert not mask.sha256.startswith(OWN_DIGEST[:12])
+    statuses = {
+        "mask": ModelStatus("mismatch", "C:/m.pth", OWN_DIGEST),
+        "skeleton": ModelStatus("missing", "C:/s.pth", None),
+    }
+
+    lines = _model_lines(about_dialog.details_text(statuses))
+
+    assert lines["Model mask"] == (
+        f"{os.path.basename(mask.relpath)} · sha256 {OWN_DIGEST[:12]} · DIFFERENT weights"
+    )
+    assert lines["Model skeleton"] == (
+        f"{os.path.basename(skeleton.relpath)} · sha256 {skeleton.sha256[:12]} · missing"
+    )
+
+
+def _model_labels(dlg) -> list[QLabel]:
+    return [
+        label
+        for label in dlg.findChildren(QLabel)
+        if ".pth" in label.text() or "unavailable" in label.text()
+    ]
+
+
+def test_the_dialog_warns_about_different_weights(app, monkeypatch):
+    from app.gui.widgets import tokens
+
+    statuses = {
+        "mask": ModelStatus("mismatch", "C:/m.pth", OWN_DIGEST),
+        "skeleton": ModelStatus("ok", "C:/s.pth", None),
+    }
+    monkeypatch.setattr(about_dialog, "_verify_models", lambda: statuses)
+    dlg = about_dialog.AboutDialog()
+    try:
+        assert wait_until(lambda: "DIFFERENT weights" in _texts(dlg))
+        (different,) = [lb for lb in _model_labels(dlg) if "DIFFERENT" in lb.text()]
+        assert OWN_DIGEST[:12] in different.text() and tokens.WARN in different.styleSheet()
+        (verified,) = [lb for lb in _model_labels(dlg) if "verified" in lb.text()]
+        assert tokens.WARN not in verified.styleSheet()
+    finally:
+        delete_widgets([dlg])
+
+
+def test_a_failed_verification_says_unavailable(app, monkeypatch):
+    def fail():
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(about_dialog, "_verify_models", fail)
+    dlg = about_dialog.AboutDialog()
+    try:
+        assert wait_until(lambda: "mask: unavailable" in _texts(dlg))
+        assert "skeleton: unavailable" in _texts(dlg)
+    finally:
+        delete_widgets([dlg])

@@ -16,16 +16,25 @@ glyphs without a font directory, so pixels cannot tell).
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtGui import QPaintDevice, QPaintEngine, QPainter, QRegion
-from PyQt6.QtWidgets import QApplication, QHeaderView, QTreeWidget
+from PyQt6.QtCore import QEvent, QPoint, Qt
+from PyQt6.QtGui import QHelpEvent, QPaintDevice, QPaintEngine, QPainter, QRegion
+from PyQt6.QtWidgets import (
+    QApplication,
+    QHeaderView,
+    QStyle,
+    QStyleOptionViewItem,
+    QToolTip,
+    QTreeWidget,
+)
 
 from app.gui import file_tree_manager
 from app.gui.library_index import (
     LibraryIndex,
     LibraryItemDelegate,
+    fit_label,
     index_names,
     label_forms,
+    stem_forms,
 )
 from app.gui.ui_panels import library_tree_qss
 from tests.qt_teardown import delete_widgets
@@ -259,3 +268,118 @@ def test_the_default_library_draws_every_date_row_whole(window, tmp_path):
     assert date_row.text(0) == "2024.07.18 · 8 images"
     shown = check_row(tree, file_tree_manager.library_index_for(window), date_row)
     assert shown and ELLIPSIS not in shown  # some text was drawn (the recorder saw it), whole
+
+
+# ------------------------------------------------------------------ Qt-free forms
+
+
+STEM = "24EFCAM1_T001_L044_2024.07.18_111530_001_SMM"
+
+
+@pytest.mark.parametrize(
+    ("text", "forms"),
+    [
+        ("L44 · 11:15:30", ["L44 · 11:15:30", "L44 · 11:15", "L44"]),
+        (
+            "2024.07.18 · 128 images",
+            ["2024.07.18 · 128 images", "2024.07.18 · 128", "2024.07.18", "07.18"],
+        ),
+        ("2024.07.18 · 1 image", ["2024.07.18 · 1 image", "2024.07.18 · 1", "2024.07.18", "07.18"]),
+        ("No Date · 46,178 images", ["No Date · 46,178 images", "No Date · 46,178", "No Date"]),
+        ("L7 · 24EF_T001_L007_nodate", ["L7 · 24EF_T001_L007_nodate", "L7"]),
+        ("T1", ["T1"]),
+        ("plain", ["plain"]),
+        ("", [""]),
+    ],
+)
+def test_label_forms_keep_the_head(text, forms):
+    assert label_forms(text) == forms
+
+
+def test_stem_forms_keep_tube_depth_and_date():
+    assert stem_forms(STEM) == [
+        STEM,
+        "T1 · L44 · 2024.07.18 · 11:15:30",
+        "T1 · L44 · 2024.07.18",
+        "T1 · L44",
+    ]
+    assert stem_forms("24EF_T001_L007_nodate") == ["24EF_T001_L007_nodate", "T1 · L7"]
+    assert stem_forms("plain_name") == ["plain_name"]
+
+
+def test_fit_label_takes_the_first_form_that_fits():
+    forms = label_forms("2024.07.18 · 128 images")
+    assert fit_label(forms, lambda t: len(t) <= 30) == "2024.07.18 · 128 images"
+    assert fit_label(forms, lambda t: len(t) <= 16) == "2024.07.18 · 128"
+    assert fit_label(forms, lambda t: len(t) <= 12) == "2024.07.18"
+    assert fit_label(forms, lambda t: len(t) <= 6) == "07.18"
+    assert fit_label(forms, lambda t: False) == "07.18"  # Qt elides the shortest
+
+
+# ----------------------------------------------------- a shortened group row's tooltip
+
+
+def _tree(app, width: int) -> tuple[QTreeWidget, LibraryIndex]:
+    names = [f"24EFCAM1_T001_L{p:03d}_2024.07.18_11{p % 60:02d}30_001_SMM" for p in range(1, 129)]
+    tree = QTreeWidget()
+    tree.setHeaderLabels(["Library"])
+    tree.setTextElideMode(Qt.TextElideMode.ElideRight)
+    index = LibraryIndex(tree)
+    index.build(*index_names(names))
+    tree.expandAll()
+    tree.resize(width, 600)
+    tree.show()
+    QApplication.processEvents()
+    return tree, index
+
+
+def _painted(tree: QTreeWidget, item) -> tuple[str, int]:
+    """(text the delegate paints for ``item``, width the style draws that text in: its text
+    rect less the margin the style keeps inside it on each side, V4)."""
+    model_index = tree.indexFromItem(item)
+    option = QStyleOptionViewItem()
+    option.initFrom(tree.viewport())
+    option.rect = tree.visualRect(model_index)
+    option.widget = tree
+    tree.itemDelegate().initStyleOption(option, model_index)
+    style = tree.style()
+    rect = style.subElementRect(QStyle.SubElement.SE_ItemViewItemText, option, tree)
+    margin = style.pixelMetric(QStyle.PixelMetric.PM_FocusFrameHMargin, None, tree) + 1
+    return option.text, rect.width() - 2 * margin
+
+
+def _date_row(tree):
+    return tree.topLevelItem(0).child(0).child(0)
+
+
+def test_a_shortened_group_row_has_its_full_text_as_tooltip(app, monkeypatch):
+    tree, _index = _tree(app, 140)
+    row = _date_row(tree)
+    painted, _room = _painted(tree, row)
+    assert painted != row.text(0)
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda *args: shown.append(args[1]))
+    rect = tree.visualItemRect(row)
+    event = QHelpEvent(QEvent.Type.ToolTip, rect.center(), tree.mapToGlobal(rect.center()))
+    option = QStyleOptionViewItem()
+    option.initFrom(tree.viewport())
+    option.rect = rect
+    option.widget = tree
+    handled = tree.itemDelegate().helpEvent(event, tree, option, tree.indexFromItem(row))
+    assert handled and shown == ["2024.07.18 · 128 images"]
+    tree.deleteLater()
+
+
+def test_an_image_row_tooltip_names_its_stem_and_status(app, monkeypatch):
+    tree, index = _tree(app, 300)
+    leaf = _date_row(tree).child(0)
+    shown = []
+    monkeypatch.setattr(QToolTip, "showText", lambda *args: shown.append(args[1]))
+    rect = tree.visualItemRect(leaf)
+    event = QHelpEvent(QEvent.Type.ToolTip, rect.center(), tree.mapToGlobal(rect.center()))
+    option = QStyleOptionViewItem()
+    option.initFrom(tree.viewport())
+    option.rect, option.widget = rect, tree
+    assert tree.itemDelegate().helpEvent(event, tree, option, tree.indexFromItem(leaf))
+    assert shown == [index.tooltip_for(leaf.data(0, Qt.ItemDataRole.UserRole))]
+    tree.deleteLater()
