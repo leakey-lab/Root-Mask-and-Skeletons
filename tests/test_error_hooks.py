@@ -6,7 +6,9 @@ lost) when an exception escapes a slot or ``QThread.run`` while
 ``sys.excepthook`` is Python's default. The subprocess test pins that the
 installed hooks keep the app alive; a control run without them proves the
 premise. The in-process tests cover logging, delegation of KeyboardInterrupt,
-re-entrance safety and the single coalescing, non-modal dialog.
+re-entrance safety and the single coalescing, non-modal dialog (and its going quiet when it
+cannot be built). A native crash (no Python traceback at all) leaves every thread's stack in
+the crash log ``main()`` enables next to ``app.log``; checked in a child that crashes.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import textwrap
 import threading
 import time
 
+import pytest
 from PyQt6 import sip
 from PyQt6.QtCore import (
     QCoreApplication,
@@ -391,21 +394,14 @@ def test_an_error_queued_while_the_box_closes_keeps_one_dialog(qapp, monkeypatch
 
 
 def test_the_box_is_a_modeless_transient_box_that_frees_itself(qapp, monkeypatch):
-    """Shown by app.dialogs.show_transient (modeless, never exec()), deleted once closed."""
+    """Modeless (never exec()), deleted once closed."""
     monkeypatch.setattr(QApplication, "activeWindow", staticmethod(lambda: None))
-    real, modes = error_hooks.show_transient, []
-
-    def recording(box, on_answer=None, *, modal=True):
-        modes.append(modal)
-        return real(box, on_answer, modal=modal)
-
-    monkeypatch.setattr(error_hooks, "show_transient", recording)
     presenter = CrashDialogPresenter(log_file=None)
     presenter.report("ValueError: x", "tb")
     _pump()
     box = presenter.dialog
     try:
-        assert modes == [False] and box.isVisible()
+        assert box.isVisible()
         assert box.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         assert box.windowModality() == Qt.WindowModality.NonModal and not box.isModal()
         box.close()
@@ -415,6 +411,27 @@ def test_the_box_is_a_modeless_transient_box_that_frees_itself(qapp, monkeypatch
         if not sip.isdeleted(box):
             box.close()
         _pump()
+
+
+def test_a_dialog_that_cannot_be_built_mutes_the_presenter(qapp, monkeypatch, caplog):
+    """One broken dialog must not turn every later error into another failing dialog: the
+    presenter goes quiet (errors are still logged by the hooks)."""
+    built = []
+
+    def broken_box(*args):
+        built.append(args)
+        raise RuntimeError("no screen for the dialog")
+
+    monkeypatch.setattr(error_hooks, "QMessageBox", broken_box)
+    presenter = CrashDialogPresenter(log_file=None)
+    with caplog.at_level(logging.ERROR, logger=error_hooks.logger.name):
+        presenter.report("ValueError: first", "tb1")
+        _pump()
+        presenter.report("OSError: second", "tb2")
+        _pump()
+    assert presenter.muted is True and presenter.dialog is None
+    assert len(built) == 1  # the second error built no second dialog
+    assert "Could not show the error dialog" in caplog.text
 
 
 def test_dialog_names_the_log_file(qapp, tmp_path):
@@ -443,3 +460,54 @@ def test_qt_warnings_are_routed_to_the_logger(caplog):
         r.name == "qt" and r.levelno == logging.WARNING and "something odd" in r.getMessage()
         for r in caplog.records
     )
+
+
+# --- the crash log of a native crash -------------------------------------------------
+
+#: A child that enables the crash log, starts a second (named) thread and crashes natively,
+#: with no Windows error box and no core file (a non-dumpable process on Linux).
+_CRASH_SCRIPT = textwrap.dedent("""
+    import ctypes, faulthandler, sys, threading
+    from pathlib import Path
+    if sys.platform == "win32":
+        ctypes.windll.kernel32.SetErrorMode(0x0001 | 0x0002)  # no error box
+    else:
+        ctypes.CDLL(None).prctl(4, 0, 0, 0, 0)  # PR_SET_DUMPABLE 0: no core file
+    sys.path.insert(0, sys.argv[2])
+    from app.gui.error_hooks import enable_fault_log
+    assert enable_fault_log(Path(sys.argv[1]))
+    gate = threading.Event()
+    threading.Thread(target=gate.wait, name="decode-worker", daemon=True).start()
+    faulthandler._sigsegv()
+    """)
+
+
+@pytest.mark.skipif(
+    sys.platform == "darwin",
+    reason="macOS: the crash reporter may show a 'quit unexpectedly' box for a crashing "
+    "child, which the child cannot suppress",
+)
+def test_a_native_crash_leaves_every_threads_stack_in_the_crash_log(tmp_path):
+    log = tmp_path / "logs" / "fault.log"  # the folder does not exist yet
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
+    proc = subprocess.run(
+        [sys.executable, "-c", _CRASH_SCRIPT, str(log), REPO_ROOT],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode != 0, proc.stdout + proc.stderr  # it crashed
+    text = log.read_text(encoding="utf-8")
+    assert "Fatal Python error: Segmentation fault" in text
+    assert "Current thread" in text  # the crashing thread's stack ...
+    assert "decode-worker" in text  # ... and every other thread's
+
+
+def test_a_crash_log_that_cannot_be_opened_is_reported_not_raised(tmp_path, caplog):
+    in_the_way = tmp_path / "logs"
+    in_the_way.write_text("a file where the log folder should be", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger=error_hooks.logger.name):
+        assert error_hooks.enable_fault_log(in_the_way / "fault.log") is False
+    assert "Crash log disabled" in caplog.text

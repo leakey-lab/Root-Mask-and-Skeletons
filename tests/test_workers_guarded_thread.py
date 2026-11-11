@@ -1,10 +1,14 @@
-"""
-Tests for the worker error boundary (``app/workers.py``) and the
-app-wide batch-job registry (``app/handlers/job_registry.py``).
+"""The worker error boundary of ``app/workers.py``: ``GuardedThread`` and ``describe_error``.
 
-Offscreen Qt. Threads are real ``QThread`` s; tests that act while a job runs
-hold it on a ``threading.Event`` so they never race it. Queued signals are
-flushed with ``_pump_until``.
+Exactly one outcome per run: the subclass's own result signal, ``cancelled`` (after
+``cancel()`` / ``JobCancelled``), or ``failed(message)`` for anything else that ends
+``work()``, ``SystemExit`` and ``KeyboardInterrupt`` included (unreported, the job registry
+would hold the job for good). Nothing escapes ``run()``, not even a broken ``describe()``
+or ``__str__``. A user condition (a file open in another program, an output folder that
+takes no files) keeps its own message and is logged without a traceback.
+
+Offscreen Qt. Threads are real ``QThread`` s; tests that act while a job runs hold it on a
+``threading.Event`` so they never race it. Queued signals are flushed with ``_pump_until``.
 """
 
 from __future__ import annotations
@@ -13,12 +17,10 @@ import logging
 import sys
 import threading
 import time
-import types
 
 import pytest
-from PyQt6.QtCore import QCoreApplication, QEventLoop, QThread, pyqtSignal
+from PyQt6.QtCore import QCoreApplication, QEventLoop, pyqtSignal
 
-from app.handlers.job_registry import JobRegistry
 from app.workers import GuardedThread, JobCancelled, describe_error
 
 
@@ -82,27 +84,6 @@ class _BlockingThread(GuardedThread):
             self.check_cancelled()
 
 
-class _StubbornThread(QThread):
-    """Plain QThread (custom finished) that ignores interruption until released."""
-
-    finished = pyqtSignal(dict)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.gate = threading.Event()
-
-    def run(self) -> None:
-        self.gate.wait(10)
-
-
-class _PoliteThread(QThread):
-    """Plain QThread that honours requestInterruption()."""
-
-    def run(self) -> None:
-        while not self.isInterruptionRequested():
-            time.sleep(0.002)
-
-
 # --- describe_error ----------------------------------------------------------------
 
 
@@ -119,26 +100,50 @@ def test_describe_error_survives_a_broken_str():
     assert describe_error(Unprintable()) == "Unprintable"
 
 
-def test_describe_error_uses_file_locked_message(monkeypatch):
-    class FileLockedError(OSError):
-        pass
+def test_file_locked_error_is_logged_without_a_traceback(app, caplog, tmp_path):
+    from app.io_utils import FileLockedError
+    from app.workers import GuardedThread, describe_error, is_user_condition
 
-    fake = types.ModuleType("app.io_utils")
-    fake.FileLockedError = FileLockedError
-    monkeypatch.setitem(sys.modules, "app.io_utils", fake)
-    exc = FileLockedError("root_lengths.csv is open in another program. Close it and retry.")
-    assert describe_error(exc) == (
-        "root_lengths.csv is open in another program. Close it and retry."
-    )
+    exc = FileLockedError(tmp_path / "root_lengths.csv")
+
+    class Locked(GuardedThread):
+        def work(self):
+            raise exc
+
+    thread = Locked()
+    messages = []
+    thread.failed.connect(messages.append)
+    with caplog.at_level(logging.WARNING, logger="app.handlers.worker_base"):
+        thread.run()  # the error boundary, called synchronously
+    assert messages == [str(exc)] == [describe_error(exc)]
+    assert is_user_condition(exc) and not is_user_condition(ValueError("x"))
+    records = [r for r in caplog.records if r.name == "app.handlers.worker_base"]
+    assert [r.levelno for r in records] == [logging.WARNING]
+    assert records[0].exc_info is None
 
 
-def test_describe_error_with_the_real_file_locked_error(tmp_path):
-    io_utils = pytest.importorskip("app.io_utils")
-    exc = io_utils.FileLockedError(tmp_path / "root_lengths.csv")
-    message = describe_error(exc)
-    assert message == str(exc)
-    assert message.startswith("root_lengths.csv")
-    assert not message.startswith("FileLockedError")
+def test_an_unwritable_output_folder_is_a_user_condition(tmp_path):
+    """Generate's stop for a folder that takes no new files (C6-01) shows its own message,
+    without the exception type and without a traceback in the log."""
+    from app.io_utils import FolderNotWritableError
+    from app.workers import describe_error, is_user_condition
+
+    exc = FolderNotWritableError(tmp_path / "mask", "access denied", 13)
+    assert is_user_condition(exc)
+    assert describe_error(exc) == exc.message
+    assert describe_error(exc).startswith(f"Cannot save files in {tmp_path / 'mask'}")
+
+
+def test_a_broken_batch_engine_import_does_not_hide_a_locked_file(monkeypatch, tmp_path):
+    """The user conditions are imported one at a time: one that cannot be imported must not
+    turn a locked CSV into "FileLockedError: ..." with a traceback."""
+    from app.io_utils import FileLockedError
+    from app.workers import is_user_condition
+
+    monkeypatch.setitem(sys.modules, "app.inference.batch_engine", None)  # its import fails
+    exc = FileLockedError(tmp_path / "root_lengths.csv")
+    assert is_user_condition(exc)
+    assert describe_error(exc) == str(exc)
 
 
 # --- GuardedThread -----------------------------------------------------------------
@@ -240,11 +245,6 @@ class _BrokenWordingThread(_RaisingThread):
         raise SystemExit("describe() itself failed")
 
 
-def test_the_default_message_is_describe_error(qapp):
-    exc = ValueError("bad value")
-    assert GuardedThread().describe(exc) == describe_error(exc) == "ValueError: bad value"
-
-
 @pytest.mark.parametrize("exc", [OSError("disk gone"), SystemExit("disk gone")])
 def test_a_subclass_words_its_own_failure_message(qapp, caplog, exc):
     thread = _WordedThread(exc)
@@ -264,90 +264,3 @@ def test_a_broken_describe_falls_back_to_describe_error(qapp):
     thread.run()  # on this thread: whatever escapes run() would escape the worker thread
     _pump_until(lambda: rec.failed)
     assert rec.failed == ["RuntimeError: boom"]
-
-
-# --- JobRegistry -------------------------------------------------------------------
-
-
-@pytest.fixture
-def registry(qapp):
-    reg = JobRegistry()
-    states: list[bool] = []
-    reg.busy_changed.connect(states.append)
-    reg.states = states  # test-only attribute for assertions
-    return reg
-
-
-def test_try_start_runs_one_job_and_rejects_a_second(registry):
-    first, second = _BlockingThread(), _BlockingThread()
-    assert registry.try_start("Generating masks", first) is True
-    assert first.started_work.wait(5)
-    assert registry.is_busy() is True
-    assert registry.running_name() == "Generating masks"
-    assert registry.try_start("Measuring", second) is False
-    assert second.isRunning() is False
-    first.gate.set()
-    assert first.wait(5000)
-    _pump_until(lambda: not registry.is_busy())
-    assert registry.running_name() is None
-    assert registry.states == [True, False]
-
-
-def test_registry_clears_when_subclass_shadows_finished(registry):
-    thread = _StubbornThread()  # custom finished(dict) that is never emitted
-    assert registry.try_start("Loading images", thread)
-    thread.gate.set()
-    assert thread.wait(5000)
-    _pump_until(lambda: not registry.is_busy())
-    assert registry.try_start("Next job", _ResultThread()) is True
-    _pump_until(lambda: not registry.is_busy())
-
-
-def test_cancel_all_requests_interruption(registry):
-    guarded, plain = _BlockingThread(), _PoliteThread()
-    rec = _Recorder(guarded)
-    assert registry.try_start("Generating skeletons", guarded)
-    assert guarded.started_work.wait(5)
-    registry.cancel_all()
-    assert guarded.wait(5000)
-    _pump_until(lambda: rec.cancelled and not registry.is_busy())
-
-    assert registry.try_start("Measuring", plain)
-    registry.cancel_all()
-    assert plain.wait(5000)
-    _pump_until(lambda: not registry.is_busy())
-
-
-def test_stop_all_waits_and_clears_synchronously(registry):
-    thread = _BlockingThread()
-    assert registry.try_start("Generating masks", thread)
-    assert thread.started_work.wait(5)
-    assert registry.stop_all(timeout_ms=5000) is True
-    assert thread.isFinished()
-    assert registry.is_busy() is False
-    assert registry.states == [True, False]
-    # The queued finished of the stopped job must not clear a job started after it.
-    follow_up = _BlockingThread()
-    assert registry.try_start("Measuring", follow_up)
-    _flush()
-    assert registry.running_name() == "Measuring"
-    follow_up.gate.set()
-    assert follow_up.wait(5000)
-    _pump_until(lambda: not registry.is_busy())
-
-
-def test_stop_all_reports_a_job_that_does_not_stop(registry):
-    thread = _StubbornThread()
-    assert registry.try_start("Stubborn", thread)
-    try:
-        assert registry.stop_all(timeout_ms=50) is False
-        assert registry.running_name() == "Stubborn"
-    finally:
-        thread.gate.set()
-        assert thread.wait(5000)
-    _pump_until(lambda: not registry.is_busy())
-
-
-def test_stop_all_without_a_job_is_true(registry):
-    assert registry.stop_all() is True
-    assert registry.states == []

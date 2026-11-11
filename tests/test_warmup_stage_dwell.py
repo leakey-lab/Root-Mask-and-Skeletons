@@ -104,14 +104,14 @@ def test_another_stage_with_warmups_starts_its_own_dwell(made):
 
 
 def test_coming_back_waits_a_whole_dwell_again(made):
-    intent, asked = make_intent(made, dwell_ms=200)
+    intent, asked = make_intent(made, dwell_ms=500)  # well beyond the 120 ms wait, under load too
     intent.stage_changed("Generate")
     QTest.qWait(120)
     intent.stage_changed("Library")
     intent.stage_changed("Generate")
     start = time.perf_counter()
     assert wait(lambda: asked.calls)
-    assert asked.calls[0][1] - start >= 0.18  # the time before the detour does not count
+    assert asked.calls[0][1] - start >= 0.48  # the time before the detour does not count
     assert asked.keys() == [("torch", "models")]
 
 

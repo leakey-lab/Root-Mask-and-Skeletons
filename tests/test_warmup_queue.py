@@ -237,6 +237,27 @@ def test_a_job_ended_by_a_base_exception_still_ends_its_warmup(made, pool, endin
     assert not gc_policy.full_collections_held()
 
 
+def test_a_warmup_whose_thread_cannot_start_fails_and_the_queue_goes_on(made, pool, monkeypatch):
+    """No thread to be had: that warm-up ends as a failure with the reason (the first real
+    use imports it), never "running" for good with every later one waiting."""
+    real = threading.Thread
+
+    class NoThreadForA(real):
+        def start(self):
+            if self.name == "warm-up a":
+                raise RuntimeError("can't start new thread")
+            super().start()
+
+    monkeypatch.setattr(threading, "Thread", NoThreadForA)
+    first, second = Job("a"), Job("b")
+    queue = make_queue(made, pool, {"a": first, "b": second})
+    queue.request("a")
+    queue.request("b")
+    assert wait(lambda: len(queue.finished_log) == 2)
+    assert queue.finished_log == [("a", "can't start new thread"), ("b", "")]
+    assert first.runs == [] and len(second.runs) == 1
+
+
 # ------------------------------------------------------------------ threads
 def test_each_warmup_runs_on_a_thread_of_its_own(made, pool):
     """Never a reused QThreadPool thread: torch's C++ code there deadlocked the next job."""
@@ -452,7 +473,7 @@ def leave(widget) -> None:
 def test_resting_on_a_watched_button_asks_for_its_warmup(made, buttons):
     watched, other = buttons
     asked: list[str] = []
-    intent = HoverIntent(None, asked.append, dwell_ms=60)
+    intent = HoverIntent(None, asked.append, dwell_ms=200)  # well beyond the 20 ms wait
     made.append(intent)
     intent.watch(watched, "torch")
     intent.watch(None, "ignored")  # a missing button is skipped
@@ -477,6 +498,22 @@ def test_leaving_before_the_dwell_asks_for_nothing(made, buttons):
     QTest.qWait(20)
     leave(watched)
     QTest.qWait(150)
+    assert asked == []
+
+
+def test_a_button_hidden_under_the_pointer_asks_for_nothing(made, buttons):
+    """The stage changed while the pointer rested on its run button: the button hides under
+    the pointer, and the dwell must not start the warm-up anyway (the V9 stall). Qt 6 sends
+    the Hide, then a synthetic Leave; the intent drops the dwell on either."""
+    watched, _other = buttons
+    asked: list[str] = []
+    intent = HoverIntent(None, asked.append, dwell_ms=200)
+    made.append(intent)
+    intent.watch(watched, "torch")
+    enter(watched)
+    QTest.qWait(20)
+    watched.hide()
+    QTest.qWait(400)
     assert asked == []
 
 

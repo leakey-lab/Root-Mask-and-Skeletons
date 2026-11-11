@@ -179,7 +179,9 @@ def test_every_pool_job_is_started_by_start_pool_job():
 
 
 def test_the_apps_pool_jobs_never_import_torch():
-    """The device check and the scikit-image warm-up, as pool jobs in a fresh process."""
+    """The device check and the scikit-image warm-up, as pool jobs in a fresh process: each
+    does its job (the device check names the device from the driver, a ``DeviceGuess``; the
+    warm-up imports scikit-image) and neither imports torch."""
     code = textwrap.dedent(
         """
         import sys
@@ -188,11 +190,16 @@ def test_the_apps_pool_jobs_never_import_torch():
         from app.gui import device_check, skeleton_graph_model
         from app.workers import start_pool_job
 
-        results = []
-        start_pool_job(lambda: results.append(device_check.resolve_device_logged()))
-        start_pool_job(lambda: results.append(skeleton_graph_model.prewarm_skeletonize()))
+        results = {}
+        start_pool_job(lambda: results.update(device=device_check.resolve_device_logged()))
+        start_pool_job(lambda: results.update(skimage=skeleton_graph_model.prewarm_skeletonize()))
         assert QThreadPool.globalInstance().waitForDone(120_000)
-        print(len(results), "torch" in sys.modules)
+        print(
+            type(results["device"]).__name__,
+            results["skimage"],
+            "skimage" in sys.modules,
+            "torch" in sys.modules,
+        )
         """
     )
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
@@ -205,4 +212,4 @@ def test_the_apps_pool_jobs_never_import_torch():
         timeout=300,
     )
     assert result.returncode == 0, result.stderr[-2000:]
-    assert result.stdout.strip() == "2 False"
+    assert result.stdout.strip() == "DeviceGuess None True False"

@@ -1,5 +1,7 @@
 """
-Tests for the Qt-free batch pipeline helpers (``app/inference/batch_pipeline.py``).
+Tests for the Qt-free batch pipeline helpers (``app/inference/batch_pipeline.py``): the
+prefetch iterator, the async writer, the log limiter, and the progress arithmetic every
+task bar uses (``progress_percent``).
 
 Fake work only (sleeps, events, counters): no GPU, no torch, no image files.
 Tasks that must still be running when the test acts are held on a
@@ -25,6 +27,7 @@ from app.inference.batch_pipeline import (
     LogLimiter,
     PrefetchIterator,
     default_io_threads,
+    progress_percent,
 )
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +40,25 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def test_default_io_threads_is_half_the_cpus_clamped(monkeypatch, cpus, expected):
     monkeypatch.setattr(batch_pipeline.os, "cpu_count", lambda: cpus)
     assert default_io_threads() == expected
+
+
+@pytest.mark.parametrize(
+    ("done", "total", "expected"),
+    [
+        (0, None, 0),
+        (42, None, 42),
+        (150, None, 100),
+        (-5, None, 0),
+        (1, 3, 33),
+        (2, 3, 66),
+        (3, 3, 100),
+        (5, 3, 100),
+        (0, 0, 100),
+        (7, 1000, 0),
+    ],
+)
+def test_progress_percent(done, total, expected):
+    assert progress_percent(done, total) == expected
 
 
 def test_module_import_does_not_pull_in_torch():

@@ -1,42 +1,36 @@
 """Background jobs report an outcome whatever ends them (KNOWN_ISSUES #7).
 
-Same class as the warm-up fix (:mod:`app.gui.warmup`): a ``BaseException`` that is not an
-``Exception`` (``SystemExit``, ``KeyboardInterrupt``, or any other) used to end a job's
-thread without a word, so the GUI waited for good:
+A ``BaseException`` that is not an ``Exception`` (``SystemExit``, ``KeyboardInterrupt``, or
+any other) used to end a job's thread without a word, so the GUI waited for good:
 
 - the Measure CSV parse (``MetricsController.prewarm``) left ``metrics.loading`` True:
   no other parse, the warm-ups blocked and the bar never refreshed;
-- the start-up device check left the chip at "Checking GPU…";
 - a folder scan (``ImageLoaderThread``) caught ``OSError`` only: anything else reported
   neither outcome and the loading card stayed up.
 
 Each now logs the traceback and reports a failure (never re-raised: the thread has no one
 to hand it to, and PyQt aborts the process on an exception that escapes a pool job or
 ``QThread.run`` under the default ``sys.excepthook``). The tests record ``sys.excepthook``:
-nothing may reach it.
+nothing may reach it. The same promise for the start-up device check is in
+``test_device_check.py``, for the warm-ups in ``test_warmup_queue.py`` and for
+``GuardedThread`` in ``test_workers_guarded_thread.py``.
 """
 
 from __future__ import annotations
 
 import os
-import sys
 import time
-import types
 from types import SimpleNamespace
 
 import pytest
 from PyQt6.QtCore import QCoreApplication, QEvent, QThreadPool
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication
 
 from app.gui import image_manager as im
-from app.gui import shell_chrome
-from app.gui.device_check import DeviceCheck
 from app.gui.window import project_loader
 from app.gui.window.metrics import MetricsController
-from tests.qt_teardown import delete_widgets, flush_deleted
-
-RUNTIME = "app.inference.runtime"
+from tests.qt_teardown import flush_deleted
 
 
 class Abort(BaseException):
@@ -113,62 +107,6 @@ def test_a_parse_ended_by_a_base_exception_still_ends_the_loading(ending, caplog
     assert "Could not read the measurement CSVs" in caplog.text
     controller.prewarm()  # the next parse is not blocked
     assert wait(lambda: index.prewarmed == 2 and not controller.loading)
-
-
-# ------------------------------------------------------------------ the device check
-class Line:
-    """Stand-in status line: records the chip states."""
-
-    def __init__(self) -> None:
-        self.calls: list[tuple] = []
-
-    def set_device_check(self, state, detail: str = "") -> None:
-        self.calls.append((state, detail))
-
-    def state(self) -> str:
-        return "idle"
-
-
-@pytest.fixture
-def widgets():
-    made: list = []
-    yield made
-    delete_widgets(made)
-
-
-def start_check(widgets, resolve=None) -> Line:
-    widget, line = QWidget(), Line()
-    widgets.append(widget)
-    DeviceCheck(widget, line, delay_ms=10, idle_ms=20, resolve=resolve, enabled=True)
-    assert line.calls == [(shell_chrome.CHECKING, "")]
-    widget.show()
-    return line
-
-
-@pytest.mark.parametrize("ending", ENDINGS, ids=ENDING_IDS)
-def test_a_check_ended_by_a_base_exception_still_resolves_the_chip(widgets, ending, caplog):
-    line = start_check(widgets, resolve=raiser(ending))
-
-    assert wait(lambda: len(line.calls) == 2), "the chip stayed at 'Checking GPU…'"
-    state, detail = line.calls[-1]
-    assert state == shell_chrome.FAILED and detail  # "Device unknown", and why
-    assert "Could not detect the inference device" in caplog.text
-
-
-def test_the_real_check_ended_by_a_base_exception_still_resolves_the_chip(
-    widgets, monkeypatch, caplog
-):
-    broken = types.ModuleType(RUNTIME)
-    broken.describe_runtime = raiser(KeyboardInterrupt())
-    monkeypatch.setitem(sys.modules, RUNTIME, broken)
-    import app.inference as inference_package
-
-    monkeypatch.setattr(inference_package, "runtime", broken, raising=False)
-    line = start_check(widgets)  # resolve_device_logged, as in the app
-
-    assert wait(lambda: len(line.calls) == 2), "the chip stayed at 'Checking GPU…'"
-    assert line.calls[-1] == (shell_chrome.FAILED, "KeyboardInterrupt")
-    assert "Could not detect the inference device" in caplog.text
 
 
 # ------------------------------------------------------------------ the folder scan

@@ -13,6 +13,7 @@ suite frees Qt wrappers with gc.collect()).
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
 
@@ -26,6 +27,7 @@ from PyQt6.QtWidgets import QApplication
 
 from app import gc_policy
 from app.gui import main_window, shell_chrome, warmup
+from tests.device_chip_support import RUNTIME, FakeRuntime
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import wait_until as wait
 from tests.window_support import build_window, open_folder, quiet_window
@@ -141,25 +143,6 @@ def test_passing_through_generate_warms_nothing(make_window, warmups):
     assert window.warmups.state(warmup.TORCH) == "idle"
 
 
-def test_passing_through_measure_on_the_way_to_visualize_warms_nothing(make_window, warmups):
-    """The dashboard Visualize opens imports its libraries itself."""
-    window = make_window(warm_up=True)
-    window.on_stage_changed("Measure")
-    window.on_stage_changed("Visualize")
-    QTest.qWait(3 * DWELL_MS)
-    assert warmups.runs == [] and window.warmups.pending() == ()
-
-
-def test_generate_warms_up_once_the_user_has_stayed_for_the_dwell(make_window, warmups):
-    window = make_window(warm_up=True)
-    entered = time.perf_counter()
-    window.on_stage_changed("Generate")
-    QApplication.processEvents()
-    assert warmups.runs == [] and window.warmups.pending() == ()  # entering is not enough
-    assert wait(lambda: warmups.keys() == [warmup.TORCH, warmup.MODELS])
-    assert warmups.runs[0][2] - entered >= 0.9 * DWELL_MS / 1000
-
-
 def test_resting_on_a_run_button_does_not_wait_for_the_stage_dwell(
     make_window, warmups, monkeypatch
 ):
@@ -184,6 +167,7 @@ def test_closing_the_window_during_the_dwell_starts_nothing(make_window, warmups
     assert warmups.runs == [] and window.warmups.pending() == ()
 
 
+@pytest.mark.wallclock  # 80 ms of the 200 ms hover dwell must pass with the dwell not yet over
 @pytest.mark.parametrize(
     "button, keys",
     [
@@ -216,14 +200,6 @@ def test_headless_windows_warm_nothing_unless_asked(make_window, warmups):
     QTest.qWait(400)
     assert warmups.runs == []
     assert wait(lambda: window.warmups.state(warmup.SKIMAGE) == "done")  # start-up, as before
-
-
-def test_nothing_is_warmed_on_a_timer_after_a_project_load(make_window, warmups, tmp_path):
-    window = make_window(warm_up=True)
-    open_project(window, new_project(tmp_path))
-    QTest.qWait(2300)  # the old timer fired 2 s after the load
-    assert warmups.runs == []
-    assert not hasattr(main_window, "DASHBOARD_PREWARM_DELAY_MS")
 
 
 # ------------------------------------------------------------------ the gates
@@ -283,11 +259,18 @@ def test_closing_the_window_drops_a_warmup_that_has_not_started(make_window, war
 
 # ------------------------------------------------------------------ the chip
 def test_the_torch_warmup_puts_the_runtime_on_the_chip(make_window, warmups, monkeypatch):
+    """Once the torch warm-up has resolved the runtime, the chip reads its full line."""
+    import app.inference as inference_package
+
+    fake = FakeRuntime()  # resolved by the torch warm-up below, as runtime.warm_up() does
+    monkeypatch.setitem(sys.modules, RUNTIME, fake.module)
+    monkeypatch.setattr(inference_package, "runtime", fake.module, raising=False)
+    monkeypatch.setattr(warmup, "warm_inference", lambda: fake.describe(resolve=True) and "")
     window = make_window(warm_up=True)
-    refreshed = []
-    monkeypatch.setattr(window.statusline, "refresh_runtime", lambda: refreshed.append(1))
+    tip = window.statusline_info.toolTip
+    assert tip().startswith("Inference runtime: Device not detected yet")
     window.on_stage_changed("Generate")
-    assert wait(lambda: refreshed)
+    assert wait(lambda: tip().startswith("Inference runtime: GPU · Fake RTX 9000 · CUDA 12.8"))
 
 
 def test_a_failed_torch_warmup_says_why_on_the_chip(make_window, warmups, monkeypatch):

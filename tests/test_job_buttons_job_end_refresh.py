@@ -5,7 +5,7 @@ end of a generation pass keeps the parsed rows, so LENGTH and AREA stay on scree
 neither CSV is parsed again (each pass end hid both for about 0.2 s at 46k rows while the
 pool parsed them again, twice per Generate). A Measure run, or a job of no known name, may
 have rewritten the CSVs: they are re-located and re-read, as before. The job-end slot learns
-which job ended from ``JobRegistry.ended_name()``.
+which job ended from ``JobRegistry.ended_name()`` (``test_job_registry.py``).
 """
 
 from __future__ import annotations
@@ -53,19 +53,6 @@ def run_job(jobs: JobRegistry, name: str) -> None:
     assert jobs.try_start(name, thread)
     assert until(lambda: ended)
     thread.wait()
-
-
-def test_the_job_end_slot_can_tell_which_job_ended(app):
-    jobs = JobRegistry()
-    seen = []
-    jobs.busy_changed.connect(
-        lambda busy: seen.append((busy, jobs.running_name(), jobs.ended_name()))
-    )
-    assert jobs.ended_name() is None
-
-    run_job(jobs, "Generating masks")
-
-    assert seen == [(True, "Generating masks", None), (False, None, "Generating masks")]
 
 
 def _csv(path, headers, value) -> None:

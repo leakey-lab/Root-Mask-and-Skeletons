@@ -285,6 +285,38 @@ def test_stop_all_names_a_thread_that_does_not_stop(app, caplog):
     assert wait_until(lambda: _ended(thread))
 
 
+class _BrokenStop(QThread):
+    """Its ``stop()`` raises (a server whose socket is gone); runs until ``gate`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = threading.Event()
+
+    def run(self) -> None:
+        self.gate.wait(10)
+
+    def stop(self) -> None:
+        raise RuntimeError("the server socket is gone")
+
+
+def test_a_stop_that_raises_does_not_keep_the_quit_from_the_other_threads(app, caplog):
+    broken, server = _BrokenStop(), _Server()
+    broken.setObjectName("BrokenStop")
+    for thread in (broken, server):  # the broken one is asked first
+        keep(thread)
+        thread.start()
+    try:
+        with caplog.at_level(logging.WARNING, logger=workers.LOGGER_NAME):
+            assert stop_all(500) is False  # the broken one still runs
+        assert not server.isRunning()  # asked and waited for, after the first stop raised
+        assert "Could not ask BrokenStop to stop" in caplog.text
+    finally:
+        broken.gate.set()
+        assert broken.wait(5000)
+    for thread in (broken, server):
+        assert wait_until(lambda thread=thread: _ended(thread))
+
+
 def test_the_quit_stops_the_kept_threads():
     result = _run_python(
         """

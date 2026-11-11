@@ -8,43 +8,13 @@ viewports. These tests pin the decision on the suite's offscreen platform.
 
 from __future__ import annotations
 
-import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QSurface
 
-from app import qt_environment as qe
 from tests.qt_teardown import delete_widgets
 
-
-@pytest.mark.parametrize(
-    ("environ", "opengl"),
-    [
-        ({}, True),  # Qt's Linux default: configure_qt_environment sets no backend there
-        ({"QSG_RHI_BACKEND": "opengl"}, True),
-        ({"QSG_RHI_BACKEND": " GL "}, True),
-        ({"QSG_RHI_BACKEND": "vulkan"}, False),
-        ({"QSG_RHI_BACKEND": "d3d11"}, False),
-        ({"QT_QUICK_BACKEND": "rhi"}, True),  # Qt Quick's default backend
-        ({"QT_QUICK_BACKEND": "software"}, False),  # no RHI at all
-        ({"QSG_RHI_BACKEND": "opengl", "QT_QUICK_BACKEND": "software"}, False),
-    ],
-)
-def test_qt_quick_on_linux_draws_through_opengl_unless_the_user_chose_otherwise(environ, opengl):
-    assert qe.linux_quick_uses_opengl(environ) is opengl
-
-
-def test_the_windows_rule_is_unchanged_by_the_linux_one():
-    assert qe.windows_quick_uses_direct3d({}) is True
-    assert qe.windows_quick_uses_direct3d({"QSG_RHI_BACKEND": "opengl"}) is False
-    assert qe.linux_quick_uses_opengl({"QSG_RHI_BACKEND": "d3d11"}) is False
-
-
-def test_linux_start_up_sets_no_qt_quick_backend():
-    """The X11 route relies on Qt's own default (OpenGL): nothing may pin another one."""
-    env: dict[str, str] = {}
-    qe.configure_qt_environment(env, platform="linux", euid=1000)
-    assert "QSG_RHI_BACKEND" not in env and "QT_QUICK_BACKEND" not in env
-    assert qe.linux_quick_uses_opengl(env)
+# The backend rule these tests rely on (Linux draws Qt Quick through OpenGL unless the user
+# chose otherwise) is tested in test_qt_environment.py.
 
 
 def test_x11_dashboards_embed_natively_and_skip_the_canvas_swap(monkeypatch):
