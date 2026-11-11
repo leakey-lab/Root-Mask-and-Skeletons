@@ -108,10 +108,13 @@ def test_coming_back_waits_a_whole_dwell_again(made):
     intent.stage_changed("Generate")
     QTest.qWait(120)
     intent.stage_changed("Library")
-    intent.stage_changed("Generate")
     start = time.perf_counter()
+    intent.stage_changed("Generate")
     assert wait(lambda: asked.calls)
-    assert asked.calls[0][1] - start >= 0.48  # the time before the detour does not count
+    # The time before the detour does not count: counted, the call would come about 0.38 s
+    # after the return. A coarse Qt timer may fire up to 5 % early (0.475 s; Ubuntu CI fired
+    # at 0.477 s), so the floor leaves that room.
+    assert asked.calls[0][1] - start >= 0.45
     assert asked.keys() == [("torch", "models")]
 
 
