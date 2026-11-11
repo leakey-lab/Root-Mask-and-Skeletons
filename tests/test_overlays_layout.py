@@ -3,12 +3,23 @@
 The host below carries the same overlays as the Correct Mask / Trace GT editors, built from
 the real widgets: tool rail, dock (two sliders, three actions, Save), zoom cluster, status
 chip, Enhance popover and the GT class panel.
+
+At teardown: a page, its canvas host and the host's OverlayLayout form a reference cycle.
+When Python's collector breaks it, it clears the layout wrapper's ``__dict__`` (sip
+``tp_clear``) while the C++ object, owned by the host, is still an event filter of the host
+and the overlays. Events delivered then (a resize, an overlay hidden while the host goes, a
+queued relayout) used to print ``AttributeError: 'OverlayLayout' object has no attribute
+'_host'``: they must be ignored.
 """
 
 from __future__ import annotations
 
+import gc
+import sys
+
 import pytest
-from PyQt6.QtCore import QRect
+from PyQt6.QtCore import QEvent, QRect, QSize
+from PyQt6.QtGui import QResizeEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (
     QApplication,
@@ -254,3 +265,82 @@ def test_layout_settles_after_a_change(editor, monkeypatch):
     QTest.qWait(200)
     assert len(calls) == settled
     assert settled < 10
+
+
+# ------------------------------------------------------------------------------ teardown
+@pytest.fixture
+def slot_errors(monkeypatch):
+    """Exceptions raised in Qt virtuals / slots (PyQt hands them to ``sys.excepthook``)."""
+    errors: list[BaseException] = []
+    monkeypatch.setattr(sys, "excepthook", lambda kind, value, tb: errors.append(value))
+    return errors
+
+
+def _host_with_layout():
+    host = QWidget()
+    host.resize(400, 300)
+    dock = QFrame(host)
+    dock.setMinimumSize(120, 30)
+    layout = OverlayLayout(host)
+    layout.register(dock=dock)
+    host.show()
+    QApplication.processEvents()
+    return host, dock, layout
+
+
+def _events_after_collection(host, dock) -> None:
+    """What Qt delivers to the filter while the page is being torn down."""
+    QApplication.sendEvent(host, QResizeEvent(QSize(410, 310), QSize(400, 300)))
+    dock.hide()
+    dock.show()
+    QApplication.sendEvent(dock, QEvent(QEvent.Type.LayoutRequest))
+    QApplication.processEvents()  # a relayout queued by the show / hide
+
+
+def test_events_after_the_collector_cleared_the_layout_are_ignored(app, slot_errors):
+    host, dock, layout = _host_with_layout()
+    dock.hide()  # queues a relayout on the next loop pass (_run_pending)
+    layout.__dict__.clear()  # what the collector's tp_clear does to the wrapper
+
+    _events_after_collection(host, dock)
+
+    assert slot_errors == []
+    host.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def test_collecting_a_page_cycle_while_its_host_is_shown_raises_nothing(app, slot_errors):
+    class Page(QWidget):
+        """A page that keeps its canvas host's layout (the editors' chrome does)."""
+
+    for _ in range(20):  # the collector's order within the cycle varies
+        page = Page()
+        page.resize(400, 300)
+        page.host = QWidget(page)
+        page.host.resize(400, 300)
+        page.dock = QFrame(page.host)
+        page.dock.setMinimumSize(120, 30)
+        page.layout_ = OverlayLayout(page.host)
+        page.layout_.register(dock=page.dock)
+        page.layout_.page = page  # the cycle: page -> layout -> page
+        page.show()
+        QApplication.processEvents()
+        page.dock.hide()  # a relayout still queued when the page goes
+        del page
+        gc.collect()
+        QApplication.processEvents()
+
+    assert slot_errors == []
+
+
+def test_a_live_layout_still_follows_its_host(app, slot_errors):
+    host, dock, layout = _host_with_layout()
+    before = dock.geometry()
+
+    host.resize(800, 600)
+    QApplication.processEvents()
+
+    assert dock.geometry() != before  # the dock was placed again for the new size
+    assert slot_errors == []
+    host.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

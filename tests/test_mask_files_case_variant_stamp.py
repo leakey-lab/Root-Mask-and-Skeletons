@@ -28,7 +28,7 @@ from app.gui.correct.layer import MASK
 from app.gui.correct.mask_document import MaskDocument
 from app.gui.correct.mask_files import mask_stamps, read_mask
 from app.io_utils import file_stamp
-from app.masks import MaskFileError, MaskStore, write_mask_file
+from app.masks import write_mask_file
 from app.project_layout import ProjectLayout
 from tests.correct_paging_support import read_ahead_done, ring
 from tests.correct_support import (
@@ -114,18 +114,15 @@ def test_read_mask_looks_the_prediction_up_once(tmp_path, monkeypatch):
     assert len(lookups) == 1
 
 
-def test_the_store_reads_the_file_found_without_a_second_lookup(tmp_path, monkeypatch):
-    found = write_mask(os.path.join(str(tmp_path), "mask", "img.png"), box_plane())
-    store = MaskStore(ProjectLayout(str(tmp_path)))
-    monkeypatch.setattr(ProjectLayout, "find_mask", lambda *_args: pytest.fail("looked up"))
+def test_a_prediction_gone_between_its_lookup_and_its_read_reads_as_none(tmp_path, monkeypatch):
+    image = write_image(os.path.join(str(tmp_path), "img.png"))
+    gone = os.path.join(str(tmp_path), "mask", "img.png")  # found, then deleted before the read
+    monkeypatch.setattr(ProjectLayout, "find_mask", lambda layout, stem: gone)
 
-    assert np.array_equal(store.read("img", path=found), box_plane() > 0)
-    os.remove(found)
-    assert store.read("img", path=found) is None  # gone since the lookup: no prediction
-    with open(found, "wb") as fh:
-        fh.write(b"not a png")
-    with pytest.raises(MaskFileError):
-        store.read("img", path=found)
+    read = read_mask(image, (W, H))
+
+    assert (read.source, read.plane, read.prediction_path) == (None, None, None)
+    assert (read.has_saved_file, read.not_loaded) == (False, "")  # no "unreadable" warning
 
 
 # ------------------------------------------------------------------ the document

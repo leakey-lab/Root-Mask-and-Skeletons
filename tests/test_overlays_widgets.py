@@ -1,14 +1,17 @@
 """Overlay widgets: compact dock (UXE-09), content-sized Enhance popover (UI-07), the shared
-ZoomCluster (UXE-05) and StatusChip (UXE-11)."""
+ZoomCluster (UXE-05), StatusChip (UXE-11), the panels' own placement without an
+OverlayLayout and the progress card."""
 
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QLabel,
+    QProgressBar,
     QPushButton,
     QWidget,
 )
@@ -18,6 +21,8 @@ from app.gui.widgets import (
     EnhancePopover,
     FloatingDock,
     IconButton,
+    ProgressOverlay,
+    ToolRail,
 )
 from tests.qt_teardown import flush_deleted
 
@@ -418,3 +423,71 @@ def test_status_chip_width_fit_accounts_for_the_dot(host):
     chip.fit_to_width(None)
     chip.adjustSize()
     assert chip.width() == natural
+
+
+def test_escape_closes_the_open_enhance_popover(app):
+    from app.gui.widgets import EnhancePopover
+
+    host = QWidget()
+    host.resize(640, 480)
+    popover = EnhancePopover(host)
+    popover.set_content(QLabel("content"))
+    seen = []
+    popover.toggled.connect(seen.append)
+    host.show()
+    try:
+        popover.toggle()
+        assert not popover.isHidden()
+        QTest.keyClick(popover, Qt.Key.Key_Escape)
+        assert popover.isHidden()
+        assert seen == [True, False]
+        QTest.keyClick(popover, Qt.Key.Key_Escape)  # closed: Esc is not consumed twice
+        assert seen == [True, False]
+    finally:
+        host.close()
+
+
+# --------------------------------------------------------------------------- #
+#  Panels without an OverlayLayout place themselves
+# --------------------------------------------------------------------------- #
+def test_a_rail_and_a_dock_without_a_layout_place_themselves(host):
+    host.resize(800, 600)
+    rail = ToolRail(host)
+    rail.add_widget(IconButton("brush", "Brush", checkable=True))
+    rail.add_separator()
+    rail.add_widget(IconButton("erase", "Erase", checkable=True))
+    dock = FloatingDock(host)
+    dock.add_widget(QPushButton("Save mask"))
+
+    rail.reposition()
+    dock.reposition()
+
+    assert rail.x() == 14 and abs(rail.geometry().center().y() - 300) <= 1  # left, centred
+    assert abs(dock.geometry().center().x() - 400) <= 1  # bottom-centred
+    assert dock.geometry().bottom() + 1 == 600 - 18
+
+
+# --------------------------------------------------------------------------- #
+#  ProgressOverlay: the generate / loading card
+# --------------------------------------------------------------------------- #
+def test_the_progress_card_shows_its_label_and_a_clamped_percentage(host):
+    host.resize(800, 600)
+    card = ProgressOverlay(host)
+    label = card.findChild(QLabel, "progLabel")
+    percent = card.findChild(QLabel, "progPct")
+    bar = card.findChild(QProgressBar)
+
+    card.start("Generating masks…")
+    assert not card.isHidden()
+    assert (label.text(), percent.text(), bar.value()) == ("Generating masks…", "0%", 0)
+    assert card.y() == 18 and abs(card.geometry().center().x() - 400) <= 1  # top-centre
+
+    card.set_progress(42)
+    assert (percent.text(), bar.value()) == ("42%", 42)
+    card.set_progress(150)
+    assert (percent.text(), bar.value()) == ("100%", 100)
+    card.set_progress(-5)
+    assert (percent.text(), bar.value()) == ("0%", 0)
+
+    card.finish()
+    assert card.isHidden() and bar.value() == 100

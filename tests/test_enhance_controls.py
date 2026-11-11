@@ -31,6 +31,7 @@ from app.enhancement import (
 from app.gui.image_normalization_interface import NormalizationControls
 from app.gui.widgets import EnhancePopover
 from resources.resource_utils import resource_path
+from tests.qt_teardown import delete_widgets
 from tests.qt_wait import wait_until
 
 FACTORY = resource_path("config", "normalization_defaults.json")
@@ -41,6 +42,26 @@ def user_config(tmp_path, monkeypatch):
     """Every control built here stores its defaults under tmp_path, never in the repo."""
     monkeypatch.setenv("SPROUTS_CONFIG_DIR", str(tmp_path / "cfg"))
     return tmp_path / "cfg"
+
+
+_MADE: list = []  # the controls a test made, deleted after it (see ``made_controls``)
+
+
+def _controls(**kwargs) -> NormalizationControls:
+    """A parentless ``NormalizationControls``, deleted when the test ends."""
+    controls = NormalizationControls(**kwargs)
+    _MADE.append(controls)
+    return controls
+
+
+@pytest.fixture(autouse=True)
+def made_controls(app):
+    """Delete every control a test made before the next one. Left to the garbage
+    collector, a parentless one crashed the process (access violation in
+    ``flush_deleted``) when certain modules were collected with this one
+    (``H/bugs/A6-masks-overlays-1.py``)."""
+    yield
+    delete_widgets(_MADE, close=False)
 
 
 def _store(tmp_path, user=None, factory=None):
@@ -78,7 +99,7 @@ def _wait_for_preview(controls: NormalizationControls) -> None:
     ],
 )
 def test_bad_saved_defaults_never_break_construction(app, tmp_path, payload):
-    controls = NormalizationControls(store=_store(tmp_path, user=payload))
+    controls = _controls(store=_store(tmp_path, user=payload))
     for slider in (
         controls.clip_slider,
         controls.tile_slider,
@@ -92,7 +113,7 @@ def test_bad_saved_defaults_never_break_construction(app, tmp_path, payload):
 def test_save_as_default_writes_the_user_config_and_not_the_repo(app, user_config):
     before = open(FACTORY, "rb").read()
     mtime = os.stat(FACTORY).st_mtime_ns
-    controls = NormalizationControls()
+    controls = _controls()
     controls.method_combo.setCurrentText(METHOD_STRETCH)
     controls.clip_slider.setValue(31)
     controls.lower_slider.setValue(7)
@@ -101,13 +122,13 @@ def test_save_as_default_writes_the_user_config_and_not_the_repo(app, user_confi
     assert saved["clahe_clip"] == 31 and saved["contrast_lower"] == 7
     assert saved["last_method"] == METHOD_STRETCH
     assert open(FACTORY, "rb").read() == before and os.stat(FACTORY).st_mtime_ns == mtime
-    again = NormalizationControls()
+    again = _controls()
     assert again.settings() == controls.settings()
 
 
 def test_reset_restores_the_saved_defaults_not_hardcoded_ones(app, tmp_path):
     store = _store(tmp_path, user={"clahe_clip": 12, "clahe_tile": 4, "last_method": "CLAHE"})
-    controls = NormalizationControls(store=store)
+    controls = _controls(store=store)
     controls.clip_slider.setValue(40)
     controls.tile_slider.setValue(15)
     controls.reset_to_defaults()
@@ -128,7 +149,7 @@ def test_every_label_shows_its_value_when_saved_at_the_minimum(app, tmp_path):
             "contrast_upper": lo["upper"],
         },
     )
-    controls = NormalizationControls(store=store)
+    controls = _controls(store=store)
     assert (controls.clip_slider.value(), controls.tile_slider.value()) == (1, 2)
     assert (controls.lower_slider.value(), controls.upper_slider.value()) == (0, 51)
     assert controls.clip_label.text() == "Clip limit: 0.1"
@@ -152,7 +173,7 @@ def test_every_button_fits_inside_the_264px_popover_with_the_app_theme(app):
     host.resize(1280, 800)
     try:
         popover = EnhancePopover(host)
-        controls = NormalizationControls()
+        controls = _controls()
         popover.set_content(controls)
         host.show()
         QTest.qWaitForWindowExposed(host)
@@ -193,7 +214,7 @@ def test_every_button_fits_inside_the_264px_popover_with_the_app_theme(app):
 
 # --------------------------------------------------------------------------- live preview
 def test_rapid_slider_changes_emit_one_debounced_update(app, tmp_path):
-    controls = NormalizationControls(store=_store(tmp_path), preview_delay_ms=40)
+    controls = _controls(store=_store(tmp_path), preview_delay_ms=40)
     hits = []
     controls.enhancement_changed.connect(lambda: hits.append(1))
     for value in (11, 12, 13, 14, 15):
@@ -205,7 +226,7 @@ def test_rapid_slider_changes_emit_one_debounced_update(app, tmp_path):
 
 
 def test_apply_activates_immediately_and_original_toggles_back(app, tmp_path):
-    controls = NormalizationControls(store=_store(tmp_path))
+    controls = _controls(store=_store(tmp_path))
     hits = []
     controls.enhancement_changed.connect(lambda: hits.append(1))
     assert not controls.is_active()
@@ -218,18 +239,20 @@ def test_apply_activates_immediately_and_original_toggles_back(app, tmp_path):
     assert controls.is_active()
 
 
-def test_apply_to_is_identity_until_active_then_enhances(app, tmp_path):
-    controls = NormalizationControls(store=_store(tmp_path))
+@pytest.mark.parametrize("method", [METHOD_CLAHE, METHOD_STRETCH])
+def test_apply_to_is_identity_until_active_then_enhances_once(app, tmp_path, method):
+    # CLAHE is not idempotent: an enhancement applied twice would not equal one enhance().
+    controls = _controls(store=_store(tmp_path))
     img = _image()
     assert controls.apply_to(img) is img
-    controls.method_combo.setCurrentText(METHOD_STRETCH)
+    controls.method_combo.setCurrentText(method)
     controls.apply_button.click()
     assert np.array_equal(controls.apply_to(img), enhance(img, controls.settings()))
-    assert controls.settings().method == METHOD_STRETCH
+    assert controls.settings().method == method
 
 
 def test_set_settings_updates_every_control(app, tmp_path):
-    controls = NormalizationControls(store=_store(tmp_path))
+    controls = _controls(store=_store(tmp_path))
     wanted = EnhanceSettings(method=METHOD_STRETCH, clip=9, tile=3, lower=10, upper=90)
     controls.set_settings(wanted)
     assert controls.settings() == wanted
@@ -241,7 +264,7 @@ def test_display_pixmap_raw_then_enhanced_and_none_for_missing(app, tmp_path):
     path = tmp_path / "img.png"
     img = _image()
     cv2.imencode(".png", img)[1].tofile(str(path))
-    controls = NormalizationControls(store=_store(tmp_path))
+    controls = _controls(store=_store(tmp_path))
     raw = controls.display_pixmap(str(path))
     assert raw is not None and (raw.width(), raw.height()) == (80, 60)
     controls.apply_button.click()
@@ -257,7 +280,7 @@ def test_source_image_is_one_cached_decode_in_qt_geometry(app, tmp_path):
     from tests.enhance_support import exif_rotated_jpeg
 
     path = exif_rotated_jpeg(tmp_path / "rotated.jpg")
-    controls = NormalizationControls(store=_store(tmp_path))
+    controls = _controls(store=_store(tmp_path))
     first = controls.source_image(path)
     assert controls.source_image(path) is first
     qt = QImage(path)
@@ -268,13 +291,14 @@ def test_source_image_is_one_cached_decode_in_qt_geometry(app, tmp_path):
 def test_display_image_is_the_source_until_enhanced(app, tmp_path):
     path = tmp_path / "img.png"
     cv2.imencode(".png", _image())[1].tofile(str(path))
-    controls = NormalizationControls(store=_store(tmp_path))
+    controls = _controls(store=_store(tmp_path))
     source = controls.source_image(str(path))
     assert controls.display_image(str(path)) is source  # no copy while enhancement is off
-    controls.method_combo.setCurrentText(METHOD_STRETCH)
+    controls.method_combo.setCurrentText(METHOD_CLAHE)  # not idempotent: twice would show
     controls.apply_button.click()
     shown = controls.display_image(str(path))
     assert shown is not source
+    assert np.array_equal(controls.source_image(str(path)), source)  # the decode stays raw
     assert np.array_equal(shown, enhance(source, controls.settings()))
     assert not np.array_equal(shown, source)
     controls.original_check.setChecked(True)
@@ -282,22 +306,29 @@ def test_display_image_is_the_source_until_enhanced(app, tmp_path):
     assert controls.display_image(str(tmp_path / "missing.png")) is None
 
 
-def test_legacy_public_surface_is_kept(app, tmp_path):
-    controls = NormalizationControls(store=_store(tmp_path))
-    for name in (
-        "method_combo",
-        "clip_slider",
-        "tile_slider",
-        "lower_slider",
-        "upper_slider",
-        "apply_button",
-        "save_defaults_button",
-        "restore_defaults_button",
-        "default_values",
-        "clahe_group",
-        "contrast_group",
-    ):
-        assert hasattr(controls, name), name
+@pytest.mark.usefixtures("correct_guards")
+def test_enhancing_the_open_photo_again_still_enhances_it_once(make_editor, tmp_path):
+    """Every slider change re-renders the photo: from the decode, never from the last render."""
+    folder = tmp_path / "project"
+    folder.mkdir()
+    photo = str(folder / "a.png")
+    cv2.imencode(".png", _image())[1].tofile(photo)
+    editor = make_editor(photo, str(folder))
+    raw = editor.photo_item.pixmap().toImage()
+    # CLAHE: not idempotent (the shipped default, Contrast Stretching, would hide a repeat).
+    editor.norm_controls.method_combo.setCurrentText(METHOD_CLAHE)
+    editor.norm_controls.apply_button.click()  # rendered at once
+    once = editor.photo_item.pixmap().toImage()
+    assert once != raw
+
+    editor.apply_normalization()
+    editor.apply_normalization()
+
+    assert editor.photo_item.pixmap().toImage() == once
+
+
+def test_apply_is_enabled_only_with_an_image(app, tmp_path):
+    controls = _controls(store=_store(tmp_path))
     controls.set_image(None)
     assert not controls.apply_button.isEnabled()
     controls.set_image(_image())
@@ -333,7 +364,7 @@ def _jpeg(tmp_path):
 
 
 def test_the_box_is_offered_only_for_jpeg_sources(app, tmp_path):
-    controls = NormalizationControls(store=_store(tmp_path))
+    controls = _controls(store=_store(tmp_path))
     assert not controls.deblock_check.isVisibleTo(controls)  # no source yet
     for name, shown in (("a.jpg", True), ("a.JPEG", True), ("a.png", False), (None, False)):
         controls.set_source_path(name)
@@ -344,7 +375,7 @@ def test_the_box_is_offered_only_for_jpeg_sources(app, tmp_path):
 
 
 def test_checking_the_box_smooths_blocks_without_turning_on_clahe(app, tmp_path):
-    controls = NormalizationControls(store=_store(tmp_path))
+    controls = _controls(store=_store(tmp_path))
     img = _blocky()  # 48 x 64 BGR with 8 px block steps of 6 to 10
     controls.set_source_path("a.jpg")
     hits = []
@@ -362,7 +393,7 @@ def test_checking_the_box_smooths_blocks_without_turning_on_clahe(app, tmp_path)
 
 
 def test_deblock_is_not_applied_to_a_png_even_when_checked(app, tmp_path):
-    controls = NormalizationControls(store=_store(tmp_path, user={"jpeg_deblock": True}))
+    controls = _controls(store=_store(tmp_path, user={"jpeg_deblock": True}))
     img = _blocky()
     assert controls.settings().deblock is True  # the saved default is kept
     controls.set_source_path("a.png")
@@ -372,7 +403,7 @@ def test_deblock_is_not_applied_to_a_png_even_when_checked(app, tmp_path):
 
 
 def test_deblock_then_stretch_applies_both_in_order(app, tmp_path):
-    controls = NormalizationControls(store=_store(tmp_path))
+    controls = _controls(store=_store(tmp_path))
     controls.set_source_path("a.jpg")
     controls.deblock_check.setChecked(True)
     controls.method_combo.setCurrentText(METHOD_STRETCH)
@@ -382,13 +413,13 @@ def test_deblock_then_stretch_applies_both_in_order(app, tmp_path):
 
 
 def test_the_box_is_saved_with_the_defaults_and_reset_restores_it(app, user_config):
-    controls = NormalizationControls()
+    controls = _controls()
     controls.set_source_path("a.jpg")
     controls.deblock_check.setChecked(True)
     controls.save_current_as_defaults()
     saved = json.loads((user_config / "normalization_defaults.json").read_text("utf-8"))
     assert saved["jpeg_deblock"] is True
-    again = NormalizationControls()
+    again = _controls()
     assert again.deblock_check.isChecked() and again.settings().deblock
     again.set_source_path("a.jpg")
     again.deblock_check.setChecked(False)
@@ -407,7 +438,7 @@ def test_the_box_is_saved_with_the_defaults_and_reset_restores_it(app, user_conf
 def test_display_image_follows_the_path_it_is_given(app, tmp_path):
     jpg, png = _jpeg(tmp_path), tmp_path / "p.png"
     cv2.imencode(".png", _blocky())[1].tofile(str(png))
-    controls = NormalizationControls(store=_store(tmp_path))
+    controls = _controls(store=_store(tmp_path))
     controls.deblock_check.setChecked(True)
     assert not np.array_equal(controls.display_image(str(jpg)), controls.source_image(str(jpg)))
     assert controls.display_image(str(png)) is controls.source_image(str(png))

@@ -43,17 +43,32 @@ def test_the_scan_opens_no_mask_file(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("limit_to_images", [False, True])
-def test_a_large_folder_is_counted_by_name(tmp_path, limit_to_images):
+def test_a_folder_is_counted_by_name(tmp_path, limit_to_images):
+    # 30 files: the count rule is the same at any size; the test above proves no file opens.
     mask_dir = tmp_path / "mask"
     mask_dir.mkdir()
-    for i in range(3000):
+    for i in range(30):
         (mask_dir / f"T{i:05d}.png").write_bytes(b"")  # unreadable as a PNG: still a mask
     layout = ProjectLayout(str(tmp_path))
-    wanted = {f"T{i:05d}" for i in range(0, 3000, 3)}
+    wanted = {f"T{i:05d}" for i in range(0, 30, 3)}
 
     found = scan_existing_masks(layout, wanted if limit_to_images else None)
 
-    assert found.count == (len(wanted) if limit_to_images else 3000)
+    assert found.count == (len(wanted) if limit_to_images else 30)
+
+
+def test_a_mask_named_in_another_case_counts_for_its_image(tmp_path):
+    """O7: ``mask/a.png`` is the mask of ``A.jpg``; "Keep existing" must skip that image."""
+    mask_dir = tmp_path / "mask"
+    mask_dir.mkdir()
+    for stem in ("A", "B"):
+        (tmp_path / f"{stem}.jpg").write_bytes(b"")
+    (mask_dir / "a.png").write_bytes(b"")
+    layout = ProjectLayout(str(tmp_path))
+
+    found = scan_existing_masks(layout, layout.scan_images())
+
+    assert found.stems == frozenset({"A"})
 
 
 def test_masks_named_as_their_images_are_not_remapped(tmp_path, monkeypatch):

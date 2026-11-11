@@ -1,11 +1,11 @@
-"""A save toast with a long file name stays on one line (KNOWN_ISSUES #7).
+"""How a toast fits its text (``app.gui.widgets.toasts``).
 
-"Saved mask · <file name>" wrapped onto two lines when the name was long: the name fitted
-on a line of its own, so it was not shortened, but the whole line did not fit. Now a
-"<what> · <name>" toast shows its title and then the name (mono), elided in the middle (its
-start and its extension stay) on the same line; only a name left under MIN_NAME_PX beside
-its title takes a line of its own (2026-10-31 capsule). The full text stays in the tooltip.
-Other messages wrap as before.
+A save's message "<what> · <file name>" splits into a title and the file name (mono), shown on
+one line with the name elided in the middle (its start and its extension stay); only a name
+left under MIN_NAME_PX beside its title takes a line of its own (KNOWN_ISSUES #7: "Saved mask
+· <long name>" wrapped onto two lines). Any other message wraps at 460 px inside the window;
+an unbreakable path is elided in the middle. The full text is always the tooltip and the
+accessible name.
 """
 
 from __future__ import annotations
@@ -15,9 +15,15 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QLabel, QWidget
 
 from app.gui.widgets import ToastManager
+from app.gui.widgets.toasts import split_message
 from tests.qt_teardown import delete_widgets
 
 NAME = "24EFCAM1_T001_L044_2024.07.18_111530_001_SMM.jpg"
+LONG_ERROR = (
+    "Cannot export: gt/classes.json is invalid ("
+    + "class 'root_tip' colour #ffd166 duplicates class 'nodule'; " * 4
+    + ")"
+)
 
 
 @pytest.fixture
@@ -38,6 +44,10 @@ def _name(toast) -> QLabel:
     return toast.findChild(QLabel, "toastDetail")
 
 
+def _text(toast) -> str:
+    return _title(toast).text()
+
+
 def _one_line(toast) -> bool:
     title, name = _title(toast), _name(toast)
     title_box, name_box = title.geometry(), name.geometry()
@@ -48,6 +58,20 @@ def _one_line(toast) -> bool:
     )
 
 
+# --------------------------------------------------------------------- the message
+def test_a_save_message_splits_into_title_and_file_name():
+    assert split_message(f"Saved mask · {NAME}") == ("Saved mask", NAME)
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["Loaded 40 images", "Branch deleted · Ctrl+Z to undo", " · L44.jpg", "Saved mask · "],
+)
+def test_other_messages_stay_whole(message):
+    assert split_message(message) == (message, None)
+
+
+# ------------------------------------------------------------------- a save's file name
 # "mask and skeleton" is left out: the offscreen platform's wide font leaves its name
 # under MIN_NAME_PX beside its title (the app's font leaves it about 230 px).
 @pytest.mark.parametrize("what", ["mask", "GT"])
@@ -84,6 +108,18 @@ def test_a_name_with_no_room_left_beside_its_title_takes_its_own_line(host):
     assert _name(toast).text().endswith(".jpg")
 
 
+def test_an_update_in_place_refits_the_name(host):
+    manager = ToastManager(host)
+    toast = manager.show("Saved mask · L44.jpg", key="saved")
+    QApplication.processEvents()
+    assert manager.show(f"Saved mask · {NAME}", key="saved") is toast
+    QApplication.processEvents()
+
+    assert _one_line(toast)
+    assert _name(toast).text().endswith(".jpg") and "…" in _name(toast).text()
+
+
+# ------------------------------------------------------------------- other messages
 def test_a_sentence_still_wraps(host):
     message = f"Could not save mask for {NAME}: disk full"
     toast = ToastManager(host).show(message, "danger")
@@ -104,12 +140,21 @@ def test_several_words_after_the_dot_still_wrap(host):
     assert not _name(toast).isVisibleTo(toast)
 
 
-def test_an_update_in_place_refits_the_name(host):
+def test_long_messages_wrap_inside_the_window(host):
     manager = ToastManager(host)
-    toast = manager.show("Saved mask · L44.jpg", key="saved")
+    toast = manager.show(LONG_ERROR, "danger")
     QApplication.processEvents()
-    assert manager.show(f"Saved mask · {NAME}", key="saved") is toast
-    QApplication.processEvents()
+    assert host.rect().contains(toast.geometry())
+    assert toast.width() <= 460
+    assert toast.accessibleName() == LONG_ERROR
 
-    assert _one_line(toast)
-    assert _name(toast).text().endswith(".jpg") and "…" in _name(toast).text()
+
+def test_unbreakable_paths_are_elided_with_the_full_text_in_the_tooltip(host):
+    manager = ToastManager(host)
+    path = "D:/" + "/".join(["a_very_long_folder_name"] * 12) + "/mask/T001_L044.png"
+    message = f"Could not save mask to {path}"
+    toast = manager.show(message, "danger")
+    QApplication.processEvents()
+    assert host.rect().contains(toast.geometry())
+    assert "…" in _text(toast)
+    assert toast.toolTip() == message

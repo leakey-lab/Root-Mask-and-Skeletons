@@ -173,14 +173,16 @@ def _show_active(window: QWidget) -> None:
 def test_a_rename_typed_in_the_classes_editor_survives_a_click_on_ok(app):
     """The Classes editor commits a row's new name when its field loses the keyboard; a click
     on OK must still take it, or the rename is dropped without a word (review of #44)."""
-    dialog = ClassEditorDialog(default_registry())
+    registry = default_registry()
+    dialog = ClassEditorDialog(registry)
     try:
         _show_active(dialog)
-        field = dialog._rows["nodule"].name_edit
+        name = registry.by_key("nodule").name
+        [field] = [f for f in dialog.findChildren(QLineEdit) if f.text() == name]
         field.setFocus()
         field.selectAll()
         QTest.keyClicks(field, "Nodule X")
-        ok = dialog._button_box.button(QDialogButtonBox.StandardButton.Ok)
+        ok = dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Ok)
         QTest.mouseClick(ok, Qt.MouseButton.LeftButton)
         registry = dialog.result_registry()
         assert registry is not None

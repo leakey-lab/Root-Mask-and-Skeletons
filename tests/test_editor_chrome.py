@@ -211,31 +211,8 @@ def test_fit_keeps_clear_of_the_overlays(app, make_page):
     assert shown.left() >= insets.left() - 1
 
 
-def test_zooms_and_fits_leave_a_chip_below_the_prompt_as_placed(app, make_page):
-    """Every zoom and fit asks the layout for the insets. A chip moved below the polyline
-    prompt (no room beside it) used to be left narrowed to that room: name elided, hint
-    wrapped over the rail."""
-    page = make_page((900, 600))
-    chrome, view = page.chrome, page.view
-    chrome.chip.set_text(PHOTO_NAME)
-    chrome.chip.set_hint(POLYLINE_HINT)
-    prompt = QFrame(page)
-    prompt.setFixedSize(658, 44)
-    prompt.show()
-    chrome.register(prompt=prompt)
-    settle(app, page)
-    chip = chrome.chip
-    assert chip.y() > bottom(prompt)  # the chip sits below the prompt
-    placed = (chip.geometry(), chip.file_label.text(), chip.hint_label.text())
-
-    for action in (
-        lambda: view.zoom_step(-1),
-        lambda: view.zoom_step(+1),
-        lambda: view.set_zoom(2.0),
-        view.fit_to_view,
-    ):
-        action()
-        assert (chip.geometry(), chip.file_label.text(), chip.hint_label.text()) == placed
+# A chip below the prompt left as placed by every zoom and fit (the insets it asks for):
+# tests/test_overlays_layout.py::test_asking_for_the_insets_leaves_a_chip_below_the_prompt_as_placed.
 
 
 def test_the_resize_refit_gets_the_insets_of_the_new_size(app, make_page):

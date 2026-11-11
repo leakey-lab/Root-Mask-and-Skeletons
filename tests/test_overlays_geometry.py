@@ -87,6 +87,15 @@ def test_dock_slides_left_of_the_zoom_cluster_at_the_minimum_window():
     assert not plan.dock_compact and not plan.zoom_lifted
 
 
+def test_a_dock_that_fits_exactly_stays_beside_the_zoom_cluster():
+    # 14 + 623 (dock) + 10 + 165 (zoom cluster) + 14 = 826 px: not one pixel to spare.
+    plan = plan_overlays(OverlaySpec(host=(826, 562), chip=_chip(), **MASK))
+    dock, zoom = plan.rects["dock"], plan.rects["zoom_cluster"]
+    assert not plan.zoom_lifted and not plan.dock_compact
+    assert dock == Rect(14, 498, 623, 46) and dock.right + 10 == zoom.x
+    assert plan_overlays(OverlaySpec(host=(825, 562), chip=_chip(), **MASK)).zoom_lifted
+
+
 def test_zoom_cluster_lifts_above_the_dock_when_the_span_is_too_narrow():
     plan = plan_overlays(OverlaySpec(host=(780, 562), chip=_chip(), **MASK))
     dock, zoom = plan.rects["dock"], plan.rects["zoom_cluster"]

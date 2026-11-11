@@ -1,4 +1,9 @@
-"""PE-06: patch-based undo/redo for the raster editors (Qt-free core)."""
+"""Undo and redo of ``app.gui.patch_history.PatchHistory``, the raster layers' history (PE-06).
+
+Every undo and redo restores the exact plane, the history is bounded by count and bytes, and
+``drop_redo`` ends a branch. How patches are stored (bit packing, deflate):
+``tests/test_patch_history.py``.
+"""
 
 import numpy as np
 import pytest
@@ -146,3 +151,34 @@ def test_drop_redo_is_a_no_op_without_a_redo_branch():
 
     assert calls == []
     assert len(h.undo_stack) == 1 and h.plane.sum() == 4
+
+
+def test_random_commits_undos_and_redos_match_a_snapshot_oracle():
+    """Edits, undos and redos interleaved at random: after every step the plane is the one a
+    list of whole snapshots says, and Undo / Redo are offered exactly when it has a state."""
+    rng = np.random.default_rng(2026)
+    shape, depth = (120, 160), 30  # 19 200 bytes: a whole-plane patch is stored deflated
+    h = PatchHistory(maxlen=depth)
+    h.reset(np.zeros(shape, np.uint8))
+    states, at = [h.plane.copy()], 0
+    for _ in range(400):
+        step = rng.choice(["edit", "edit", "undo", "redo"])
+        if step == "edit":
+            if rng.random() < 0.1:
+                rect = (0, 0, shape[1], shape[0])
+            else:
+                rect = h.clip(tuple(int(v) for v in rng.integers(-10, 150, 2)) + (40, 30))
+            x, y, w, hh = rect
+            after = h.plane[y : y + hh, x : x + w].copy()
+            after[rng.random(after.shape) < 0.4] = int(rng.integers(0, 4))  # class ids 0..3
+            h.commit(rect, after)
+            states = [*states[: at + 1], h.plane.copy()][-(depth + 1) :]  # the oldest go
+            at = len(states) - 1
+        elif step == "undo":
+            assert (h.undo() is None) == (at == 0)
+            at = max(0, at - 1)
+        else:
+            assert (h.redo() is None) == (at == len(states) - 1)
+            at = min(len(states) - 1, at + 1)
+        assert np.array_equal(h.plane, states[at])
+        assert (h.can_undo, h.can_redo) == (at > 0, at < len(states) - 1)

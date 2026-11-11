@@ -1,15 +1,17 @@
-"""Mask-file corpora shared by the mask-store tests and the GT-mask read test.
+"""The corpus of mask files of ``tests/test_mask_store_decode.py``, and its builders.
 
-Three sections, one per test module that owns its corpus:
+``CORPUS``: name -> (file bytes, whether the exact fast path of ``app.masks.store`` should
+take the file). It is every distinct file of three sections (a file byte-identical to an
+earlier one is left out), each name prefixed by its section:
 
-- ``EDITOR_CASES`` (``tests/test_mask_editor_store.py``, there named ``CASES``): name ->
-  (file bytes, ``"fast"`` or ``"reference"``);
-- ``GREY`` / ``BROKEN`` / ``ALL`` (``tests/test_mask_store_grey_fast_path.py``): name ->
-  (file bytes, whether the fast path should take it);
-- ``RGBA_CASES`` (``tests/test_mask_store_rgba_fast_path.py``, there named ``CASES``):
-  name -> (file bytes, whether the fast path should take it).
+- ``editor:`` (``EDITOR_CASES``): the editor's own masks and their near misses;
+- ``png:`` (``GREY`` / ``BROKEN`` / ``ALL``): 8-bit grey model masks written every way
+  OpenCV and Pillow can, and broken or odd PNGs of both kinds the fast path must refuse;
+- ``rgba:`` (``RGBA_CASES``): RGBA masks with every alpha pattern, colour, RGB, 16-bit and
+  palette files.
 
-``tests/test_mask_files_gt_read.py`` reads all three. Each corpus is built once, here.
+``_mask``, ``_strokes``, ``_pil_png`` and ``_FILTERS`` are also used directly by
+``tests/test_mask_store.py`` and the seeded loops of the decode test.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from PIL import Image
 from app.masks import MASK_THRESHOLD, encode_mask_png
 
 
-# ============================================== tests/test_mask_editor_store.py: CASES
+# ======================================================= section "editor:" (EDITOR_CASES)
 def _mask(h=60, w=80):
     on = np.zeros((h, w), bool)
     on[10:14, 5:60] = True
@@ -180,11 +182,11 @@ def _interlaced() -> bytes:
     return _png_from_chunks([(b"IHDR", ihdr), (b"IDAT", zlib.compress(bytes(raw))), (b"IEND", b"")])
 
 
-# ``CASES`` in tests/test_mask_editor_store.py (named apart from the RGBA corpus's ``CASES``).
+# The "editor:" section of CORPUS.
 EDITOR_CASES = _mask_file_cases()
 
 
-# ================================== tests/test_mask_store_grey_fast_path.py: GREY, ALL
+# ================================================= section "png:" (GREY, BROKEN, ALL)
 SIG = b"\x89PNG\r\n\x1a\n"
 
 
@@ -484,7 +486,7 @@ BROKEN = {
 ALL = {**{f"grey_{name}": case for name, case in GREY.items()}, **BROKEN}
 
 
-# ===================================== tests/test_mask_store_rgba_fast_path.py: CASES
+# ========================================================= section "rgba:" (RGBA_CASES)
 def _grey_levels(h: int, w: int, seed: int) -> np.ndarray:
     """Random grey levels, half of them close to the threshold."""
     rng = np.random.default_rng(seed)
@@ -608,5 +610,25 @@ def _cases() -> dict[str, tuple[bytes, bool]]:
     return cases
 
 
-# ``CASES`` in tests/test_mask_store_rgba_fast_path.py (named apart from the editor corpus).
+# The "rgba:" section of CORPUS.
 RGBA_CASES = _cases()
+
+
+# ========================================================== the one corpus of the decode test
+def _distinct_corpus() -> dict[str, tuple[bytes, bool]]:
+    """The three sections as one corpus, each distinct file once (the first name kept)."""
+    named = [(f"editor:{n}", data, kind == "fast") for n, (data, kind) in EDITOR_CASES.items()]
+    named += [(f"png:{n}", data, bool(fast)) for n, (data, fast) in ALL.items()]
+    named += [(f"rgba:{n}", data, bool(fast)) for n, (data, fast) in RGBA_CASES.items()]
+    corpus: dict[str, tuple[bytes, bool]] = {}
+    seen: dict[bytes, bool] = {}
+    for name, data, fast in named:
+        if data in seen:
+            assert seen[data] == fast, f"{name}: a byte-identical file expects another path"
+            continue
+        seen[data] = fast
+        corpus[name] = (data, fast)
+    return corpus
+
+
+CORPUS = _distinct_corpus()

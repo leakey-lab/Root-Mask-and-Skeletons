@@ -80,25 +80,15 @@ def _editor_like():
     return host, canvas, save, size, tool
 
 
-@pytest.mark.parametrize("target", ["save", "slider", "rail tool"])
+# Buttons: Tab-only app-wide (tests/test_tab_only_buttons.py); a slider keeps click focus
+# outside an overlay, so it is the control that proves keep_canvas_focus here.
+@pytest.mark.parametrize("target", ["slider"])
 def test_clicking_an_overlay_control_leaves_focus_on_the_canvas(app, target):
     host, canvas, save, size, tool = _editor_like()
     try:
         widget = {"save": save, "slider": size.slider, "rail tool": tool}[target]
         QTest.mouseClick(widget, Qt.MouseButton.LeftButton)
         assert QApplication.focusWidget() is canvas
-    finally:
-        host.close()
-
-
-def test_space_after_clicking_save_does_not_click_it_again(app):
-    host, canvas, save, _size, _tool = _editor_like()
-    try:
-        clicks = []
-        save.clicked.connect(lambda: clicks.append(1))
-        QTest.mouseClick(save, Qt.MouseButton.LeftButton)
-        QTest.keyClick(QApplication.focusWidget(), Qt.Key.Key_Space)
-        assert clicks == [1]
     finally:
         host.close()
 

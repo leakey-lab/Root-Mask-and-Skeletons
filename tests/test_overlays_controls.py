@@ -148,3 +148,36 @@ def test_arrow_keys_move_the_segmented_selection(window):
         assert seg.value() == expected, key
         assert QApplication.focusWidget() is seg.button(expected)
     assert got == ["overlay", "split", "single", "split", "single", "split", "overlay"]
+
+
+# --------------------------------------------------------------------------- #
+#  Selection signals of the segmented control
+# --------------------------------------------------------------------------- #
+def test_set_value_selects_the_segment_and_reports_the_change(app):
+    seg = SegmentedControl(
+        [
+            ("single", "Single", "single"),
+            ("overlay", "Overlay", "overlay"),
+            ("split", "Side by side", "split"),
+        ],
+        value="overlay",
+    )
+    assert seg.value() == "overlay"
+    got = []
+    seg.valueChanged.connect(got.append)
+    seg.setValue("split")
+    assert seg.value() == "split"
+    assert got == ["split"]
+
+
+def test_a_click_on_the_selected_segment_is_reported_as_activated_only(app):
+    """A "show this view" selector needs every click; ``valueChanged`` fires on a change."""
+    seg = SegmentedControl([("length", "Length"), ("area", "Area")], value="length")
+    changed, activated = [], []
+    seg.valueChanged.connect(changed.append)
+    seg.activated.connect(activated.append)
+    seg.button("length").click()
+    seg.button("area").click()
+    seg.button("area").click()
+    assert changed == ["area"]
+    assert activated == ["length", "area", "area"]

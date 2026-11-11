@@ -87,10 +87,13 @@ def test_flat_channel_is_returned_unchanged_without_warnings():
     assert out[..., 0].max() == 255
 
 
-def test_non_uint8_input_falls_back_without_crashing():
+def test_a_non_uint8_image_is_stretched_as_the_float64_reference_does():
     img = (np.arange(64, dtype=np.uint16).reshape(8, 8) * 1000).astype(np.uint16)
     out = enh.contrast_stretch(img, 2, 98)
     assert out.dtype == np.uint8 and out.shape == img.shape
+    assert np.array_equal(out, _reference_stretch(img, 2, 98))
+    flat = np.full((4, 5), 300, np.uint16)  # nothing to stretch: kept, clipped to 0..255
+    assert np.array_equal(enh.contrast_stretch(flat, 2, 98), np.full((4, 5), 255, np.uint8))
 
 
 def test_enhance_dispatches_on_method():
@@ -124,6 +127,10 @@ def test_settings_legacy_dict_round_trip():
         {"clahe_clip": 8.5},
         {"clahe_tile": "14"},
         {"clahe_clip": 10**9},
+        {"clahe_clip": 0},  # below the minimum of each slider
+        {"clahe_tile": 0},
+        {"contrast_lower": -5},
+        {"contrast_upper": 10},
         {"contrast_lower": [1]},
         {"contrast_upper": None},
         {"last_method": "Sharpen"},
@@ -146,8 +153,8 @@ def test_from_dict_rounds_floats_and_parses_numeric_strings():
     assert EnhanceSettings.from_dict({"clahe_clip": 10**9})[0].clip == 50
 
 
-def test_lower_must_stay_below_upper():
-    settings, _ = EnhanceSettings.from_dict({"contrast_lower": 49, "contrast_upper": 51})
+def test_lower_stays_below_upper_whatever_the_file_says():
+    settings, _ = EnhanceSettings.from_dict({"contrast_lower": 100, "contrast_upper": 0})
     assert settings.lower < settings.upper
 
 
