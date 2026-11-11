@@ -16,16 +16,11 @@ from PyQt6.QtGui import QColor, QIcon, QImage, QPalette, QPixmap
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QTreeWidget, QTreeWidgetItem
 
+from app.gui.ui_panels import library_tree_qss
 from app.gui.widgets import tokens
 from tests.qt_teardown import flush_deleted
 
 APP_QSS = Path(__file__).resolve().parents[1] / "resources" / "themes" / "dark_theme.qss"
-# The library tree's own stylesheet (ui_panels.py) sets a translucent selection fill.
-LIBRARY_QSS = f"""
-QTreeWidget {{ background-color: {tokens.BG_1}; border: 1px solid {tokens.BORDER}; }}
-QTreeWidget::item {{ padding: 4px; border-radius: 5px; }}
-QTreeWidget::item:selected {{ background-color: {tokens.SEL_SOFT}; color: {tokens.TEXT}; }}
-"""
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +41,7 @@ def tree(app):
     widget = QTreeWidget()
     widget.setHeaderHidden(True)
     widget.setIndentation(20)
-    widget.setStyleSheet(LIBRARY_QSS)
+    widget.setStyleSheet(library_tree_qss())  # the library tree's own sheet, over the app's
     field = QTreeWidgetItem(widget, ["24EF"])
     tube = QTreeWidgetItem(field, ["T1"])
     date = QTreeWidgetItem(tube, ["2024.07.18"])

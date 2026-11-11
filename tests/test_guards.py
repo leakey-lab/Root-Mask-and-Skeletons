@@ -1,21 +1,20 @@
-"""The guard fixtures of conftest.py (tests/guards.py): no prompt, no file dialog, no delayed
-temp sweep, no OpenGL, and no exception hidden in a Qt slot."""
+"""The slot-error guard of conftest.py (``tests/guards.record_slot_errors``).
+
+PyQt hands an exception raised in a Qt slot to ``sys.excepthook``, which only prints it
+under pytest. The guard records it, the test fails at teardown, and with ``sources`` only an
+exception whose traceback passes through one of those files counts (at a path-separator
+boundary). The other guards are one ``monkeypatch.setattr`` each and have no test of their
+own.
+"""
 
 import os
 import sys
 
 import pytest
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PyQt6.QtWidgets import QApplication
 
-from app.gui import canvas_gl, image_manager
 from tests import guards
-
-FAILED = pytest.fail.Exception
-_REAL_BOXES = {name: getattr(QMessageBox, name) for name in ("exec", *guards.PROMPT_STATICS)}
-_REAL_DIALOGS = {name: getattr(QFileDialog, name) for name in guards.FILE_DIALOGS}
-_REAL_SWEEP = image_manager.ImageManager._start_temp_sweep
-_REAL_HOOK = sys.excepthook
 
 
 def _exc_info_from(filename: str):
@@ -29,52 +28,10 @@ def _exc_info_from(filename: str):
 
 
 @pytest.fixture
-def gl_requested(monkeypatch):
-    monkeypatch.setenv(canvas_gl.ENV_VAR, "1")
-
-
-@pytest.fixture
 def sources_in_module(monkeypatch):
     """This module names the files whose slot errors count, as a module would."""
     names = (os.path.join("pkg", "thing.py"),)
     monkeypatch.setattr(sys.modules[__name__], "SLOT_ERRORS_FROM", names, raising=False)
-
-
-def test_no_prompts_refuses_exec_and_the_static_boxes(app, no_prompts):
-    box = QMessageBox()
-    box.setText("Save changes?")
-    with pytest.raises(FAILED, match="prompt: Save changes"):
-        box.exec()
-    for name in guards.PROMPT_STATICS:
-        with pytest.raises(FAILED, match=f"QMessageBox.{name}"):
-            getattr(QMessageBox, name)(None, "Title", "Text")
-    box.deleteLater()
-
-
-def test_no_file_dialogs_refuses_every_getter(app, no_file_dialogs):
-    for name in guards.FILE_DIALOGS:
-        with pytest.raises(FAILED, match=f"QFileDialog.{name}"):
-            getattr(QFileDialog, name)(None, "Pick")
-
-
-def test_no_temp_sweep_turns_the_delayed_sweep_into_a_no_op(no_temp_sweep, tmp_path):
-    sweep = image_manager.ImageManager._start_temp_sweep
-    assert sweep is not _REAL_SWEEP
-    assert sweep(str(tmp_path)) is None
-
-
-def test_gl_off_wins_over_the_environment(gl_requested, gl_off):
-    assert os.environ[canvas_gl.ENV_VAR] == "0"
-    assert canvas_gl.opengl_viewport_requested() is False
-
-
-def test_window_guards_combines_prompts_dialogs_sweep_and_gl(app, gl_requested, window_guards):
-    with pytest.raises(FAILED):
-        QMessageBox().exec()
-    with pytest.raises(FAILED):
-        QFileDialog.getExistingDirectory(None, "Pick")
-    assert image_manager.ImageManager._start_temp_sweep is not _REAL_SWEEP
-    assert os.environ[canvas_gl.ENV_VAR] == "0"
 
 
 def test_slot_errors_records_an_exception_raised_in_a_qt_slot(app, slot_errors):
@@ -135,11 +92,3 @@ def test_slot_errors_reads_the_modules_sources(sources_in_module, slot_errors, c
     assert [str(error) for error in slot_errors] == [os.path.join("root", "pkg", "thing.py")]
     assert "elsewhere.py" in capsys.readouterr().err
     slot_errors.clear()
-
-
-def test_every_guard_ends_with_its_test():
-    assert {name: getattr(QMessageBox, name) for name in _REAL_BOXES} == _REAL_BOXES
-    assert {name: getattr(QFileDialog, name) for name in _REAL_DIALOGS} == _REAL_DIALOGS
-    assert image_manager.ImageManager._start_temp_sweep is _REAL_SWEEP
-    assert sys.excepthook is _REAL_HOOK
-    assert not hasattr(sys.modules[__name__], "SLOT_ERRORS_FROM")

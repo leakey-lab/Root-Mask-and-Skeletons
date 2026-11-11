@@ -112,3 +112,24 @@ def test_icons_render_natively_on_a_150_percent_screen():
     assert float(screen_dpr) == pytest.approx(1.5)
     assert (int(width), int(height), float(pixmap_dpr)) == (23, 23, 1.5)
     assert native == "True"
+
+
+def test_icons_present(app):
+    # from test_widgets_smoke.py at b9f7d19 (A6 hand-over): the icons the editors draw
+    from app.gui import widgets
+
+    for name in (
+        "brush",
+        "erase",
+        "fill",
+        "save",
+        "trash",
+        "polyline",
+        "link",
+        "cursor",
+        "contrast",
+        "sprouts_logo",
+    ):
+        assert widgets.has_icon(name), f"missing icon {name}"
+        assert not widgets.load_icon(name, tokens.ACCENT, 18).isNull()
+        assert not widgets.load_pixmap(name, tokens.MASK, 20).isNull()

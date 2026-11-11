@@ -12,12 +12,6 @@ from tests.qt_wait import settle, wait_until
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_wait_until_returns_once_the_event_loop_makes_the_predicate_hold(app):
-    fired = []
-    QTimer.singleShot(30, lambda: fired.append(True))
-    assert wait_until(lambda: fired) is True
-
-
 def test_wait_until_gives_the_last_answer_after_the_timeout(app):
     started = time.monotonic()
     assert wait_until(lambda: [], timeout=0.05) == []

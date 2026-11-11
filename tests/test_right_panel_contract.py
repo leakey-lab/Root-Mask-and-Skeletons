@@ -9,23 +9,27 @@ would survive that silently, so both are rejected anywhere under ``app/``:
 * an int literal page index: ``right_panel.setCurrentIndex(<int>)``,
   ``right_panel.widget(<int>)``, or ``right_panel.currentIndex()`` compared with ``==``,
   ``!=``, ``in`` or ``not in`` to an int literal. Name pages with ``Panel`` members.
-* a legacy page key: ``switch_right_panel`` logs and ignores a key that ``Panel.coerce``
-  rejects, so ``switch_right_panel("mask_tracing")`` would do nothing, without an error.
-  No string constant may name ``mask_tracing`` or ``skeleton_correction`` (a whole word,
-  in any case, as ``Panel.coerce`` matches keys). Docstrings (the first statement of a
-  module, class or function) may, to say which keys are gone.
+* a page key ``Panel.coerce`` rejects: ``switch_right_panel`` logs and ignores it, so
+  ``switch_right_panel("mask_tracing")`` (a removed editor's key) or a typo such as
+  ``"dispaly"`` would do nothing, without an error. Every string literal passed to
+  ``switch_right_panel(...)`` or ``Panel.coerce(...)`` must be a key ``Panel.coerce``
+  accepts.
 
-The scan is syntactic (AST): it cannot follow an index through a variable, so it pins the
-call sites as written. The self-tests prove each rule can fail.
+The scan is syntactic (AST): it cannot follow an index or a key through a variable, so it
+pins the call sites as written. The self-tests prove each rule can fail. The ``Panel`` enum
+itself (values, keys, ``coerce``) is tested at the end.
 """
 
 from __future__ import annotations
 
 import ast
-import re
 import textwrap
 from collections.abc import Callable
 from pathlib import Path
+
+import pytest
+
+from app.gui.panels import Panel
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "app"
@@ -36,10 +40,6 @@ PAGE_ARGUMENT = frozenset({"setCurrentIndex", "widget"})
 PAGE_RESULT = frozenset({"currentIndex"})
 #: Comparisons that test a page index for a value.
 MATCHING = (ast.Eq, ast.NotEq, ast.In, ast.NotIn)
-#: The page keys of the two editors the Correct stage replaced.
-LEGACY_KEY = re.compile(r"\b(?:mask_tracing|skeleton_correction)\b", re.IGNORECASE)
-#: Nodes whose first statement, when a string, is their docstring.
-DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 
 
 def _is_right_panel(node: ast.AST) -> bool:
@@ -103,31 +103,41 @@ def right_panel_page_calls(source: str) -> int:
     return sum(_right_panel_call(node, methods) for node in ast.walk(ast.parse(source)))
 
 
-def _docstring_ids(tree: ast.Module) -> set[int]:
-    """``id()`` of every docstring constant of ``tree``."""
-    return {
-        id(first.value)
-        for node in ast.walk(tree)
-        if isinstance(node, DOCSTRING_OWNERS)
-        and node.body
-        and isinstance(first := node.body[0], ast.Expr)
-        and isinstance(first.value, ast.Constant)
-        and isinstance(first.value.value, str)
-    }
-
-
-def legacy_panel_keys(source: str) -> list[int]:
-    """Line numbers of string constants (docstrings excepted) naming a legacy page key."""
-    tree = ast.parse(source)
-    docstrings = _docstring_ids(tree)
-    return sorted(
-        node.lineno
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and id(node) not in docstrings
-        and LEGACY_KEY.search(node.value)
+def _takes_a_page_key(node: ast.AST) -> bool:
+    """``<x>.switch_right_panel(...)`` or ``Panel.coerce(...)``."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+        return False
+    if node.func.attr == "switch_right_panel":
+        return True
+    return (
+        node.func.attr == "coerce"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "Panel"
     )
+
+
+def literal_page_keys(source: str) -> list[tuple[int, str]]:
+    """``(line, key)`` of every string literal passed as the page of a key-taking call."""
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if _takes_a_page_key(node):
+            for argument in [*node.args[:1], *(k.value for k in node.keywords)]:
+                if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                    found.append((node.lineno, argument.value))
+    return sorted(found)
+
+
+def _accepted(key: str) -> bool:
+    try:
+        Panel.coerce(key)
+    except ValueError:
+        return False
+    return True
+
+
+def unknown_page_keys(source: str) -> list[int]:
+    """Line numbers where a literal page key is one ``Panel.coerce`` rejects."""
+    return [line for line, key in literal_page_keys(source) if not _accepted(key)]
 
 
 def _app_sources() -> dict[str, str]:
@@ -176,27 +186,25 @@ def test_the_index_scan_flags_int_literals_and_passes_panel_members() -> None:
     assert right_panel_page_calls(source) == 12
 
 
-def test_the_key_scan_flags_legacy_keys_but_not_docstrings() -> None:
+def test_the_key_scan_flags_keys_panel_rejects_and_passes_the_others() -> None:
     source = textwrap.dedent(
         '''\
-        """Module docstring: "mask_tracing" and "skeleton_correction" are gone."""
-
-
-        class Page:
-            """Keys like 'mask_tracing' were renamed."""
-
-            def show(self):
-                """Show "skeleton_correction"."""
-                self.switch_right_panel("mask_tracing")
-                Panel.coerce("SKELETON_CORRECTION")
-                message = f"go to {'mask_tracing'}"
-                "a later bare string naming skeleton_correction is code, not a docstring"
-                self.switch_right_panel("correct")
-                folder = "skeleton_corrections"
-                module = "app.gui.mask_tracing_interface"
+        """Docstring: "mask_tracing" and "gt_tracing" are gone."""
+        self.switch_right_panel("mask_tracing")
+        mw.switch_right_panel("gt_tracing")
+        self._mw.switch_right_panel("dispaly")
+        Panel.coerce("SKELETON_CORRECTION")
+        window.switch_right_panel(panel="nope")
+        mw.switch_right_panel("display")
+        Panel.coerce("CORRECT")
+        mw.switch_right_panel(Panel.VISUALIZATION)
+        mw.switch_right_panel(target)
+        other.coerce("mask_tracing")
+        message = "switch_right_panel('mask_tracing')"
         '''
     )
-    assert legacy_panel_keys(source) == [9, 10, 11, 12]
+    assert unknown_page_keys(source) == [2, 3, 4, 5, 6]
+    assert len(literal_page_keys(source)) == 7
 
 
 def test_no_int_literal_names_a_right_panel_page() -> None:
@@ -207,8 +215,51 @@ def test_no_int_literal_names_a_right_panel_page() -> None:
     assert offenders == {}, "name right_panel pages with app.gui.panels.Panel members"
 
 
-def test_no_legacy_page_key_is_left_in_app() -> None:
-    offenders = _offenders(_app_sources(), legacy_panel_keys)
+def test_every_literal_page_key_in_app_is_one_panel_accepts() -> None:
+    sources = _app_sources()
+    seen = sum(len(literal_page_keys(source)) for source in sources.values())
+    assert seen > 0, "the scan found no literal page key: it would pass vacuously"
+    offenders = _offenders(sources, unknown_page_keys)
     assert offenders == {}, (
-        "legacy right-panel keys (switch_right_panel ignores them): use Panel.CORRECT / 'correct'"
+        "switch_right_panel ignores a key Panel.coerce rejects: use a Panel member or its key"
     )
+
+
+# ------------------------------------------------------------- the Panel enum itself
+# (from test_foundation_runtime_panels_feedback.py at b9f7d19, A3 hand-over)
+
+
+def test_panel_values_pin_the_right_panel_contract():
+    assert [int(p) for p in Panel] == [0, 1, 2]
+    assert Panel.DISPLAY == 0
+    assert Panel.CORRECT == 1
+    assert Panel.VISUALIZATION == 2
+
+
+@pytest.mark.parametrize(
+    ("key", "panel"),
+    [
+        ("display", Panel.DISPLAY),
+        ("correct", Panel.CORRECT),
+        ("visualization", Panel.VISUALIZATION),
+    ],
+)
+def test_panel_key_round_trips_switch_keys(key, panel):
+    assert panel.key == key
+    assert Panel.coerce(key) is panel
+    assert Panel.coerce(key.upper()) is panel
+
+
+def test_panel_coerce_accepts_panels_and_indices():
+    assert Panel.coerce(Panel.VISUALIZATION) is Panel.VISUALIZATION
+    assert Panel.coerce(1) is Panel.CORRECT
+
+
+@pytest.mark.parametrize(
+    "bad",
+    # 3 and 4 were the removed editors' pages (no aliases); a key Panel does not know
+    [3, 4, "nope", "", 7, -1, None, 1.5],
+)
+def test_panel_coerce_rejects_unknown_values(bad):
+    with pytest.raises(ValueError):
+        Panel.coerce(bad)

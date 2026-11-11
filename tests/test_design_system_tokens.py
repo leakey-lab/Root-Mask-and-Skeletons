@@ -96,3 +96,10 @@ def test_focus_rule_applies_to_every_selector_of_a_list():
 
     rule = tokens.focus_rule("QPushButton#a, QPushButton#b", "#eceef5", width=2)
     assert rule == "QPushButton#a:focus, QPushButton#b:focus { border: 2px solid #eceef5; }"
+
+
+def test_rgba_turns_a_token_and_an_alpha_into_a_css_colour():
+    # from test_widgets_smoke.py::test_tokens_rgba at b9f7d19 (A6 hand-over)
+    from app.gui.widgets import tokens
+
+    assert tokens.rgba("#c39af6", 0.14) == "rgba(195, 154, 246, 0.14)"

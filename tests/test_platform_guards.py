@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.source_scan_support import parse
+
 ROOT = Path(__file__).resolve().parents[1]
 SCAN = [
     ROOT / "main.py",
@@ -31,7 +33,7 @@ def _rel(path: Path) -> str:
 
 
 def _parse(path: Path) -> ast.Module:
-    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return parse(path)  # once per process for all the scans (tests/source_scan_support.py)
 
 
 def _with_parents(tree: ast.Module) -> dict[ast.AST, ast.AST]:

@@ -3,14 +3,20 @@
 * ``docs/MODELS.md`` lists every checkpoint registered in ``app.models`` with its
   exact path and SHA-256, so users can verify downloaded weights.
 * ``docs/DATA_DICTIONARY.md`` documents every pinned metric CSV column verbatim.
+* ``README.md`` and ``docs/DATA_DICTIONARY.md`` name the GT files where
+  ``app.project_layout.ProjectLayout`` puts them (owner decision O1).
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
 
 from app.config import AREA_CSV_HEADERS, LENGTH_CSV_HEADERS
 from app.models import MODELS
+from app.project_layout import ProjectLayout
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,13 +52,19 @@ def test_model_card_states_the_weights_licence():
     assert "CC-BY-4.0" in (ROOT / "docs" / "MODELS.md").read_text(encoding="utf-8")
 
 
-def test_readme_documents_the_layers_and_the_gt_paths():
-    text = _read("README.md")
-    for row in (
-        "| Fix the model's mask of an image | Mask layer (area) |",
-        "| Fix the model's skeleton of an image | Skeleton layer (length) |",
-        "| Make labels to train a model | Classes layer |",
-    ):
-        assert row in text
-    for path in ("gt/mask/<stem>.png", "gt/skeletons/<stem>.png", "gt/<stem>.png"):
-        assert path in text
+def gt_paths() -> list[str]:
+    """The GT file of an image ``<stem>`` (mask, skeleton, class labels), relative to the
+    project folder, as ``ProjectLayout`` builds them (the one place that makes the paths)."""
+    layout = ProjectLayout("project")
+    paths = (
+        layout.gt_mask_path_for_stem("<stem>"),
+        layout.gt_skeleton_path_for_stem("<stem>"),
+        layout.gt_path("<stem>"),
+    )
+    return [os.path.relpath(path, layout.root).replace(os.sep, "/") for path in paths]
+
+
+@pytest.mark.parametrize("doc", ["README.md", "docs/DATA_DICTIONARY.md"])
+def test_the_docs_name_the_gt_paths_the_project_layout_writes(doc):
+    text = _read(doc)
+    assert [path for path in gt_paths() if f"`{path}`" not in text] == []

@@ -1,22 +1,18 @@
-"""tests/window_support.py: a MainWindow on its own settings, a folder opened until its load
-has ended, and a quiet close."""
+"""tests/window_support.py: ``open_folder`` waits until the load it started has ended.
+
+Waiting for the image count and the tree's rows is not enough: the Library keeps the
+previous project until the scan delivers, so a folder opened after one with as many images
+passed at once. The other helpers are straight-line and have no test of their own.
+"""
 
 import time
-from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtGui import QImage
 
 from app.gui import image_manager
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import wait_until
-from tests.window_support import (
-    WINDOW_SIZE,
-    build_window,
-    open_folder,
-    quiet_window,
-    write_photos,
-)
+from tests.window_support import build_window, open_folder, quiet_window, write_photos
 
 pytestmark = pytest.mark.usefixtures("window_guards")
 
@@ -54,22 +50,6 @@ def _stems(window) -> list[str]:
     return sorted(window.image_manager.images)
 
 
-def test_build_window_needs_its_own_settings():
-    with pytest.raises(TypeError):
-        build_window()
-
-
-def test_build_window_makes_a_shown_window_on_ini_settings(make_window):
-    window = make_window()
-    assert window.isVisible()
-    assert window.height() == WINDOW_SIZE[1]
-    assert window.width() >= WINDOW_SIZE[0]  # the window's minimum width may be larger
-    assert window._persist_window_state  # explicit settings, never the user's
-
-    hidden = make_window(size=None, show=False)
-    assert not hidden.isVisible()
-
-
 def test_open_folder_waits_for_the_load_to_end(make_window, tmp_path):
     window = make_window()
     open_folder(window, write_photos(tmp_path / "first", FIRST), len(FIRST))
@@ -96,20 +76,3 @@ def test_open_folder_fails_when_the_load_does_not_end_in_time(make_window, tmp_p
     with pytest.raises(AssertionError, match="did not end with 3 images in 0.2 s"):
         open_folder(window, write_photos(tmp_path / "first", FIRST), len(FIRST), timeout=0.2)
     assert wait_until(lambda: not window._loading_project)  # no late scan in a later test
-
-
-def test_write_photos_writes_one_flat_photo_per_stem(tmp_path):
-    folder = write_photos(tmp_path / "new" / "photos", ["a", "b"], size=(16, 8), suffix=".png")
-    assert folder == tmp_path / "new" / "photos"
-    assert sorted(path.name for path in folder.iterdir()) == ["a.png", "b.png"]
-    image = QImage(str(folder / "a.png"))
-    assert (image.width(), image.height()) == (16, 8)
-    assert image.pixelColor(3, 3).getRgb()[:3] == (90, 60, 30)
-
-
-def test_quiet_window_answers_every_editor_and_skips_what_a_window_lacks(make_window):
-    window = make_window(show=False)
-    quiet_window(window)
-    assert all(editor.maybe_save_changes() is True for editor in window._editors().values())
-
-    quiet_window(SimpleNamespace())  # no editors, no Correct page

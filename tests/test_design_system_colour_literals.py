@@ -24,7 +24,6 @@ _LITERALS = re.compile(
 # Colour literals allowed per module (counted at a1599e6, lowered since). Only ever lower.
 BASELINE = {
     "class_editor_dialog.py": 10,  # _ADD_PALETTE: default GT class colours (data, not chrome)
-    "main_window.py": 6,  # 0 today; lower once its integration work has landed
     "widgets/effects.py": 1,  # QColor(0, 0, 0, alpha): drop-shadow black
 }
 
