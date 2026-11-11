@@ -25,6 +25,7 @@ from PyQt6.QtGui import QColor, QImage, QMouseEvent, QWheelEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+import app.gui.correct as correct_package
 from app.gui.correct.editor import CorrectEditor
 from app.gui.correct.layer import MASK, SKELETON
 from app.gui.correct.mask_tools import argb_to_plane, fill_source, mask_lut
@@ -41,7 +42,18 @@ LEFT, NO_BUTTON = Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton
 SAVE = QMessageBox.StandardButton.Save
 DISCARD = QMessageBox.StandardButton.Discard
 CANCEL = QMessageBox.StandardButton.Cancel  # also "Keep editing" on the failed-save box
-UNDER_TEST = os.path.join("correct", "editor.py")
+#: Every module of the Correct package, and the skeleton layer's tools: an exception raised in
+#: a Qt slot is recorded (and fails the test) when its traceback passes through one of them.
+#: Until 2026-11-10 only ``correct/editor.py`` was named, so an exception raised in a layer,
+#: the session or a tool slot was printed and the test passed.
+UNDER_TEST = (
+    *(
+        os.path.join("correct", name)
+        for name in sorted(os.listdir(os.path.dirname(correct_package.__file__)))
+        if name.endswith(".py")
+    ),
+    os.path.join("gui", "skeleton_tools.py"),
+)
 _APP: QApplication | None = None
 
 
