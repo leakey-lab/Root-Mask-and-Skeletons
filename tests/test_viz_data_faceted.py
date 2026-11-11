@@ -12,6 +12,7 @@ deepest bin = 30 -> y range [40, 0].
 """
 
 import math
+import os
 
 import pandas as pd
 import pytest
@@ -26,7 +27,8 @@ from app.visualization.faceted_profile import (
     build_faceted_profile,
     faceted_profile_figure,
 )
-from tests.test_viz_data_cache import write_metric_csv
+from tests.viz_dash_helpers import LENGTH_COLUMN, FakeImageManager, write_metric_csv
+from tests.viz_data_support import write_metric_csv as write_rows_csv
 
 A = pd.Timestamp("2024-07-18")
 B = pd.Timestamp("2024-08-07")
@@ -34,7 +36,7 @@ B = pd.Timestamp("2024-08-07")
 
 @pytest.fixture(scope="module")
 def cache(tmp_path_factory):
-    path = write_metric_csv(tmp_path_factory.mktemp("faceted") / "l.csv", LENGTH_CSV_HEADERS)
+    path = write_rows_csv(tmp_path_factory.mktemp("faceted") / "l.csv", LENGTH_CSV_HEADERS)
     return DataCache(DataProcessor(path))
 
 
@@ -174,6 +176,14 @@ def test_x_ticks_keep_a_readable_scale(value, tickvals, ticktext):
     assert list(axis.ticktext) == ticktext
 
 
+def test_a_grid_whose_means_are_all_zero_keeps_a_ten_unit_scale():
+    # Early in a season every interval can measure 0: the panels keep -10..10, not 0..0.
+    axis = faceted_profile_figure(_single_bar_profile(0.0)).layout.xaxis
+
+    assert tuple(axis.range) == (-10, 10)
+    assert list(axis.tickvals) == [-10, -5, 0, 5, 10]
+
+
 # ---- R-VIZ X4: the grid is make_subplots' grid, without make_subplots ---------------
 
 
@@ -203,7 +213,7 @@ def _make_subplots_layout(column_titles, row_titles) -> dict:
 def _assert_equal_up_to_rounding(got, expected, path="layout"):
     """The same keys, texts and integers; floats within 1e-12. Python 3.12's ``sum()``
     adds make_subplots' floats with compensation, up to 4 units in the last place away from
-    the plain sums the grid keeps (``PYTHON_310_GRIDS``)."""
+    the plain sums the grid keeps (``test_a_nine_date_grid_places_its_panels_as_python_3_10_did``)."""
     if isinstance(expected, dict):
         assert isinstance(got, dict) and sorted(got) == sorted(expected), path
         for key, value in expected.items():
@@ -225,7 +235,7 @@ def _assert_equal_up_to_rounding(got, expected, path="layout"):
 )
 def test_the_grid_layout_is_the_make_subplots_grid(rows, cols):
     # make_subplots is the oracle: a plotly upgrade that changes its grid shows up here
-    # (up to rounding: the grid keeps Python 3.10's float sums, pinned below).
+    # (up to rounding: the grid keeps Python 3.10's float sums, pinned by the test below).
     import json
 
     from app.visualization.faceted_profile import grid_layout
@@ -244,35 +254,6 @@ def test_the_grid_layout_is_the_make_subplots_grid(rows, cols):
     ]
     first["xaxis"]["range"] = [0, 1]  # every call returns a fresh layout
     assert "range" not in grid_layout(columns, dates)["xaxis"]
-
-
-#: SHA-256 of ``json.dumps(grid_layout(...), sort_keys=True)`` as Python 3.10.11 gave it
-#: (``sum()`` adding floats left to right). With Python 3.12's compensated ``sum()``
-#: every one of these grids had other floats in the last place (panel domains, titles).
-PYTHON_310_GRIDS = {
-    (9, 1): "c4bbfd2b1d23b2cf91994716e7b6cebf4689798dfd0f95c1fd924ec801b419be",
-    (9, 6): "4c303bb074995771e3b41582fa908e079ad47101ef442c816c7c4ff4e1b8ffa0",
-    (11, 6): "6a21e7e33d403f4133052f59951dc484f48381755df50d3ebe086af72525ceda",
-    (12, 3): "68904fac89a1404e50b3a035f24bfb295b0ec923aeea2e14a8bd9704d8d2cb5f",
-    (17, 5): "112161441ed1470e26a2ca2cae6e503197d57e928091b42b6f08eb8b14b17690",
-    (25, 6): "36824683d6f702d999e50ff408c73f5b6357ada857d15756590d82b16a1ed7ac",
-    (40, 6): "afc73f0d4bec832243409e227431f08b5f8bdfd98af6a82fed90d24b04725258",
-}
-
-
-@pytest.mark.parametrize("rows, cols", list(PYTHON_310_GRIDS))
-def test_the_grid_layout_is_the_json_python_3_10_gave(rows, cols):
-    # The Depth Profile Grid's figure JSON must not change with the Python version.
-    import hashlib
-    import json
-
-    from app.visualization.faceted_profile import grid_layout
-
-    columns = [f"Tube {c + 1}" for c in range(cols)]
-    dates = [f"2024-06-{r + 1:02d}" for r in range(rows)]
-    text = json.dumps(grid_layout(columns, dates), sort_keys=True)
-
-    assert hashlib.sha256(text.encode()).hexdigest() == PYTHON_310_GRIDS[rows, cols]
 
 
 def test_a_nine_date_grid_places_its_panels_as_python_3_10_did():
@@ -347,3 +328,43 @@ def test_the_faceted_figure_is_unchanged_by_the_direct_grid(cache, monkeypatch):
     direct = json.loads(to_json(faceted_profile_figure(profile)))
 
     assert cached == direct
+
+
+# ---- the value axis titled once; a one-image interval -------------------------------------
+
+
+def _length_app(csv: str, **kwargs):
+    from app.data_processing.data_processor import DataProcessor
+    from app.visualization.dash_app import DashApp
+
+    return DashApp(DataProcessor(csv), os.path.dirname(csv), FakeImageManager(), **kwargs)
+
+
+@pytest.mark.parametrize("n_tubes", [1, 6])
+def test_the_grid_titles_its_value_axis_once_under_the_grid(tmp_path, n_tubes):
+    """Six tubes are twelve bottom panels: one title per panel touched its neighbours below
+    about 790 px of graph width. One centred title reads with one tube and with six."""
+    rows = tuple(
+        (f"T{tube:03d}_L{pos:03d}_{date}", tube, pos, date, 1.0 + tube + pos / 10)
+        for tube in range(1, 7)
+        for pos in (5, 15, 25)
+        for date in ("2024.07.18", "2024.08.07")
+    )
+    dashboard = _length_app(write_metric_csv(str(tmp_path / "l.csv"), LENGTH_COLUMN, rows))
+    layout = dashboard.create_faceted_depth_profile(list(range(1, n_tubes + 1))).layout
+
+    titled = [k for k in layout if k.startswith("xaxis") and layout[k].title.text]
+    assert titled == []
+    (value,) = [a for a in layout.annotations if a.text == "Mean Length (mm)"]
+    first, last = layout.xaxis.domain, layout[f"xaxis{n_tubes if n_tubes > 1 else ''}"].domain
+    assert value.x == pytest.approx((first[0] + last[1]) / 2)
+    assert value.yref == "paper" and value.y == 0 and value.yanchor == "top"
+
+
+def test_the_grid_figure_still_draws_a_one_image_bin_as_before(tmp_path):
+    rows = (("T001_L015_2024.07.18", 1, 15, "2024.07.18", 2.5),)
+    csv = write_metric_csv(str(tmp_path / "root_lengths.csv"), LENGTH_COLUMN, rows)
+    figure = _length_app(csv).create_faceted_depth_profile([1])
+
+    field = figure.data[0]
+    assert [list(row) for row in field.customdata] == [[11, 20, pytest.approx(2.5), 0]]

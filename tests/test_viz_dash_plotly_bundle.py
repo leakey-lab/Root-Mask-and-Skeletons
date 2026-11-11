@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -21,7 +22,7 @@ from plotly.offline import get_plotlyjs_version
 from app.visualization.dash_shell import ASSETS_DIR
 from tests.viz_dash_helpers import build_area_app, build_length_app
 
-BUNDLE = os.path.join(ASSETS_DIR, "plotly-basic.min.js")
+BUNDLE = Path(ASSETS_DIR) / "plotly-basic.min.js"
 THIRD_PARTY = os.path.join(ASSETS_DIR, "THIRD_PARTY.md")
 #: Trace types in plotly.js's basic bundle.
 BASIC_TRACES = {"scatter", "bar", "pie"}
@@ -151,3 +152,37 @@ def test_the_bundle_still_resizes_the_way_the_autosize_guard_expects(pattern):
     with open(BUNDLE, encoding="utf-8") as fh:
         source = fh.read()
     assert re.search(pattern, source, re.S)
+
+
+def test_the_bundled_plotly_js_picks_label_colours_by_wcag_contrast():
+    """A label inside a bar without a colour of its own is drawn white or dark grey by WCAG
+    contrast. Owner decision #51 (`theme.bar_labels` sets no label colour) rests on this rule of
+    the bundle: the test guards that premise when plotly.js is upgraded."""
+    # What the reference picks above model: a label inside a bar without a text colour
+    # of its own is Color.contrast(bar colour), which is the background (#fff) on a dark
+    # bar and the default line colour (#444) on a light one, and isDark compares WCAG
+    # ratios against those two.
+    bundle = BUNDLE.read_text(encoding="utf-8")
+    assert "plotly.js (basic - minified) v4.1.1" in bundle[:200]
+    is_dark = re.search(r"isDark:([\w$]+)", bundle)[1]
+    wcag = re.search(r"wcagContrast:([\w$]+)\}", bundle)[1]
+    background, line = re.search(r"\{background:([\w$]+),defaultLine:([\w$]+),", bundle).groups()
+    assert f"{is_dark}=e=>{wcag}(e,{background})>{wcag}(e,{line})" in bundle
+    assert re.search(
+        r'defaultLine="#444";[\w$]+\.lightLine="#eee";[\w$]+\.background="#fff"', bundle
+    )
+    contrast = re.search(r"contrast:([\w$]+),", bundle)[1]
+    names = {k: re.escape(v) for k, v in dict(c=contrast, d=is_dark, b=background, ln=line).items()}
+    assert re.search(  # contrast(colour) with no shift: dark -> background, else defaultLine
+        rf"([\w$]+)=[\w$]+\([\w$]+\({names['b']}\)\),([\w$]+)=[\w$]+\([\w$]+\({names['ln']}\)\),"
+        rf"{names['c']}=\(e,r,t\)=>[^;]*?{names['d']}\(e\)\?r\?[\w$]+\(e,r\):\1:"
+        rf"t\?[\w$]+\(e,-t\):\2\)",
+        bundle,
+    )
+    # The bar trace's inside-label rule (bar/style.js determineInsideTextFont); the pie
+    # trace has a look-alike rule of its own, which this pattern does not match.
+    bar_rule = (
+        r"_input\.textfont===void 0\|\|[\w$]+\._input\.textfont\.color===void 0[^;]*;"
+        r"return [\w$]+&&\([\w$]+=\{color:[\w$]+\.contrast\([\w$]+\),"
+    )
+    assert len(re.findall(bar_rule, bundle)) == 1

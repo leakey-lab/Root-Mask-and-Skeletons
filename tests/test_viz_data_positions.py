@@ -16,19 +16,10 @@ import pytest
 from app.config import LENGTH_CSV_HEADERS
 from app.data_processing.data_processor import DataProcessor
 from app.visualization.dash_data_cache import DataCache
-from app.visualization.dash_visualizations import DashVisualizations
+from tests.viz_data_support import Charts as _Charts
 
 SHALLOW = pd.Timestamp("2024-07-18")
 DEEP = pd.Timestamp("2024-08-07")
-
-
-class _Charts(DashVisualizations):
-    """Minimal host for the DashVisualizations mixin (the attributes DashApp provides)."""
-
-    def __init__(self, processor):
-        self.data_processor = processor
-        self.data_cache = DataCache(processor)
-        self.available_images = {}
 
 
 def _write_csv(path, rows):

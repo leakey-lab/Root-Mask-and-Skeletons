@@ -17,73 +17,15 @@ from tests.viz_dash_helpers import (
     build_length_app,
     call_callback,
     call_clientside,
-    clientside_function,
-    component_ids,
     walk_components,
 )
 
-# Component ids and callback outputs that existed before the shell refactor. They
-# are a public contract (other modules, saved browser state, the Dash renderer):
-# the refactor may add ids / callbacks but must keep every one of these. The area
-# dashboard has the length page (it charts area in the length views), so it keeps
-# them too; the ids it had before are among them.
-LENGTH_IDS = {
-    "add-range-btn", "cached-data", "clear-all-btn", "click-data", "faceted-date-selector",
-    "faceted-dates-store", "faceted-options-card", "faceted-selection-info",
-    "faceted-tube-selector", "faceted-tubes-store", "growth-viz-options", "image-container",
-    "legend-visible-store", "main-graph", "select-all-btn", "selected-tubes-display",
-    "selected-tubes-store", "toggle-legend-btn", "tube-date-availability", "tube-manual-entry",
-    "tube-multiselect", "tube-range-from", "tube-range-to", "tube-selection-card",
-    "tube-selection-tabs", "tube-selector", "view-selector", "viz-controls",
-    "viz-controls-collapse", "viz-controls-toggle", "viz-options-card", "viz-resize-dummy",
-}  # fmt: skip
-LENGTH_CALLBACKS = {
-    "viz-controls-collapse.is_open": ({"viz-controls-toggle.n_clicks"}, {"viz-controls-collapse.is_open"}),
-    "viz-resize-dummy.data": ({"view-selector.value", "viz-controls-collapse.is_open"}, set()),
-    "..tube-selection-card.style...viz-options-card.style...tube-multiselect.options..."
-    "faceted-options-card.style...faceted-tube-selector.options...faceted-date-selector.options..":
-        ({"view-selector.value"}, set()),
-    "..faceted-tubes-store.data...faceted-dates-store.data...faceted-selection-info.children..."
-    "tube-date-availability.children..":
-        ({"faceted-date-selector.value", "faceted-tube-selector.value"}, set()),
-    "selected-tubes-store.data": (
-        {"add-range-btn.n_clicks", "clear-all-btn.n_clicks", "select-all-btn.n_clicks",
-         "tube-manual-entry.value", "tube-multiselect.value"},
-        {"selected-tubes-store.data", "tube-range-from.value", "tube-range-to.value"},
-    ),
-    "selected-tubes-display.children": ({"selected-tubes-store.data"}, set()),
-    "legend-visible-store.data": ({"toggle-legend-btn.n_clicks"}, {"legend-visible-store.data"}),
-    "..main-graph.figure...click-data.children...tube-selector.style...tube-selector.options..."
-    "main-graph.style...image-container.style..": (
-        {"faceted-dates-store.data", "faceted-tubes-store.data", "growth-viz-options.value",
-         "legend-visible-store.data", "main-graph.clickData", "selected-tubes-store.data",
-         "tube-selector.value", "view-selector.value"},
-        set(),
-    ),
-    "image-container.children": (
-        {"main-graph.hoverData"}, {"tube-selector.value", "view-selector.value"}
-    ),
-}  # fmt: skip
+# Every id a callback names is on the served page: tests/test_viz_dash_wiring.py.
 
 
 @pytest.fixture
 def length_app(tmp_path):
     return build_length_app(tmp_path)
-
-
-def _specs(items) -> set[str]:
-    return {f"{i['id']}.{i['property']}" for i in items}
-
-
-@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
-def test_refactor_keeps_every_component_id_and_callback(tmp_path, builder):
-    dash = builder(tmp_path).app
-    assert LENGTH_IDS <= component_ids(dash.layout)
-    for output, (inputs, state) in LENGTH_CALLBACKS.items():
-        assert output in dash.callback_map, f"callback writing {output} disappeared"
-        spec = dash.callback_map[output]
-        assert inputs <= _specs(spec["inputs"]), output
-        assert state <= _specs(spec["state"]), output
 
 
 def _served_layout(dash) -> dict:
@@ -155,18 +97,6 @@ def test_chart_loading_wrapper_is_a_flex_container(tmp_path, builder):
 # The strip callbacks run in the browser (R-VIZ X2): as server callbacks their
 # responses raced the new figure's, which was then drawn at the old size and again
 # at the new one. They are run here in Qt's JavaScript engine.
-
-STRIP_OUTPUTS = (
-    "viz-controls-collapse.is_open",
-    "viz-controls.style",
-    "viz-controls-caret.children",
-)
-
-
-@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
-@pytest.mark.parametrize("output", STRIP_OUTPUTS)
-def test_the_strip_changes_in_the_browser_not_after_a_server_round_trip(tmp_path, builder, output):
-    assert clientside_function(builder(tmp_path).app, output)["clientside_function"]
 
 
 @pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
@@ -350,13 +280,6 @@ def _select_plotted_tube(dash, view, current, options=None):
         changed=["view-selector.value"],
     )  # fmt: skip
     return out["tube-selector"]["value"]
-
-
-@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
-def test_the_per_tube_selection_runs_in_the_browser(tmp_path, builder):
-    # As a server callback, every view switch waited for its answer (almost always "no
-    # change") before it asked for the new figure.
-    assert clientside_function(builder(tmp_path).app, "tube-selector.value")["clientside_function"]
 
 
 @pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
@@ -559,3 +482,80 @@ def test_a_view_shown_again_sends_the_same_figure(tmp_path, monkeypatch, builder
 
     assert again == first
     assert plain == first
+
+
+# ---- FR-15: the notice of the rows left out of the charts -------------------------------
+
+
+def _find_component(component, component_id):
+    if getattr(component, "id", None) == component_id:
+        return component
+    children = getattr(component, "children", None)
+    if isinstance(children, (list, tuple)):
+        for child in children:
+            found = _find_component(child, component_id)
+            if found is not None:
+                return found
+    elif children is not None and not isinstance(children, str):
+        return _find_component(children, component_id)
+    return None
+
+
+def test_dashboard_page_shows_the_exclusions_notice_only_when_rows_were_left_out():
+    from app.data_processing.data_processor import RowExclusions
+    from app.visualization.dash_metric_layout import LENGTH_SHELL
+    from app.visualization.dash_shell import DashboardShell, exclusions_note
+
+    class Processor:
+        exclusions = RowExclusions(failed=2, bad_name=0, unreadable=0)
+
+    note = exclusions_note(Processor())
+    assert note and note.startswith("2 rows are not shown")
+    assert exclusions_note(object()) is None
+
+    shell = DashboardShell(LENGTH_SHELL)
+    with_note = shell.page(controls=[], chart=[], notice=note)
+    assert _find_component(with_note, "viz-data-notice").children == note
+    assert _find_component(shell.page(controls=[], chart=[]), "viz-data-notice") is None
+
+
+@pytest.mark.parametrize("builder", [build_length_app, build_area_app], ids=["length", "area"])
+def test_a_dashboard_tells_the_page_which_rows_it_left_out(tmp_path, builder):
+    # The served page of a dashboard over a CSV with a failed measurement carries the
+    # sentence under its header; a dashboard over a clean CSV carries none.
+    from tests.viz_dash_helpers import AREA_COLUMN, LENGTH_COLUMN
+
+    clean = builder(tmp_path)
+    assert (
+        _find(
+            _served_layout(clean.app), lambda n: n.get("props", {}).get("id") == "viz-data-notice"
+        )
+        is None
+    )
+
+    column = LENGTH_COLUMN if builder is build_length_app else AREA_COLUMN
+    name = "root_lengths.csv" if builder is build_length_app else "root_areas.csv"
+    csv = tmp_path / "failed" / name
+    csv.parent.mkdir()
+    csv.write_text(
+        f"Image,Tube,Position,Date,Time,{column},Error\n"
+        "A_T001_L005_2024.07.18_120000_001,1,5,2024.07.18,120000,2.5,\n"
+        "A_T001_L006_2024.07.18_120000,,,,,0,cannot identify image file\n",
+        encoding="utf-8",
+    )
+    from app.data_processing.data_processor import DataProcessor
+    from app.data_processing.data_processor_area import DataProcessorArea
+    from app.visualization.dash_app import DashApp
+    from app.visualization.dash_app_area import DashAppArea
+
+    if builder is build_length_app:
+        dashboard = DashApp(DataProcessor(str(csv)), str(csv.parent))
+    else:
+        dashboard = DashAppArea(DataProcessorArea(str(csv)), str(csv.parent))
+    notice = _find(
+        _served_layout(dashboard.app), lambda n: n.get("props", {}).get("id") == "viz-data-notice"
+    )
+
+    assert notice["props"]["children"] == (
+        "1 row is not shown: 1 failed measurement (see the CSV's Error column)."
+    )

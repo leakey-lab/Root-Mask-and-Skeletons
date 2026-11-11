@@ -15,13 +15,15 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtCore import QCoreApplication, QEvent, QObject, QUrl, pyqtSignal
+from PyQt6.QtCore import QCoreApplication, QEvent, QObject, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QSurface
 from PyQt6.QtWebEngineCore import QWebEngineDownloadRequest, QWebEnginePage
 from PyQt6.QtWidgets import QWidget
 
 from app.visualization._viz_server import _DashServerThreadBase
 from app.visualization.viz_window import DashVizWindow, require_rows
 from tests.qt_teardown import delete_widgets, flush_deleted
+from tests.qt_wait import wait_until
 
 DownloadState = QWebEngineDownloadRequest.DownloadState
 TerminationStatus = QWebEnginePage.RenderProcessTerminationStatus
@@ -33,16 +35,6 @@ def pump(seconds: float) -> None:
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete.value)
         QCoreApplication.processEvents()
         time.sleep(0.005)
-
-
-def wait_until(predicate, timeout: float = 5.0) -> bool:
-    end = time.perf_counter() + timeout
-    while time.perf_counter() < end:
-        QCoreApplication.processEvents()
-        if predicate():
-            return True
-        time.sleep(0.005)
-    return bool(predicate())
 
 
 def _status(port: int) -> int:
@@ -367,21 +359,6 @@ def test_a_build_that_exits_is_reported_in_place_with_its_traceback(make_window,
     assert any(r.exc_info and r.exc_info[0] is SystemExit for r in caplog.records)
 
 
-def test_the_build_worker_uses_the_shared_thread_error_boundary(qapp):
-    # One boundary for every worker (app.workers): the build worker only words its message.
-    from app.visualization.viz_window import DashInitWorker
-    from app.workers import GuardedThread
-
-    assert issubclass(DashInitWorker, GuardedThread)
-    assert DashInitWorker.run is GuardedThread.run
-    built = []
-    worker = DashInitWorker(lambda: ("processor", "dash app"))
-    worker.built.connect(lambda processor, dash_app: built.append((processor, dash_app)))
-    worker.failed.connect(built.append)
-    worker.run()
-    assert built == [("processor", "dash app")]
-
-
 def test_an_unchartable_csv_is_reported_with_the_processors_reason():
     # "No data found in CSV file" was all a user saw, also for a CSV whose
     # measurements had all failed or that lacked a column.
@@ -626,8 +603,8 @@ def test_prewarm_imports_loads_the_dashboard_stack():
     ("platform", "environ", "surface"),
     [
         ("windows", {}, "Direct3DSurface"),
-        # the backend tables: tests/test_startup_environment.py (Windows),
-        # tests/test_qt_environment_linux_quick.py (Linux)
+        # the backend tables: tests/test_qt_environment.py; the X11 dashboard: the end of
+        # this file
         ("windows", {"QSG_RHI_BACKEND": "opengl"}, None),  # the browser draws through OpenGL
         ("windows", {"QT_QUICK_BACKEND": "software"}, None),  # no RHI at all
         ("offscreen", {}, None),
@@ -673,3 +650,86 @@ def test_a_native_dashboard_gets_its_own_direct3d_window(make_window, monkeypatc
     assert window.testAttribute(Qt.WidgetAttribute.WA_NativeWindow)
     assert window.windowHandle() is not None
     assert window.windowHandle().surfaceType() == direct3d
+
+
+# --------------------------------------------------------------------------- #
+#  The length and area windows hand the open project's folder to their build
+# --------------------------------------------------------------------------- #
+METRICS = ["length", "area"]
+
+
+@pytest.mark.parametrize(
+    "module, builder_name",
+    [
+        ("app.visualization.root_length_visulization", "RootLengthVisualization"),
+        ("app.visualization.root_area_visualization", "RootAreaVisualization"),
+    ],
+    ids=METRICS,
+)
+def test_the_window_hands_the_loaded_projects_root_to_the_build(tmp_path, module, builder_name):
+    # The root is read on the GUI thread, where the build is set up; the worker gets a string.
+    import importlib
+
+    cls = getattr(importlib.import_module(module), builder_name)
+    manager = SimpleNamespace(original_folder=str(tmp_path / "trial"), images={})
+    window = SimpleNamespace(
+        csv_path=str(tmp_path / "trial" / "mask" / "root_areas.csv"),
+        save_directory=str(tmp_path / "trial" / "mask"),
+        image_manager=manager,
+    )
+
+    build = cls._dashboard_builder(window)
+
+    assert build.keywords == {"project_root": os.path.normpath(str(tmp_path / "trial"))}
+    assert build.args[2] is manager
+
+
+def test_the_window_without_a_project_keeps_the_lookup_above_the_csv(tmp_path):
+    from app.visualization.root_length_visulization import RootLengthVisualization
+
+    window = SimpleNamespace(
+        csv_path=str(tmp_path / "root_lengths.csv"),
+        save_directory=str(tmp_path),
+        image_manager=None,
+    )
+
+    assert RootLengthVisualization._dashboard_builder(window).keywords == {"project_root": None}
+
+
+@pytest.mark.parametrize("metric", METRICS)
+def test_a_builder_refuses_a_csv_without_rows_with_the_processors_reason(tmp_path, metric):
+    from app.visualization.root_area_visualization import build_area_dashboard
+    from app.visualization.root_length_visulization import build_length_dashboard
+
+    column, build = {
+        "length": ("Length (mm)", build_length_dashboard),
+        "area": ("Area (mm²)", build_area_dashboard),
+    }[metric]
+    csv = tmp_path / "metric.csv"
+    csv.write_text(f"Image,Tube,Position,Date,Time,{column},Error\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="The CSV has no measurement rows."):
+        build(str(csv), str(tmp_path), None)
+
+
+# --------------------------------------------------------------------------- #
+#  Linux on X11: a native child window with an OpenGL surface (KNOWN_ISSUES D8)
+# --------------------------------------------------------------------------- #
+def test_an_x11_dashboard_gets_its_own_opengl_window(qapp, tmp_path, monkeypatch):
+    import app.visualization.viz_window as vw
+
+    opengl = QSurface.SurfaceType.OpenGLSurface
+    real = vw.native_child_surface
+    monkeypatch.setattr(
+        vw, "native_child_surface", lambda platform=None, environ=None: real("xcb", {})
+    )
+    csv_path = tmp_path / "root_lengths.csv"
+    csv_path.write_text("Image,Length (mm)\n", encoding="utf-8")
+
+    window = _Dashboard(str(csv_path), FakeProfile())
+    try:
+        assert window.testAttribute(Qt.WidgetAttribute.WA_NativeWindow)
+        assert window.windowHandle() is not None
+        assert window.windowHandle().surfaceType() == opengl
+    finally:
+        delete_widgets([window], close=False, prepare=lambda board: board.cleanup_server())

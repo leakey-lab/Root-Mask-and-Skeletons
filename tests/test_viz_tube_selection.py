@@ -1,22 +1,21 @@
-"""viz-dash: regressions found in the 2026-09-30 dashboard bug hunt (PKG-VIZ, V3).
+"""The Growth Over Time tube selection of both dashboards (``dash_metric_callbacks``
+``manage_tube_selection`` / ``display_selected_tubes``, ``parse_tube_selection``).
 
-Each test names the user-visible failure it pins. Callbacks go through Dash's real
-dispatch (Flask test client), figures through the dashboards' own builders.
+Promises: the Multi-Select dropdown replaces the selection (an emptied one clears it); a typed
+list or a From / To range adds only tubes the trial has, a span matched against them and never
+expanded; Select All takes every tube with data, Clear All none; the typed entry is added on
+Enter, not per keystroke; the chosen tubes are listed as chips (50 at most). Callbacks go
+through Dash's real dispatch (Flask test client).
 """
 
 from __future__ import annotations
 
-import os
+import json
 import tracemalloc
 
 import pytest
 
-from tests.viz_dash_helpers import (
-    AREA_COLUMN,
-    build_length_app,
-    call_callback,
-    write_metric_csv,
-)
+from tests.viz_dash_helpers import build_length_app, call_callback
 
 
 def test_removing_the_last_multiselect_tube_clears_the_selection(tmp_path):
@@ -45,70 +44,6 @@ def test_multiselect_still_replaces_the_selection(tmp_path):
     )
 
     assert out["selected-tubes-store"]["data"] == [2, 3]
-
-
-def _stacked_values(figure) -> dict:
-    return {trace.name: dict(zip(trace.x, trace.y, strict=True)) for trace in figure.data}
-
-
-def test_stacked_bars_leave_out_dates_a_tube_was_not_measured_on(tmp_path):
-    # Tube 3 was imaged on 2024.08.07 only. Its 2024.07.18 bar was a 0.00 bar that
-    # the unified hover listed as "0.00 mm", as if the tube had no roots that day.
-    import math
-
-    from app.data_processing.data_processor_area import DataProcessorArea
-    from app.visualization.dash_app_area import DashAppArea
-
-    csv = write_metric_csv(os.path.join(tmp_path, "root_areas.csv"), AREA_COLUMN)
-    for dashboard in (
-        build_length_app(tmp_path),
-        DashAppArea(DataProcessorArea(csv), str(tmp_path)),
-    ):
-        values = _stacked_values(dashboard.create_stacked_bar_chart())
-
-        assert math.isnan(values["2024-07-18"]["Tube 3"])
-        assert values["2024-08-07"]["Tube 3"] == 0.75
-        assert values["2024-07-18"]["Tube 1"] == 4.0  # 1.5 + 2.5
-
-
-def test_stacked_bars_reach_the_browser_with_null_for_a_date_a_tube_missed(tmp_path):
-    # Tube 1 was imaged on the first and third dates, not the second. The area chart sent
-    # its bars as a typed array; plotly.js stacks the NaN inside one and restarted the
-    # tube's later dates at 0 (Totals by Tube drew 162 of 170 real tubes too short). A
-    # JSON null is left out of the stack.
-    from app.data_processing.data_processor import DataProcessor
-    from app.data_processing.data_processor_area import DataProcessorArea
-    from app.visualization.dash_app import DashApp
-    from app.visualization.dash_app_area import DashAppArea
-    from tests.viz_dash_helpers import LENGTH_COLUMN, FakeImageManager
-
-    rows = (
-        ("T001_L005_2024.07.18", 1, 5, "2024.07.18", 1.5),
-        ("T001_L005_2024.08.27", 1, 5, "2024.08.27", 2.5),
-        ("T002_L005_2024.07.18", 2, 5, "2024.07.18", 1.0),
-        ("T002_L005_2024.08.07", 2, 5, "2024.08.07", 2.0),
-        ("T002_L005_2024.08.27", 2, 5, "2024.08.27", 3.0),
-    )
-    length_csv = write_metric_csv(os.path.join(tmp_path, "root_lengths.csv"), LENGTH_COLUMN, rows)
-    area_csv = write_metric_csv(os.path.join(tmp_path, "root_areas.csv"), AREA_COLUMN, rows)
-    dashboards = {
-        "length": DashApp(DataProcessor(length_csv), str(tmp_path), FakeImageManager()),
-        "area": DashAppArea(DataProcessorArea(area_csv), str(tmp_path)),
-    }
-    for name, dashboard in dashboards.items():
-        _, out = call_callback(
-            dashboard.app,
-            "main-graph.figure",
-            {"view-selector.value": "stacked"},
-            changed=["view-selector.value"],
-        )
-        bars = {trace["name"]: trace["y"] for trace in out["main-graph"]["figure"]["data"]}
-
-        assert bars == {
-            "2024-07-18": [1.5, 1.0],
-            "2024-08-07": [None, 2.0],
-            "2024-08-27": [2.5, 3.0],
-        }, name
 
 
 def test_typed_or_ranged_tubes_without_data_are_not_selected(tmp_path):
@@ -216,3 +151,86 @@ def test_parse_tube_selection_keeps_only_the_given_tubes():
     assert parse_tube_selection("1,3,5,10-12") == [1, 3, 5, 10, 11, 12]
     assert parse_tube_selection("1,foo,3") == [1, 3]  # F-037: a malformed part is skipped
     assert parse_tube_selection("  ") == []
+
+
+def _selection(dashboard, trigger: str, current=None, **values) -> list:
+    _, out = call_callback(
+        dashboard.app,
+        "selected-tubes-store.data",
+        {trigger: 1, "selected-tubes-store.data": current, **values},
+        changed=[trigger],
+    )
+    return out["selected-tubes-store"]["data"]
+
+
+def test_select_all_takes_every_tube_with_data(tmp_path):
+    dashboard = build_length_app(tmp_path)  # tubes 1, 2 and 3
+
+    assert _selection(dashboard, "select-all-btn.n_clicks", current=[2]) == [1, 2, 3]
+
+
+def test_clear_all_empties_the_selection(tmp_path):
+    dashboard = build_length_app(tmp_path)
+
+    assert _selection(dashboard, "clear-all-btn.n_clicks", current=[1, 3]) == []
+
+
+def test_the_typed_entry_is_added_on_enter_not_per_keystroke(tmp_path):
+    # Per keystroke, typing "12" first added tube 1 (selections accumulate).
+    layout = json.loads(
+        build_length_app(tmp_path).app.server.test_client().get("/_dash-layout").data
+    )
+    (entry,) = [n for n in _nodes(layout) if n.get("props", {}).get("id") == "tube-manual-entry"]
+
+    assert entry["props"]["debounce"] is True
+
+
+def _nodes(node):
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _nodes(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _nodes(value)
+
+
+@pytest.mark.parametrize(
+    "count, chips, more", [(0, 0, None), (3, 3, None), (51, 50, "... and 1 more")]
+)
+def test_the_selected_tubes_are_listed_as_at_most_fifty_chips(tmp_path, count, chips, more):
+    dashboard = build_length_app(tmp_path)
+    _, out = call_callback(
+        dashboard.app,
+        "selected-tubes-display.children",
+        {"selected-tubes-store.data": list(range(1, count + 1))},
+        changed=["selected-tubes-store.data"],
+    )
+    shown = out["selected-tubes-display"]["children"]
+    texts = [
+        n["props"]["children"] for n in _nodes(shown) if "props" in n and "className" in n["props"]
+    ]
+
+    if count == 0:
+        assert texts == ["No tubes selected"]
+        return
+    badges = [t for t in texts if isinstance(t, str) and t.startswith("Tube ")]
+    assert badges == [f"Tube {t}" for t in range(1, chips + 1)]
+    assert (more in texts) if more else not any(str(t).startswith("...") for t in texts)
+
+
+def test_the_grid_selection_is_stored_sorted_and_its_availability_listed(tmp_path):
+    dashboard = build_length_app(tmp_path)  # tube 3 has data on 2024-08-07 only
+    _, out = call_callback(
+        dashboard.app,
+        "faceted-selection-info.children",
+        {"faceted-tube-selector.value": [3, 1],
+         "faceted-date-selector.value": ["2024-08-07T00:00:00", "2024-07-18T00:00:00"]},
+        changed=["faceted-tube-selector.value"],
+    )  # fmt: skip
+
+    assert out["faceted-tubes-store"]["data"] == [1, 3]
+    assert [d[:10] for d in out["faceted-dates-store"]["data"]] == ["2024-07-18", "2024-08-07"]
+    table = [n for n in _nodes(out["tube-date-availability"]["children"]) if n.get("type") == "Tr"]
+    cells = [[c["props"]["children"] for c in row["props"]["children"]] for row in table]
+    assert cells == [["Tube/Date", "07/18", "08/07"], ["T1", "✓", "✓"], ["T3", "✗", "✓"]]

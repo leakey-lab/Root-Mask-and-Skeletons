@@ -82,3 +82,20 @@ def test_public_names_still_resolve():
     """)
     assert result.returncode == 0, result.stderr[-2000:]
     assert result.stdout.strip() == "ok"
+
+
+def test_the_dashboard_stack_loads_no_model_image_or_qt_stack():
+    # The first dashboard of a session imports the stack on its build worker: torch (or
+    # OpenCV, scikit-image, SciPy) there would add seconds to that open, and the Dash modules
+    # are Qt-free. (From the CQ-07 split's check, without its comparison with the unsplit module.)
+    result = _run_python("""
+        import sys
+        import app.data_processing.data_processor
+        import app.data_processing.data_processor_area
+        import app.visualization.dash_app
+        import app.visualization.dash_app_area
+        heavy = ("torch", "torchvision", "cv2", "skimage", "scipy", "PyQt6")
+        print(sorted(name for name in heavy if name in sys.modules))
+    """)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.strip() == "[]"

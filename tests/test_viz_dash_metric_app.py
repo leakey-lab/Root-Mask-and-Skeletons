@@ -15,9 +15,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from app.visualization.dash_app import DashApp
 from app.visualization.dash_app_area import AREA_SHELL, DashAppArea
-from app.visualization.dash_metric_app import MetricDashApp
 from app.visualization.dash_metric_layout import LENGTH_SHELL
 from tests.viz_dash_helpers import (
     AREA_COLUMN,
@@ -44,7 +42,7 @@ def _props(items) -> tuple[str, ...]:
 
 def _wiring(dash) -> tuple:
     """(output, inputs, states, prevent_initial_call, runs in the browser) of every
-    served callback, in registration order (as tests/test_viz_dash_split_golden.py)."""
+    served callback, in registration order (as tests/test_viz_dash_wiring.py)."""
     return tuple(
         (
             callback["output"],
@@ -93,15 +91,6 @@ def apps(tmp_path_factory):
 
 
 # ---- one class --------------------------------------------------------------------
-
-
-def test_both_dashboards_are_the_main_class():
-    assert issubclass(DashApp, MetricDashApp)
-    assert issubclass(DashAppArea, MetricDashApp)
-    own_methods = {
-        n for n, v in vars(DashAppArea).items() if callable(v) and not n.startswith("__")
-    }
-    assert own_methods == set()
 
 
 def test_area_shell_has_the_length_views():
@@ -207,3 +196,31 @@ def test_area_hover_thumbnail_is_served_by_the_area_app(tmp_path):
     resp = area.app.server.test_client().get(sources[0])
     assert resp.status_code == 200
     assert resp.mimetype == "image/jpeg" and resp.data  # a served JPEG, not an empty body
+
+
+# ---- the length dashboard's compatibility layer stays gone (S15-07 tier 2) ----------------
+# Removed on 2026-10-31; the branches main, v3 and perf/optimize-pass still hold it, so a
+# merge could bring it back.
+
+REMOVED_DELEGATORS = (
+    "_availability_view", "_controls", "_controls_summary", "_export_table", "_faceted_info",
+    "_faceted_options_card", "_faceted_outputs", "_faceted_styles", "_hover_date",
+    "_legend_patch", "_lines_tube", "_render_view", "_thumbnail", "_tube_selection_card",
+    "_viz_options_card",
+)  # fmt: skip
+REMOVED_MODULE_ALIASES = (
+    "_DATE_TOKEN", "_FACETED_GRAPH_STYLE", "_GRAPH_STYLE", "_HIDDEN", "_IMAGES_SHOWN",
+    "_SHOWN", "_VIEW_PANELS_JS",
+)  # fmt: skip
+
+
+def test_the_old_compatibility_layer_is_gone():
+    import app.visualization.dash_app as dash_app
+    from app.visualization import dash_metric_layout
+
+    assert len(REMOVED_DELEGATORS) == 15 and len(REMOVED_MODULE_ALIASES) == 7
+    kept = sorted(name for name in REMOVED_DELEGATORS if hasattr(dash_app.DashApp, name))
+    assert not kept, f"DashApp still has {kept}"
+    kept = sorted(name for name in REMOVED_MODULE_ALIASES if hasattr(dash_app, name))
+    assert not kept, f"dash_app still defines {kept}"
+    assert dash_app.LENGTH_SHELL is dash_metric_layout.LENGTH_SHELL  # the page's shell

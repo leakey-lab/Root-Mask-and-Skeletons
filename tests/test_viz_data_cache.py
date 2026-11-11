@@ -13,7 +13,6 @@ The fixture is small enough to derive every expected value by hand:
     2     9         B     5.0       tube 2, date B: L1-10 = {5}
 """
 
-import csv
 import math
 
 import pandas as pd
@@ -23,41 +22,11 @@ from app.config import AREA_CSV_HEADERS, LENGTH_CSV_HEADERS
 from app.data_processing.data_processor import DataProcessor
 from app.data_processing.data_processor_area import DataProcessorArea
 from app.visualization.dash_data_cache import DataCache
+from tests.viz_data_support import ROWS, write_metric_csv
 
 A = pd.Timestamp("2024-07-18")
 B = pd.Timestamp("2024-08-07")
-ROWS = [
-    (1, 5, "2024.07.18", 2.0),
-    (1, 7, "2024.07.18", 4.0),
-    (1, 25, "2024.07.18", 10.0),
-    (2, 12, "2024.07.18", 6.0),
-    (2, 18, "2024.07.18", 8.0),
-    (1, 3, "2024.08.07", 1.0),
-    (1, 14, "2024.08.07", 3.0),
-    (2, 9, "2024.08.07", 5.0),
-]
 SQRT2 = math.sqrt(2.0)
-
-
-def write_metric_csv(path, headers, rows=ROWS):
-    """Write ``rows`` (tube, position, date, value) with the app's CSV headers."""
-    value_column = headers[5]
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=headers)
-        writer.writeheader()
-        for tube, position, date, value in rows:
-            writer.writerow(
-                {
-                    "Image": f"CAM_T{tube:03d}_L{position:03d}_{date}_120000_001",
-                    "Tube": tube,
-                    "Position": position,
-                    "Date": date,
-                    "Time": "12:00:00",
-                    value_column: value,
-                    "Error": "",
-                }
-            )
-    return str(path)
 
 
 @pytest.fixture(params=["length", "area"])

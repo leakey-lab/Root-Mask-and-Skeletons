@@ -3,6 +3,8 @@ and a measurement date has one colour (a place on the blue ramp) in every view."
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.config import AREA_CSV_HEADERS, LENGTH_CSV_HEADERS
@@ -10,17 +12,13 @@ from app.data_processing.data_processor import DataProcessor
 from app.data_processing.data_processor_area import DataProcessorArea
 from app.visualization import theme
 from app.visualization.dash_app_area import AREA_SHELL, DashAppArea
-from app.visualization.dash_data_cache import DataCache
 from app.visualization.dash_metric_layout import LENGTH_SHELL
-from app.visualization.dash_visualizations import DashVisualizations
-from tests.test_viz_data_cache import ROWS, write_metric_csv
+from tests.viz_dash_helpers import build_area_app, build_length_app
+from tests.viz_data_support import ROWS, write_metric_csv
+from tests.viz_data_support import Charts as _Charts
 
-
-class _Charts(DashVisualizations):
-    def __init__(self, processor):
-        self.data_processor = processor
-        self.data_cache = DataCache(processor)
-        self.available_images = {}
+BUILDERS = [build_length_app, build_area_app]
+METRICS = ["length", "area"]
 
 
 @pytest.fixture
@@ -116,3 +114,39 @@ def test_more_than_13_dates_stay_on_the_ramp(tmp_path):
     colours = [t.marker.color for t in charts.create_stacked_bar_chart().data]
     assert len(colours) == 15 and set(colours) <= set(theme.date_colors(15))
     assert colours[0] != colours[-1]
+
+
+# ---- the Depth Profile Grid and the Growth Over Time band name what they show ------------
+
+
+@pytest.mark.parametrize(
+    "builder, label, unit", [(build_length_app, "Length", "mm"), (build_area_app, "Area", "mm²")],
+    ids=METRICS,
+)  # fmt: skip
+def test_the_depth_profile_grid_names_its_metric_unit_and_positions(tmp_path, builder, label, unit):
+    dashboard = builder(tmp_path)
+    layout = dashboard.create_faceted_depth_profile([1, 2]).layout  # 2 dates x 2 tubes
+
+    assert layout.title.text == (
+        f"Root {label} Depth Profile Grid - Field Average (Left) vs Tube (Right)"
+    )
+    assert layout.yaxis.title.text == "Position (L)"  # positions, as the Depth Profile view
+    assert layout.yaxis.title.text == dashboard.show_growth_lines(1).layout.yaxis.title.text
+    # The value axis is titled once, under the grid (FR-7): no panel's x axis carries it.
+    value = f"Mean {label} ({unit})"
+    assert [a.text for a in layout.annotations].count(value) == 1
+    assert not any(layout[f"xaxis{s}"].title.text for s in ("", "2", "3", "4"))
+
+
+@pytest.mark.parametrize("builder", BUILDERS, ids=METRICS)
+def test_the_sd_band_is_not_called_a_variance(tmp_path, builder):
+    dashboard = builder(tmp_path)
+    figure = dashboard.show_growth_over_time([1, 2], True, True, True)
+    band = next(trace for trace in figure.data if trace.fill == "tonexty")
+
+    assert band.name == "Field Mean ±1 SD"
+    assert band.hovertemplate.startswith("<b>Field ±1 SD Range</b>")
+    layout = json.loads(dashboard.app.server.test_client().get("/_dash-layout").data)
+    served = json.dumps(layout, ensure_ascii=False)
+    assert '"label": "Show Field ±1 SD Shading", "value": "show_field_var"' in served
+    assert "Variance" not in served

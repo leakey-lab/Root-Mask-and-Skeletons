@@ -11,20 +11,12 @@ import pytest
 from app.config import LENGTH_CSV_HEADERS
 from app.data_processing.data_processor import DataProcessor
 from app.visualization import theme
-from app.visualization.dash_data_cache import DataCache
-from app.visualization.dash_visualizations import DashVisualizations
-from tests.test_viz_data_cache import write_metric_csv
+from tests.viz_data_support import Charts as _Charts
+from tests.viz_data_support import write_metric_csv
 
 LIGHT_THEME_LITERALS = {"black", "white", "gray", "grey", "lightgray", "lightgrey"}
 LIGHT_THEME_LITERALS |= {"red", "green", "blue"}
 COLOUR_KEYS = {"color", "fillcolor", "gridcolor", "zerolinecolor", "linecolor", "bordercolor"}
-
-
-class _Charts(DashVisualizations):
-    def __init__(self, processor):
-        self.data_processor = processor
-        self.data_cache = DataCache(processor)
-        self.available_images = {}
 
 
 BUILDERS = {

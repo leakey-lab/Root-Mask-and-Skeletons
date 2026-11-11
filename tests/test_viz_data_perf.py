@@ -16,8 +16,7 @@ import pytest
 
 from app.config import LENGTH_CSV_HEADERS
 from app.data_processing.data_processor import DataProcessor
-from app.visualization.dash_data_cache import DataCache
-from app.visualization.dash_visualizations import DashVisualizations
+from tests.viz_data_support import Charts as _Charts
 
 pytestmark = [
     pytest.mark.wallclock,
@@ -28,13 +27,6 @@ pytestmark = [
 ]
 
 BUDGET_S = 1.5
-
-
-class _Charts(DashVisualizations):
-    def __init__(self, processor):
-        self.data_processor = processor
-        self.data_cache = DataCache(processor)
-        self.available_images = {}
 
 
 def _write_campaign(path, tubes=8, dates=24, positions=60):

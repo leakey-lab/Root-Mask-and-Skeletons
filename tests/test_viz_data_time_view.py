@@ -4,7 +4,8 @@ X4: the time views are assembled as plain dicts and handed to ``go.Figure`` with
 validation. Building one ``go.Scatter`` per tube and validating everything again in
 ``go.Figure(data=traces)`` took 80 ms for 160 tubes (8 ms now; area 57 -> 6 ms), on
 the server thread and holding the GIL. The browser must get the same figure: the
-Dash JSON of each view is compared with the one the object-built figure produced.
+Dash JSON of each view equals what a validating ``go.Figure`` makes of the same dicts,
+and its traces carry the cache's field mean, +-1 SD band and per-tube totals.
 
 X3: above :data:`AUTO_LEGEND_MAX_TUBES` tubes the length time view starts without its
 legend (a 160-entry legend was ~200 ms of a ~670 ms draw, and ten colours cannot
@@ -25,10 +26,10 @@ from app.data_processing.data_processor import DataProcessor
 from app.data_processing.data_processor_area import DataProcessorArea
 from app.visualization import theme
 from app.visualization.dash_app_area import DashAppArea
-from app.visualization.dash_data_cache import DataCache
-from app.visualization.dash_visualizations import AUTO_LEGEND_MAX_TUBES, DashVisualizations
-from tests.test_viz_data_cache import write_metric_csv
+from app.visualization.dash_visualizations import AUTO_LEGEND_MAX_TUBES
 from tests.viz_dash_helpers import build_length_app, call_callback
+from tests.viz_data_support import Charts as _Charts
+from tests.viz_data_support import write_metric_csv
 
 DATES = ("2024.06.03", "2024.06.04", "2024.06.24", "2024.07.16")
 
@@ -44,13 +45,6 @@ def _rows(tubes: int):
                     (tube, position, date, round(((tube * 7 + d * 3 + position) % 23) / 2, 2))
                 )
     return rows
-
-
-class _Charts(DashVisualizations):
-    def __init__(self, processor):
-        self.data_processor = processor
-        self.data_cache = DataCache(processor)
-        self.available_images = {}
 
 
 @pytest.fixture
@@ -70,129 +64,85 @@ def _json(fig) -> dict:
     return json.loads(to_json(fig))
 
 
-# ---- the object-built figures the dict builders must reproduce --------------------
+# ---- X4: the dict-built figure -----------------------------------------------------
 
 
-def _reference_length(charts, tubes, show_field_average, show_field_variance, show_legend):
-    label, unit = charts._metric_text()
-    traces = []
-    if show_field_average:
-        field = charts.data_cache.get_field_growth()
-        if show_field_variance and field["std"].notna().any():
-            traces.append(
-                go.Scatter(
-                    x=field["Date"],
-                    y=field["mean"] + field["std"],
-                    mode="lines",
-                    line=dict(color="rgba(0,0,0,0)"),
-                    showlegend=False,
-                    hoverinfo="skip",
-                    legendgroup="field_avg",
-                )
-            )
-            traces.append(
-                go.Scatter(
-                    x=field["Date"],
-                    y=field["mean"] - field["std"],
-                    mode="lines",
-                    fill="tonexty",
-                    fillcolor=theme.rgba(theme.TEXT, 0.10),
-                    line=dict(color="rgba(0,0,0,0)"),
-                    name="Field Mean ±1 SD",
-                    legendgroup="field_avg",
-                    hovertemplate=theme.hover(
-                        "Field ±1 SD Range",
-                        [("Date", "%{x|%Y-%m-%d}"), ("Range", "+-1 Standard Deviation")],
-                    ),
-                )
-            )
-        traces.append(
-            go.Scatter(
-                x=field["Date"],
-                y=field["mean"],
-                mode="lines+markers",
-                name="Field Average",
-                line=dict(color=theme.TEXT, width=3),
-                marker=dict(size=8, color=theme.TEXT),
-                legendgroup="field_avg",
-                hovertemplate=theme.hover(
-                    "Field Average",
-                    [
-                        ("Date", "%{x|%Y-%m-%d}"),
-                        (f"Avg {label}", f"%{{y:.2f}} {unit}"),
-                        ("Std Dev", f"+/-%{{customdata[0]:.2f}} {unit}"),
-                        ("Tubes", "%{customdata[1]:.0f}"),
-                    ],
-                ),
-                customdata=field[["std", "count"]].values,
-            )
-        )
-    for idx, tube in enumerate(tubes):
-        totals = charts.data_cache.get_tube_totals(tube)
-        if totals.empty:
-            continue
-        traces.append(
-            go.Scatter(
-                x=totals.index,
-                y=totals,
-                mode="lines+markers",
-                name=f"Tube {int(tube)}",
-                line=dict(color=theme.color(idx), width=2),
-                marker=dict(size=6),
-                hovertemplate=theme.hover(
-                    f"Tube {int(tube)}",
-                    [("Date", "%{x|%Y-%m-%d}"), (f"Total {label}", f"%{{y:.2f}} {unit}")],
-                ),
-            )
-        )
-    fig = go.Figure(data=traces)
-    fig.update_layout(
-        title_text=f"Root {label} Growth Over Time",
-        xaxis_title_text="Date",
-        yaxis_title_text=f"Total {label} ({unit})",
-        showlegend=show_legend,
-        margin_r=180 if show_legend else 24,  # X3: no empty band for a hidden legend
-        hovermode="closest",
+def _dashboard(tmp_path, metric):
+    """A fresh dashboard of ``metric`` over the 40-tube rows (its own, empty figure memo)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    if metric == "length":
+        csv = write_metric_csv(tmp_path / "l.csv", LENGTH_CSV_HEADERS, _rows(40))
+        return _Charts(DataProcessor(csv))
+    csv = write_metric_csv(tmp_path / "a.csv", AREA_CSV_HEADERS, _rows(40))
+    return DashAppArea(DataProcessorArea(csv), str(tmp_path))
+
+
+TIME_VIEWS = [
+    ("length", (1, 2, 3), True, True, True),
+    ("length", (1, 2, 3), True, False, False),
+    ("length", (), True, True, True),
+    ("length", (4, 5), False, False, True),
+    ("length", tuple(range(1, 41)), True, True, False),
+    ("length", (99,), True, True, True),  # a tube without data draws nothing for it
+    ("area", (1, 2, 3), True, True, True),
+    ("area", (), True, True, True),
+    ("area", (4, 5), False, False, True),
+    ("area", tuple(range(1, 41)), True, True, False),
+]
+
+
+@pytest.mark.parametrize("metric, tubes, field, variance, legend", TIME_VIEWS)
+def test_the_time_figure_is_what_validation_makes_of_its_dicts(
+    tmp_path, monkeypatch, metric, tubes, field, variance, legend
+):
+    # Built from dicts with validation off (go.Figure(..., _validate=False)): the browser
+    # must get what a validating go.Figure makes of the same dicts (a misspelt property
+    # raises there), as for the Depth Profile Grid.
+    built = _json(
+        _dashboard(tmp_path / "a", metric).show_growth_over_time(tubes, field, variance, legend)
     )
-    return fig
+    init = go.Figure.__init__
 
+    def validating(self, *args, **kwargs):
+        kwargs.pop("_validate", None)
+        init(self, *args, **kwargs)
 
-# ---- X4: same figure, built once ---------------------------------------------------
+    monkeypatch.setattr(go.Figure, "__init__", validating)
+    validated = _json(
+        _dashboard(tmp_path / "b", metric).show_growth_over_time(tubes, field, variance, legend)
+    )
 
-
-@pytest.mark.parametrize(
-    "tubes, field, variance, legend",
-    [
-        ((1, 2, 3), True, True, True),
-        ((1, 2, 3), True, False, False),
-        ((), True, True, True),
-        ((4, 5), False, False, True),
-        (tuple(range(1, 41)), True, True, False),
-        ((99,), True, True, True),  # a tube without data draws nothing for it
-    ],
-)
-def test_the_length_time_figure_is_unchanged(charts, tubes, field, variance, legend):
-    built = charts._growth_over_time_figure(tubes, field, variance, legend)
-
-    assert _json(built) == _json(_reference_length(charts, tubes, field, variance, legend))
+    assert built == validated
 
 
 @pytest.mark.parametrize(
-    "tubes, field, variance, legend",
-    [
-        ((1, 2, 3), True, True, True),
-        ((), True, True, True),
-        ((4, 5), False, False, True),
-        (tuple(range(1, 41)), True, True, False),
-    ],
+    "metric, label, unit", [("length", "Length", "mm"), ("area", "Area", "mm²")]
 )
-def test_the_area_time_figure_is_unchanged(area, tubes, field, variance, legend):
-    # The area dashboard draws the length builder with the area metric: the same
-    # reference, with the area label and unit.
-    built = area._growth_over_time_figure(tubes, field, variance, legend)
+def test_the_time_figure_draws_the_cache_values(tmp_path, metric, label, unit):
+    dashboard = _dashboard(tmp_path, metric)
+    cache = dashboard.data_cache
+    field = cache.get_field_growth()
+    mean, sd = field["mean"].to_numpy(), field["std"].to_numpy()
 
-    assert _json(built) == _json(_reference_length(area, tubes, field, variance, legend))
-    assert built.layout.title.text == "Root Area Growth Over Time"
+    figure = dashboard.show_growth_over_time([3, 1], True, True, True)
+    upper, lower, average, *tubes = figure.data
+
+    assert list(upper.y) == list(mean + sd) and upper.showlegend is False
+    assert list(lower.y) == list(mean - sd) and lower.fill == "tonexty"
+    assert lower.name == "Field Mean ±1 SD"
+    assert list(average.y) == list(mean) and average.name == "Field Average"
+    assert [list(row) for row in average.customdata] == [
+        [s, c] for s, c in zip(sd, field["count"], strict=True)
+    ]
+    assert [t.name for t in tubes] == ["Tube 3", "Tube 1"]  # the selection's order
+    for trace, tube in zip(tubes, (3, 1), strict=True):
+        totals = cache.get_tube_totals(tube)
+        assert list(trace.y) == list(totals.to_numpy())
+        assert list(trace.x) == list(totals.index.to_numpy())
+    assert figure.layout.yaxis.title.text == f"Total {label} ({unit})"
+    # Without the band, the field average comes first.
+    plain = dashboard.show_growth_over_time([3, 1], True, False, True)
+    assert [t.name for t in plain.data] == ["Field Average", "Tube 3", "Tube 1"]
 
 
 def test_the_time_figures_are_plotly_figures_the_memo_and_callers_can_use(charts, area):

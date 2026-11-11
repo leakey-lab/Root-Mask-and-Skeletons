@@ -21,7 +21,7 @@ from app.visualization import dash_metric_views as views
 from app.visualization import theme
 from app.visualization.dash_shell import NO_OPTIONS_SUMMARY
 from app.visualization.faceted_profile import MAX_TUBES
-from tests.viz_dash_helpers import build_length_app, call_callback, component_ids
+from tests.viz_dash_helpers import component_ids
 
 
 def _dashboard(tubes=(1, 2, 3)):
@@ -271,56 +271,3 @@ def test_page_holds_the_chart_row_and_the_stores():
 
 
 # ---- the callbacks call the modules directly ----------------------------------------
-
-
-def test_every_length_callback_runs_without_dash_app_delegators(tmp_path):
-    """The callbacks call the view model and layout modules directly: DashApp has no
-    delegators to them any more (S15-07 tier 2), and every callback still answers."""
-    dashboard = build_length_app(tmp_path)
-    for name in (
-        "_lines_tube", "_controls_summary", "_render_view", "_faceted_outputs",
-        "_faceted_styles", "_legend_patch", "_export_table", "_hover_date", "_faceted_info",
-        "_availability_view", "_thumbnail",
-    ):  # fmt: skip
-        assert not hasattr(dashboard, name), name
-    dash = dashboard.app
-
-    for view, extra in (("stacked", {}), ("time", {"selected-tubes-store.data": [1]}),
-                        ("lines", {"tube-selector.value": 2}),
-                        ("faceted", {"faceted-tubes-store.data": [1, 2]})):  # fmt: skip
-        status, out = call_callback(
-            dash, "main-graph.figure", {"view-selector.value": view, **extra},
-            ["view-selector.value"],
-        )  # fmt: skip
-        assert status == 200
-        assert "Error generating" not in str(out["main-graph"]["figure"]), view
-    status, out = call_callback(
-        dash, "main-graph.figure",
-        {"view-selector.value": "time", "legend-visible-store.data": False},
-        ["legend-visible-store.data"],
-    )  # fmt: skip
-    assert status == 200 and "__dash_patch_update" in out["main-graph"]["figure"]
-    _, out = call_callback(
-        dash, "viz-controls-summary.children",
-        {"view-selector.value": "lines", "tube-selector.value": 3}, ["view-selector.value"],
-    )  # fmt: skip
-    assert out["viz-controls-summary"]["children"] == "Tube 3"
-    status, out = call_callback(
-        dash, "viz-export-download.data",
-        {"viz-export-btn.n_clicks": 1, "view-selector.value": "lines", "tube-selector.value": 1},
-        ["viz-export-btn.n_clicks"],
-    )  # fmt: skip
-    assert status == 200 and out["viz-export-download"]["data"]["content"]
-    _, out = call_callback(
-        dash, "faceted-selection-info.children",
-        {"faceted-tube-selector.value": [1], "faceted-date-selector.value": []},
-        ["faceted-tube-selector.value"],
-    )  # fmt: skip
-    assert out["tube-date-availability"]["children"]
-    status, out = call_callback(
-        dash, "image-container.children",
-        {"main-graph.hoverData": {"points": [{"y": 20, "customdata": "2024.07.18"}]},
-         "tube-selector.value": 1, "view-selector.value": "lines"},
-        ["main-graph.hoverData"],
-    )  # fmt: skip
-    assert status == 200

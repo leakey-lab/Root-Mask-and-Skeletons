@@ -179,9 +179,13 @@ var document = window.document;
 """
 
 
-def clientside_function(dash, output: str) -> dict:
-    """The ``_callback_list`` entry of the clientside callback writing ``output``."""
-    key = find_callback_key(dash, output)
+def clientside_function(dash, output: str, *, duplicate: bool = False) -> dict:
+    """The ``_callback_list`` entry of the clientside callback writing ``output``
+    (``duplicate``: the one that writes it with ``allow_duplicate``)."""
+    if duplicate:
+        (key,) = [k for k in dash.callback_map if k.startswith(output + "@")]
+    else:
+        key = find_callback_key(dash, output)
     entry = next(cb for cb in dash._callback_list if cb["output"] == key)
     assert entry.get("clientside_function"), f"{output!r} is written by a server callback"
     return entry
@@ -194,6 +198,7 @@ def call_clientside(
     changed: list[str] | tuple[str, ...] = (),
     *,
     setup: str = "",
+    duplicate: bool = False,
 ):
     """Run the clientside callback writing ``output`` as the Dash renderer would.
 
@@ -201,7 +206,8 @@ def call_clientside(
     minimal ``window`` (``dash_clientside.no_update``, ``callback_context.triggered``,
     an immediate ``setTimeout`` and a ``document`` without elements); ``setup`` is
     JavaScript run before the call (e.g. a fake Plotly graph). A returned Promise
-    is awaited.
+    is awaited. ``duplicate``: run the callback that writes ``output`` with
+    ``allow_duplicate`` (the plain writer is the default).
 
     Returns:
         (outputs {id: {prop: value}}, engine): a ``no_update`` value is
@@ -218,7 +224,7 @@ def call_clientside(
     # Kept referenced: a QApplication nobody holds is deleted at once, and Qt with it.
     _QAPP = QApplication.instance() or QApplication(["viz-dash-tests"])
     values = values or {}
-    entry = clientside_function(dash, output)
+    entry = clientside_function(dash, output, duplicate=duplicate)
     spec = dash.callback_map[entry["output"]]
     args = [
         values.get(f"{item['id']}.{item['property']}") for item in spec["inputs"] + spec["state"]
@@ -258,7 +264,7 @@ def call_clientside(
     result = json.loads(encoded) if encoded != "undefined" else None
     parts = _split_output_key(entry["output"])
     if not isinstance(parts, list):
-        return {parts["id"]: {parts["property"]: result}}, engine
+        return {parts["id"]: {parts["property"].split("@")[0]: result}}, engine
     outputs: dict[str, dict[str, Any]] = {}
     for part, value in zip(parts, result, strict=True):
         outputs.setdefault(part["id"], {})[part["property"].split("@")[0]] = value

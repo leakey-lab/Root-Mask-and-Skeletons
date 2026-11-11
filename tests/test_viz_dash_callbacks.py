@@ -320,3 +320,89 @@ def test_tube_dropdowns_are_populated_from_the_start(tmp_path, builder):
     for component in walk_components(layout):
         if type(component).__name__ == "Dropdown":
             assert getattr(component, "options", None), f"{component.id} starts without options"
+
+
+# ---- a figure builder that fails shows its error ----------------------------------------
+
+BUILDERS = [build_length_app, build_area_app]
+METRICS = ["length", "area"]
+
+
+def _break_stacked(monkeypatch, dashboard):
+    from app.visualization import dash_visualizations
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("no totals")
+
+    monkeypatch.setattr(dash_visualizations, "stacked_bar_figure", broken)
+    return {"view-selector.value": "stacked"}
+
+
+def _break_time(monkeypatch, dashboard):
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("no totals")
+
+    monkeypatch.setattr(dashboard.data_cache, "get_field_growth", broken)
+    return {
+        "view-selector.value": "time",
+        "selected-tubes-store.data": [1],
+        "growth-viz-options.value": ["show_field_avg", "show_field_var"],
+    }
+
+
+def _break_lines(monkeypatch, dashboard):
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("no totals")
+
+    monkeypatch.setattr(dashboard.data_cache, "get_interval_data", broken)
+    return {"view-selector.value": "lines", "tube-selector.value": 1}
+
+
+@pytest.mark.parametrize("breaker", [_break_stacked, _break_time, _break_lines])
+@pytest.mark.parametrize("builder", BUILDERS, ids=METRICS)
+def test_a_figure_that_cannot_be_built_shows_its_error(tmp_path, monkeypatch, builder, breaker):
+    from app.visualization import theme
+
+    dashboard = builder(tmp_path)
+    values = breaker(monkeypatch, dashboard)
+
+    _, out = call_callback(dashboard.app, "main-graph.figure", values, ["view-selector.value"])
+
+    (note,) = out["main-graph"]["figure"]["layout"]["annotations"]
+    assert note["text"] == "Error: no totals"
+    assert note["font"]["color"] == theme.DANGER
+    assert out["main-graph"]["figure"]["data"] == []
+
+
+# ---- what a view starts with, and what a view change clears -----------------------------
+
+
+def test_growth_over_time_opens_with_the_field_average_and_its_band(tmp_path):
+    dash = build_length_app(tmp_path).app
+    layout = json.loads(dash.server.test_client().get("/_dash-layout").data)
+    (options,) = [n for n in _json_nodes(layout) if n["props"].get("id") == "growth-viz-options"]
+    start = options["props"]["value"]
+
+    figure = _figure(
+        dash,
+        {"view-selector.value": "time", "growth-viz-options.value": start,
+         "selected-tubes-store.data": [1, 2]},
+        ["view-selector.value"],
+    )  # fmt: skip
+
+    assert start == ["show_field_avg", "show_field_var"]
+    names = [trace.get("name") for trace in figure["data"]]
+    assert "Field Average" in names and "Field Mean ±1 SD" in names
+
+
+@pytest.mark.parametrize("changed", ["view-selector.value", "tube-selector.value"])
+def test_a_view_or_tube_change_clears_the_hover_thumbnails(length_app, changed):
+    out, _ = call_clientside(
+        length_app.app,
+        "image-container.children",
+        {"view-selector.value": "lines", "tube-selector.value": 2},
+        [changed],
+        duplicate=True,
+    )
+
+    assert out["image-container"]["children"] == []

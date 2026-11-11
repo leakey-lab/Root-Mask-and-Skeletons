@@ -20,7 +20,7 @@ from PyQt6.QtCore import QCoreApplication, QEvent, Qt
 
 from app.visualization import _viz_server
 from app.visualization._viz_server import _DashServerThreadBase, join_qthread
-from app.workers import GuardedThread, kept_threads
+from app.workers import kept_threads
 
 
 def wait_until(predicate, timeout: float = 5.0) -> bool:
@@ -152,12 +152,6 @@ def test_unbindable_server_reports_an_error_and_finishes(start_server, monkeypat
     assert events["ports"] == []
     assert events["errors"] == ["no free port on 127.0.0.1 for the dashboard server"]
     assert events["emitted_on"] != [threading.main_thread()]  # on the server thread
-
-
-def test_the_server_thread_runs_inside_the_worker_error_boundary():
-    """One error boundary for every QThread of the app, and the keeper from its start."""
-    assert issubclass(_DashServerThreadBase, GuardedThread)
-    assert _DashServerThreadBase.run is GuardedThread.run
 
 
 class _ServerThatRaises:

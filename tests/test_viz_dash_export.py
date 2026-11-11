@@ -11,17 +11,29 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import math
 import os
 from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
+from dash import Dash
 
 import app
 from app import provenance
 from app.visualization import dash_export
-from tests.viz_dash_helpers import build_area_app, build_length_app, call_callback
+from tests.viz_dash_helpers import (
+    AREA_COLUMN,
+    LENGTH_COLUMN,
+    FakeImageManager,
+    build_area_app,
+    build_length_app,
+    call_callback,
+    write_metric_csv,
+)
+
+METRICS = ["length", "area"]
 
 
 def _read(text: str) -> pd.DataFrame:
@@ -53,6 +65,8 @@ def area_app(tmp_path):
 
 
 def _export(dash, values) -> dict:
+    """Click "Export CSV" of `dash` (a Dash app, or a dashboard holding one as `.app`)."""
+    dash = dash if isinstance(dash, Dash) else dash.app
     status, out = call_callback(
         dash, "viz-export-download.data", {"viz-export-btn.n_clicks": 1, **values},
         changed=["viz-export-btn.n_clicks"],
@@ -173,6 +187,27 @@ def test_lines_export_lists_depth_intervals_of_the_plotted_tube(
     }
     assert set(table.Tube) == {1}
     assert _header(download["content"])["source_sha256"] == _sha256(tmp_path / source)
+
+
+def test_the_depth_profile_export_lists_measured_intervals_with_their_spread(tmp_path):
+    # L5, L7 and L25 on one date: L1-10 holds two images, L21-30 one, L11-20 none.
+    rows = (
+        ("T001_L005_2024.07.18", 1, 5, "2024.07.18", 2.0),
+        ("T001_L007_2024.07.18", 1, 7, "2024.07.18", 4.5),
+        ("T001_L025_2024.07.18", 1, 25, "2024.07.18", 10.0),
+    )
+    csv = write_metric_csv(str(tmp_path / "root_lengths.csv"), LENGTH_COLUMN, rows)
+
+    content = _export(_length_app(csv), {"view-selector.value": "lines", "tube-selector.value": 1})
+    table = _read_cells(content["content"])
+
+    assert table["Interval end"].tolist() == ["10", "30"]  # no row for the empty L11-20
+    first, last = table.iloc[0], table.iloc[1]
+    assert (first["Min Length (mm)"], first["Max Length (mm)"]) == ("2.0", "4.5")
+    assert float(first["SD (mm)"]) == pytest.approx(math.sqrt(((2.0 - 3.25) ** 2) * 2))
+    assert (first["Count"], last["Count"]) == ("2", "1")
+    assert (last["Min Length (mm)"], last["Max Length (mm)"]) == ("10.0", "10.0")
+    assert last["SD (mm)"] == ""  # one image: no SD
 
 
 def test_faceted_export_pairs_tube_and_field_means(length_app):
@@ -384,3 +419,176 @@ def test_the_time_table_is_the_per_tube_table(tmp_path, rows, field_average):
         assert got.to_csv(index=False, lineterminator="\n") == want.to_csv(
             index=False, lineterminator="\n"
         )
+
+
+# ---- the open project's field of view; the grid export -----------------------------------
+
+
+def _project_file(folder, width=20.0, height=15.0) -> None:
+    os.makedirs(folder, exist_ok=True)
+    record = {"schema": 1, "calibration": {"fov_width_mm": width, "fov_height_mm": height}}
+    with open(os.path.join(folder, "sprouts_project.json"), "w", encoding="utf-8") as fh:
+        json.dump(record, fh)
+
+
+def _length_app(csv: str, **kwargs):
+    from app.data_processing.data_processor import DataProcessor
+    from app.visualization.dash_app import DashApp
+
+    return DashApp(DataProcessor(csv), os.path.dirname(csv), FakeImageManager(), **kwargs)
+
+
+def _calibration(content: str) -> str:
+    (line,) = [ln for ln in content.splitlines() if ln.startswith("# calibration: ")]
+    return line.removeprefix("# calibration: ")
+
+
+def _read_cells(content: str) -> pd.DataFrame:
+    """The table as written: every cell as its text (an empty cell is "")."""
+    return pd.read_csv(io.StringIO(content), comment="#", dtype=str, keep_default_na=False)
+
+
+def test_a_csv_in_the_project_folder_is_exported_with_the_projects_field_of_view(tmp_path):
+    # <root>/root_lengths.csv: the lookup above the CSV never finds <root>'s own file.
+    root = tmp_path / "trial"
+    _project_file(root)
+    csv = write_metric_csv(str(root / "root_lengths.csv"), LENGTH_COLUMN)
+
+    without = _calibration(_export(_length_app(csv), {"view-selector.value": "stacked"})["content"])
+    with_root = _calibration(
+        _export(_length_app(csv, project_root=str(root)), {"view-selector.value": "stacked"})[
+            "content"
+        ]
+    )
+
+    assert "18.00 x 13.50 mm" in without  # the app's default: the regression
+    assert with_root.startswith("field of view 20.00 x 15.00 mm")
+    assert "18.00" not in with_root
+
+
+def test_a_project_inside_another_is_exported_with_its_own_field_of_view(tmp_path):
+    # KNOWN_ISSUES M7: outer/inner/skeletons/root_lengths.csv found outer's project file.
+    outer = tmp_path / "outer"
+    _project_file(outer)
+    inner = outer / "inner"
+    os.makedirs(inner / "skeletons")
+    csv = write_metric_csv(str(inner / "skeletons" / "root_lengths.csv"), LENGTH_COLUMN)
+
+    found = _calibration(_export(_length_app(csv), {"view-selector.value": "stacked"})["content"])
+    own = _calibration(
+        _export(_length_app(csv, project_root=str(inner)), {"view-selector.value": "stacked"})[
+            "content"
+        ]
+    )
+
+    assert "20.00 x 15.00 mm" in found  # the outer project's file
+    assert own.startswith("field of view 18.00 x 13.50 mm")
+    assert "20.00" not in own
+
+
+@pytest.mark.parametrize("metric", METRICS)
+def test_the_dashboard_builders_pass_the_project_root_to_the_app(tmp_path, metric):
+    from app.visualization.root_area_visualization import build_area_dashboard
+    from app.visualization.root_length_visulization import build_length_dashboard
+
+    root = tmp_path / "trial"
+    _project_file(root)
+    if metric == "length":
+        csv = write_metric_csv(str(root / "root_lengths.csv"), LENGTH_COLUMN)
+        _, dash = build_length_dashboard(csv, str(root), FakeImageManager(), project_root=str(root))
+    else:
+        csv = write_metric_csv(str(root / "root_areas.csv"), AREA_COLUMN)
+        _, dash = build_area_dashboard(csv, str(root), FakeImageManager(), project_root=str(root))
+
+    line = _calibration(_export(dash, {"view-selector.value": "stacked"})["content"])
+    assert line.startswith("field of view 20.00 x 15.00 mm")
+
+
+def test_the_grid_export_leaves_a_one_image_sd_empty_and_counts_the_images(tmp_path):
+    rows = (
+        ("T001_L005_2024.07.18", 1, 5, "2024.07.18", 1.0),
+        ("T002_L006_2024.07.18", 2, 6, "2024.07.18", 3.0),
+        ("T001_L015_2024.07.18", 1, 15, "2024.07.18", 2.5),
+    )
+    csv = write_metric_csv(str(tmp_path / "root_lengths.csv"), LENGTH_COLUMN, rows)
+    download = _export(
+        _length_app(csv),
+        {"view-selector.value": "faceted", "faceted-tubes-store.data": [1],
+         "faceted-dates-store.data": []},
+    )  # fmt: skip
+
+    table = _read_cells(download["content"])
+    assert list(table.columns) == [
+        "Tube", "Date", "Interval start", "Interval end", "Mean Length (mm)", "Count",
+        "Field Mean Length (mm)", "Field SD (mm)", "Field Count",
+    ]  # fmt: skip
+    by_end = {int(r[3]): r for r in table.itertuples(index=False)}
+    # L1-10 pools tube 1 (1.0) and tube 2 (3.0): SD sqrt(2), two images.
+    assert float(by_end[10][7]) == pytest.approx(math.sqrt(2))
+    assert by_end[10][8] == "2"
+    # L11-20 has one image: no SD (as the Depth Profile export), one image.
+    assert by_end[20][7] == ""
+    assert by_end[20][8] == "1"
+
+
+def test_the_grid_of_a_csv_with_an_infinite_value_is_drawn_and_exported(tmp_path):
+    rows = (
+        ("T001_L005_2024.07.18", 1, 5, "2024.07.18", 2.5),
+        ("T002_L007_2024.07.18", 2, 7, "2024.07.18", float("inf")),
+    )
+    csv = write_metric_csv(str(tmp_path / "root_lengths.csv"), LENGTH_COLUMN, rows)
+    dashboard = _length_app(csv)
+
+    figure = dashboard.create_faceted_depth_profile([1])
+    assert not figure.layout.annotations or "Error" not in figure.layout.annotations[0].text
+    table = _read_cells(
+        _export(
+            dashboard,
+            {"view-selector.value": "faceted", "faceted-tubes-store.data": [1],
+             "faceted-dates-store.data": []},
+        )["content"]
+    )  # fmt: skip
+    # Tube 2's row is left out, so the field mean of L1-10 is tube 1's alone.
+    assert list(table["Field Mean Length (mm)"]) == ["2.5"]
+    assert list(table["Field Count"]) == ["1"]
+
+
+@pytest.mark.parametrize("metric", METRICS)
+def test_a_csv_of_one_image_draws_every_view_and_exports_one_row_each(tmp_path, metric):
+    from app.data_processing.data_processor import DataProcessor
+    from app.data_processing.data_processor_area import DataProcessorArea
+    from app.visualization.dash_app import DashApp
+    from app.visualization.dash_app_area import DashAppArea
+
+    column = LENGTH_COLUMN if metric == "length" else AREA_COLUMN
+    processor, cls = (
+        (DataProcessor, DashApp) if metric == "length" else (DataProcessorArea, DashAppArea)
+    )
+    rows = (("T001_L005_2024.07.18", 1, 5, "2024.07.18", 2.5),)
+    csv = write_metric_csv(str(tmp_path / "metric.csv"), column, rows)
+    dashboard = cls(processor(csv), str(tmp_path), FakeImageManager())
+    views = {
+        "stacked": {},
+        "time": {"selected-tubes-store.data": [1],
+                 "growth-viz-options.value": ["show_field_avg", "show_field_var"]},
+        "lines": {"tube-selector.value": 1},
+        "faceted": {"faceted-tubes-store.data": [1], "faceted-dates-store.data": []},
+    }  # fmt: skip
+
+    for view, values in views.items():
+        _, out = call_callback(
+            dashboard.app, "main-graph.figure", {"view-selector.value": view, **values},
+            ["view-selector.value"],
+        )  # fmt: skip
+        figure = out["main-graph"]["figure"]
+        assert figure["data"], view
+        assert "Error" not in json.dumps(figure["layout"].get("annotations", [])), view
+        table = _read_cells(_export(dashboard, {"view-selector.value": view, **values})["content"])
+        sd = [c for c in table.columns if c.startswith(("SD", "Field SD"))]
+        if view == "time":  # the field average of one tube, and the tube itself
+            assert table["Series"].tolist() == ["Field average", "Tube 1"]
+            assert table["Tubes"].tolist() == ["1", ""]
+        else:
+            assert len(table) == 1, view
+        assert all(cell == "" for c in sd for cell in table[c]), view
+        assert "2.5" in table.to_numpy().tolist()[-1], view

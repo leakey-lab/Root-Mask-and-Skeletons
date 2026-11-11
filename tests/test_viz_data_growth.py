@@ -13,9 +13,9 @@ import pytest
 
 from app.config import LENGTH_CSV_HEADERS
 from app.data_processing.data_processor import DataProcessor
-from app.visualization.dash_data_cache import DataCache, merge_nearby_dates
-from app.visualization.dash_visualizations import DashVisualizations
-from tests.test_viz_data_cache import write_metric_csv
+from app.visualization.dash_data_cache import merge_nearby_dates
+from tests.viz_data_support import Charts as _Charts
+from tests.viz_data_support import write_metric_csv
 
 D18, D19, D21, D24 = (pd.Timestamp(f"2024-07-{d}") for d in (18, 19, 21, 24))
 AUG = pd.Timestamp("2024-08-07")
@@ -27,13 +27,6 @@ ROWS = [
     (1, 5, "2024.08.07", 5.0),
     (2, 5, "2024.08.07", 7.0),
 ]
-
-
-class _Charts(DashVisualizations):
-    def __init__(self, processor):
-        self.data_processor = processor
-        self.data_cache = DataCache(processor)
-        self.available_images = {}
 
 
 @pytest.fixture
@@ -61,6 +54,28 @@ def test_field_growth_averages_a_remeasured_tube(charts):
     assert list(field["mean"]) == pytest.approx([85.0 / 3.0, 6.0])  # (15 + 30 + 40) / 3
     assert list(field["std"]) == pytest.approx([math.sqrt(475.0 / 3.0), math.sqrt(2.0)])
     assert list(field["count"]) == [3, 2]
+
+
+@pytest.mark.parametrize("later, merged", [("2024.07.21", True), ("2024.07.22", False)])
+def test_the_field_average_merges_dates_three_days_apart_not_four(tmp_path, later, merged):
+    # Tube 1 on 07-18, tubes 2 and 3 on the later date: within 3 days one campaign (the
+    # date with more tubes), 4 days apart two.
+    rows = [(1, 5, "2024.07.18", 10.0), (2, 5, later, 20.0), (3, 5, later, 40.0)]
+    cache = _Charts(
+        DataProcessor(write_metric_csv(tmp_path / "l.csv", LENGTH_CSV_HEADERS, rows))
+    ).data_cache
+    second = pd.Timestamp(later.replace(".", "-"))
+
+    field = cache.get_field_growth()
+
+    if merged:
+        assert list(field["Date"]) == [second]
+        assert list(field["mean"]) == pytest.approx([70.0 / 3.0])
+        assert list(field["count"]) == [3]
+    else:
+        assert list(field["Date"]) == [D18, second]
+        assert list(field["mean"]) == pytest.approx([10.0, 30.0])
+        assert list(field["count"]) == [1, 2]
 
 
 def test_time_view_merges_dates_only_for_the_field_average(charts):
