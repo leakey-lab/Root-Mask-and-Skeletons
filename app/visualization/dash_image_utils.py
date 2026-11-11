@@ -119,8 +119,9 @@ class ThumbnailCache:
 class ImageIndex(Mapping[ImageKey, str]):
     """``(tube, position, "YYYY.MM.DD")`` -> image path, parsed on first use.
 
-    Names without a stand-alone tube, position and date token are skipped. The
-    index also owns the dashboard's :class:`ThumbnailCache` (``.thumbnails``).
+    Names without a stand-alone tube, position and date token are skipped; of several
+    images of one key, the last by capture time, then by name, is shown (:meth:`_parse`).
+    The index also owns the dashboard's :class:`ThumbnailCache` (``.thumbnails``).
     """
 
     def __init__(
@@ -158,11 +159,24 @@ class ImageIndex(Mapping[ImageKey, str]):
 
     @staticmethod
     def _parse(names: Mapping[str, str]) -> dict[ImageKey, str]:
+        """Index the names; of several images of one key, the one the charts keep.
+
+        A position imaged twice on one date (a repeated scan) has one row in the charts:
+        the last by capture time, then by name (``MetricDataProcessor``). The hover shows
+        that image: the last by the time in its name (a name without one counts as earlier
+        than every name with one), then the last name.
+        """
         paths: dict[ImageKey, str] = {}
+        lasts: dict[ImageKey, tuple[bool, str, str]] = {}
         for name, path in names.items():
             parsed = parse_image_name(name)
             if parsed.is_complete:
-                paths[(parsed.tube, parsed.position, parsed.date)] = path
+                key = (parsed.tube, parsed.position, parsed.date)
+                order = (parsed.time is not None, parsed.time or "", name)
+                kept = lasts.get(key)
+                if kept is None or order > kept:
+                    lasts[key] = order
+                    paths[key] = path
         return paths
 
     def __getitem__(self, key: ImageKey) -> str:

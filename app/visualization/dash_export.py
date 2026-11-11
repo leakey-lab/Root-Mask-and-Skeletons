@@ -4,6 +4,7 @@
 The export holds the table behind the current view: the same DataCache
 aggregates the chart is drawn from (nothing is recomputed another way), in tidy
 long form, after ``# key: value`` provenance lines -- source file and SHA-256,
+the rows used and left out when repeated scans were left out (:func:`row_counts`),
 UTC timestamp, software version and commit, calibration, view and filters. Read
 it back with ``pandas.read_csv(path, comment="#")``.
 
@@ -44,6 +45,28 @@ class ExportTable:
     description: str
     #: Selection that produced the rows, e.g. {"tubes": "1, 3", "dates": "all"}.
     filters: Mapping[str, str] = field(default_factory=dict)
+    #: Header lines counting the metric CSV's rows the charts use and leave out, e.g.
+    #: {"rows_used": "4 of 6", "rows_left_out": "2 rows from repeated scans ..."}
+    #: (:func:`row_counts`); empty: no such lines.
+    row_counts: Mapping[str, str] = field(default_factory=dict)
+
+
+def row_counts(data_processor: Any) -> dict[str, str]:
+    """The ``rows_used`` / ``rows_left_out`` header lines of a dashboard's exports.
+
+    Written when repeated scans were left out (``exclusions.repeated``): the totals then
+    differ from a sum over every row of the CSV, and the header says by how many rows and
+    why (every cause, in the notice's words). Without repeats the export has no such
+    lines and is the file it always was.
+    """
+    exclusions = getattr(data_processor, "exclusions", None)
+    if not getattr(exclusions, "repeated", 0):
+        return {}
+    used = len(data_processor.df)
+    return {
+        "rows_used": f"{used} of {used + exclusions.total}",
+        "rows_left_out": exclusions.causes(),
+    }
 
 
 # ---- tables (one per kind of view) -------------------------------------------
@@ -213,6 +236,7 @@ def provenance_lines(
         ("metric_column", metric_column),
         ("source_csv", os.path.basename(source_csv)),
         ("source_sha256", file_sha256(source_csv) or "unavailable"),
+        *table.row_counts.items(),
         ("generated_at", when.strftime("%Y-%m-%dT%H:%M:%SZ")),
         (
             "software",

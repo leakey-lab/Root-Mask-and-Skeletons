@@ -1,7 +1,7 @@
 """Load a root-metric CSV (length or area) into a typed DataFrame for the dashboards."""
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,9 @@ KEY_COLUMNS = ("Date", "Tube", "Position")
 NAME_FORMAT_HINT = "<field>_T<tube>_L<position>_YYYY.MM.DD_HHMMSS_..."
 #: A UTF-8 byte-order mark (EF BB BF) read as latin-1.
 _LATIN1_BOM = "\u00ef\u00bb\u00bf"
+#: The notice's and the exports' words for the rows :func:`repeated_scans` leaves out.
+REPEATED_SCANS = "repeated scans of a position on one date (the last image is kept)"
+_NAT = np.datetime64("NaT", "ns")
 
 
 def _plural(count: int, noun: str) -> str:
@@ -35,10 +38,15 @@ def _parse_dates(text: pd.Series) -> pd.Series:
     date strings and the dashboards' dtypes as they were, and a date outside the
     nanosecond range (years 1677-2262, e.g. a mistyped year in a file name) is NaT, so only
     its row is left out (counted as unreadable), not the whole CSV.
+
+    Each distinct cell is parsed once (a season has a few dozen dates in 46k rows: 2.5 ms
+    instead of 8.5 ms); an empty cell is NaT.
     """
-    dates = pd.to_datetime(text, format="%Y.%m.%d", errors="coerce")
+    codes, distinct = pd.factorize(text)
+    dates = pd.to_datetime(pd.Series(distinct), format="%Y.%m.%d", errors="coerce")
     inside = dates.between(pd.Timestamp.min, pd.Timestamp.max)
-    return dates.where(inside).astype("datetime64[ns]")
+    values = np.append(dates.where(inside).astype("datetime64[ns]").to_numpy(), _NAT)
+    return pd.Series(values[codes], index=text.index)  # code -1 (empty cell): the NaT
 
 
 def _numbers(cells: pd.Series) -> pd.Series:
@@ -55,6 +63,53 @@ def _numbers(cells: pd.Series) -> pd.Series:
     return numbers
 
 
+def repeated_scans(
+    chart: pd.DataFrame, names: pd.Series | None, times: pd.Series | None
+) -> pd.Series:
+    """Rows of ``chart`` that image a position again on the same date (True = leave out).
+
+    A tube scanned twice in a day has two images of each position; summed, its total for
+    that date is about doubled. Rows are repeats of each other when their image names give
+    the same field (``app.naming``: ``24EFCAM1`` and ``24EFCAM2`` are one field, ``24EF``)
+    and their tube, position and date are equal; a row whose name gives no tube, position
+    and date is never a repeat. Of each set the last by capture time (``times``, text
+    ``HH:MM:SS``; a row without one counts as earlier than every row with one, so a timed
+    capture is kept over an untimed one), then by image name (the last name), is kept: the
+    later scan of a position replaces the earlier one.
+
+    ``chart`` holds only usable rows (int64 Tube and Position, datetime64[ns] Date);
+    ``names`` and ``times`` are the CSV's Image and Time columns on the same index (or
+    None). Only rows whose tube, position and date occur more than once have their names
+    parsed.
+    """
+    repeats = np.zeros(len(chart), dtype=bool)
+    if names is not None and len(chart):
+        shared = np.flatnonzero(chart.duplicated(list(KEY_COLUMNS), keep=False).to_numpy())
+        if len(shared):
+            labels = chart.index[shared]
+            columns = (chart[key].to_numpy()[shared].tolist() for key in KEY_COLUMNS)
+            cells = (names.loc[labels].tolist(), _cells(times, labels))
+            candidates = []  # (order, key, row): a few rows per repeated scan, not every row
+            rows = zip(shared.tolist(), *columns, *cells, strict=True)
+            for row, date, tube, position, name, time in rows:
+                parsed = parse_image_name(str(name))
+                if parsed.is_complete:
+                    text = "" if pd.isna(time) else str(time).strip()
+                    order = (bool(text), text, str(name))  # untimed < timed; then time, name
+                    candidates.append((order, (parsed.field, date, tube, position), row))
+            candidates.sort(key=lambda candidate: candidate[0], reverse=True)  # last first
+            seen = set()
+            for _order, key, row in candidates:
+                repeats[row] = key in seen
+                seen.add(key)
+    return pd.Series(repeats, index=chart.index)
+
+
+def _cells(column: pd.Series | None, labels: pd.Index) -> list:
+    """The cells of ``column`` at ``labels`` (all missing when there is no column)."""
+    return [None] * len(labels) if column is None else column.loc[labels].tolist()
+
+
 @dataclass(frozen=True)
 class RowExclusions:
     """Rows of a metric CSV that the dashboards leave out, by cause (FR-15).
@@ -65,11 +120,14 @@ class RowExclusions:
             date from (not in :data:`NAME_FORMAT_HINT` form, e.g. ``IMG_0001``).
         unreadable: other rows with a missing or non-numeric field or value (an infinite
             number included).
+        repeated: usable rows of a position imaged again on the same date (a tube scanned
+            twice in a day); the last image is kept (:func:`repeated_scans`).
     """
 
     failed: int = 0
     bad_name: int = 0
     unreadable: int = 0
+    repeated: int = 0
 
     @classmethod
     def from_mask(
@@ -97,12 +155,18 @@ class RowExclusions:
     @property
     def total(self) -> int:
         """Number of rows left out of the charts."""
-        return self.failed + self.bad_name + self.unreadable
+        return self.failed + self.bad_name + self.unreadable + self.repeated
 
     def message(self) -> str | None:
         """One user-facing sentence explaining the exclusions (``None`` if none)."""
         if not self.total:
             return None
+        verb = "is" if self.total == 1 else "are"
+        return f"{_plural(self.total, 'row')} {verb} not shown: {self.causes()}."
+
+    def causes(self) -> str:
+        """The causes with their counts, joined ('' if none): the notice's and the
+        exports' words."""
         parts = []
         if self.failed:
             parts.append(
@@ -117,8 +181,9 @@ class RowExclusions:
                 f"{_plural(self.unreadable, 'row')} with a missing or non-numeric tube, "
                 "position, date or value"
             )
-        verb = "is" if self.total == 1 else "are"
-        return f"{_plural(self.total, 'row')} {verb} not shown: {_join(parts)}."
+        if self.repeated:
+            parts.append(f"{_plural(self.repeated, 'row')} from {REPEATED_SCANS}")
+        return _join(parts) if parts else ""
 
 
 class MetricDataProcessor:
@@ -131,7 +196,9 @@ class MetricDataProcessor:
 
     After loading, ``df`` holds one row per measured image and only the columns
     ``Date`` (datetime64), ``Tube``/``Position`` (int64) and ``value_column``
-    (float64); rows missing any of them are dropped and counted in ``exclusions``.
+    (float64); rows missing any of them are dropped and counted in ``exclusions``, and so
+    are repeated scans of a position on one date (:func:`repeated_scans`): one image per
+    field, tube, position and date is kept, so every total sums each position once.
     """
 
     #: name of the numeric metric column in the CSV (e.g. "Length (mm)")
@@ -150,7 +217,7 @@ class MetricDataProcessor:
 
     @property
     def dropped_rows(self) -> int:
-        """Rows left out of ``df`` because a key field or the value was unreadable."""
+        """Rows left out of ``df``: a key field or the value was unreadable, or a repeat."""
         return self.exclusions.total
 
     def empty_reason(self) -> str | None:
@@ -237,14 +304,21 @@ class MetricDataProcessor:
                 },
                 index=df.index,
             )
-            self.exclusions = RowExclusions.from_mask(
+            exclusions = RowExclusions.from_mask(
                 chart.isna().any(axis=1), df.get("Error"), df.get("Image")
             )
-            if self.exclusions.total:
-                logger.warning("%s: %s", self.csv_path, self.exclusions.message())
             chart = chart.dropna()
             chart["Tube"] = chart["Tube"].astype("int64")
             chart["Position"] = chart["Position"].astype("int64")
+            # One image per field, tube, position and date: a second scan of a tube on
+            # the same day would otherwise count each position twice in every total.
+            repeats = repeated_scans(chart, df.get("Image"), df.get("Time"))
+            if repeats.any():
+                chart = chart[~repeats.to_numpy()]
+                exclusions = replace(exclusions, repeated=int(repeats.sum()))
+            self.exclusions = exclusions
+            if self.exclusions.total:
+                logger.warning("%s: %s", self.csv_path, self.exclusions.message())
             return chart
         except Exception as exc:
             logger.exception("Failed to load CSV %s", self.csv_path)

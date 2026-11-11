@@ -13,6 +13,7 @@ Functions that read the dashboard take it first (``dashboard``: a
 :class:`MetricDashboard`) and read it when called, like the methods they were.
 """
 
+import dataclasses
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -157,7 +158,28 @@ def export_table(
     faceted_tubes,
     faceted_dates,
 ) -> dash_export.ExportTable | None:
-    """The rows behind ``view``, from the same DataCache aggregates as the chart."""
+    """The rows behind ``view``, from the same DataCache aggregates as the chart, with the
+    count of the CSV rows the charts leave out when repeated scans were
+    (:func:`.dash_export.row_counts`)."""
+    table = _view_table(
+        dashboard, view, tube, selected_tubes, viz_options, faceted_tubes, faceted_dates
+    )
+    counts = dash_export.row_counts(dashboard.data_processor)
+    if table is None or not counts:
+        return table
+    return dataclasses.replace(table, row_counts=counts)
+
+
+def _view_table(
+    dashboard: "MetricDashboard",
+    view,
+    tube,
+    selected_tubes,
+    viz_options,
+    faceted_tubes,
+    faceted_dates,
+) -> dash_export.ExportTable | None:
+    """The rows behind ``view`` and how to describe them (see :func:`export_table`)."""
     cache = dashboard.data_cache
     noun = dashboard.data_processor.metric_label.lower()  # "length", "area"
     if view == "stacked":
