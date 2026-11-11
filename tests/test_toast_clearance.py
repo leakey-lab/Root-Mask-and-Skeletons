@@ -1,10 +1,10 @@
-"""Toasts keep clear of the bottom chrome at every window size (KNOWN_ISSUES #5, H1).
+"""Toasts keep clear of the window's bottom chrome at every window size (KNOWN_ISSUES #5, H1).
 
-Before: the stack only kept above the statusline and a Correct dock, so on the Library
-page the toasts covered the metrics bar (at 1280 x 800 the "Loaded 40 images" toast sat on
-the AREA / FOV / STATUS cells), and in an editor they could cover the zoom cluster. The
-"Loaded N images" toast is shown while the empty state is still up, so it must also move
-when the display page (with its metrics bar) replaces it.
+Before, the stack kept above the status line and a Correct dock only, so on the Library page
+the toasts covered the metrics bar (at 1280 x 800 "Loaded 40 images" sat on the AREA / FOV /
+STATUS cells), and in an editor they could cover the zoom cluster. The "Loaded N images"
+toast is shown while the empty state is still up, so it must also move when the display page
+(with its metrics bar) replaces it. (The side panels: ``test_shell_toast_side_panels.py``.)
 
 Offscreen; a tmp_path project of small photos; every window has its own INI settings.
 """
@@ -20,11 +20,16 @@ from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
 from tests.window_support import build_window, open_folder, quiet_window, write_photos
 
-STEMS = [f"24EFCAM1_T001_L0{d}_2024.07.18_1115{d}_001_SMM" for d in (11, 12, 13)]
-LONG = "Mask saved for 24EFCAM1_T001_L044_2024.07.18_111530_001_SMM.jpg"
-SIZES = [(1280, 800), (1366, 768), (1024, 640)]
-
 pytestmark = pytest.mark.usefixtures("no_prompts", "no_temp_sweep")
+
+
+STEMS = [f"24EFCAM1_T001_L0{d}_2024.07.18_1115{d}_001_SMM" for d in (11, 12, 13)]
+
+
+LONG = "Mask saved for 24EFCAM1_T001_L044_2024.07.18_111530_001_SMM.jpg"
+
+
+SIZES = [(1280, 800), (1366, 768), (1024, 640)]
 
 
 @pytest.fixture
@@ -123,3 +128,17 @@ def test_toasts_follow_a_window_resize(make_window, tmp_path):
     settle()
 
     assert_clear(window, window.metrics_bar, window.statusline)
+
+
+def test_with_no_project_the_toasts_stay_clear_of_the_status_line(make_window):
+    """The shell page before a folder is open: no metrics bar on screen, so the status line
+    is the only bottom chrome the stack has to clear."""
+    window = make_window(1280, 800)
+    window.app_stack.setCurrentIndex(1)
+    settle()
+    assert not window.metrics_bar.isVisible()
+
+    window.notify(LONG)
+    settle()
+
+    assert_clear(window, window.statusline)

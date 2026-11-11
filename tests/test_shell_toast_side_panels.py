@@ -135,20 +135,15 @@ def test_without_side_chrome_nothing_changes(app):
         flush_deleted()
 
 
-# ------------------------------------------------------ the main window (once wired)
+# ------------------------------------------------------------------- the main window
 @pytest.mark.parametrize("layer", ["mask", "classes"])
 def test_the_main_window_keeps_toasts_off_the_editor_side_panels(
     app, tmp_path, no_prompts, no_temp_sweep, layer
 ):
-    """Runs once MainWindow passes ``side=`` (see the R-SHELL-B cross-package request).
-    On the Correct page the side card holds the Layers panel, and the class panel below it
+    """On the Correct page the side card holds the Layers panel, and the class panel below it
     while the class labels are edited (WG-T5): the toasts keep clear of both."""
     from PyQt6.QtTest import QTest
 
-    from app.gui.main_window import MainWindow
-
-    if not hasattr(MainWindow, "_side_chrome"):
-        pytest.skip("MainWindow does not pass its editors' side panels to ToastClearance yet")
     stems = [f"24EFCAM1_T001_L0{d}_2024.07.18_1115{d}_001_SMM" for d in (11, 12, 13)]
     folder = write_photos(tmp_path / "project", stems, size=(640, 480))
     window = build_window(tmp_path / "s.ini", size=(1024, 640), show=False)
@@ -179,3 +174,14 @@ def test_the_main_window_keeps_toasts_off_the_editor_side_panels(
     finally:
         delete_widgets([window], prepare=quiet_window)
         QApplication.processEvents()
+
+
+def test_hidden_chrome_does_not_lift_the_stack(scene):
+    """Only chrome on screen counts: with the dock, the zoom cluster and the side panel
+    hidden, the stack sits just above the status line."""
+    for widget in (scene.dock, scene.zoom, scene.panel):
+        widget.hide()
+    scene.toasts.show("Saved")
+    settle()
+    (toast,) = scene.toasts.toasts()
+    assert toast.geometry().bottom() == scene.status.y() - 16 - 1

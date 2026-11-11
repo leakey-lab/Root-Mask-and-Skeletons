@@ -76,3 +76,10 @@ def test_corrupt_state_is_ignored(app, settings):
     settings.setValue("window/body_splitter", b"garbage")
     win, split = _window()
     assert WindowStateStore(settings).restore(win, split) is False
+
+
+def test_initial_geometry_on_a_screen_smaller_than_the_minimum_stays_on_screen():
+    avail = QRect(0, 0, 800, 600)
+    rect = initial_geometry(avail, QSize(900, 700))
+    assert rect.size() == QSize(800, 600)
+    assert avail.contains(rect)

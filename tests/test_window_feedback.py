@@ -1,5 +1,5 @@
-"""What the status line and the toasts say: about the open project, once, alike for every
-layer of the editor (V3, V6, V11).
+"""What the window says about the open project: its title, the status line and the toasts
+(once, alike for every layer of the editor; V3, V6).
 
 - V3: a Measure run leaves "Saved <its CSV path>" on the status line for 15 s and a toast
   for a few seconds. Both survived opening another folder: the new project's status line
@@ -11,7 +11,8 @@ layer of the editor (V3, V6, V11).
   updates the live one in place, worded "Saved <what> · <image>" (the class labels too,
   since Trace GT became a layer of Correct); a failure's toast is never replaced by a
   later save's.
-- V11 (part 1): the Visualize page during a run read "Measuring root length is running".
+- The title bar said "Root Viewer" (the app's old name) whatever was open; it names the
+  app and the open project.
 
 Offscreen; every project is a tmp_path folder of four photos (tests.test_correct_main_window).
 """
@@ -19,7 +20,6 @@ Offscreen; every project is a tmp_path folder of four photos (tests.test_correct
 from __future__ import annotations
 
 import os
-from types import SimpleNamespace
 
 import pytest
 from PyQt6.QtWidgets import QApplication
@@ -27,14 +27,14 @@ from PyQt6.QtWidgets import QApplication
 from app.config import ROOT_LENGTHS_CSV
 from app.gui.correct.layer import CLASSES
 from app.gui.panels import Panel
-from app.gui.window import stages
 from app.handlers.deps import SAVED_PATH_STATUS_MS
 from tests.correct_support import drag, paint
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
+from tests.qt_wait import wait_until as _wait
 from tests.qt_wait import wait_until as wait
 from tests.window_project_support import STEMS, enter, new_project, open_project, select
-from tests.window_support import build_window, quiet_window
+from tests.window_support import build_window, quiet_window, write_photos
 
 pytestmark = pytest.mark.usefixtures("window_guards")
 
@@ -243,43 +243,21 @@ def test_other_editor_notices_still_stack(window):
     assert toast_texts(window)[-2:] == ["Mask shown", "Skeleton shown"]
 
 
-# ======================================================================== V11: the wait text
-def waiting_window(tmp_path, running: str | None) -> SimpleNamespace:
-    """A stand-in window whose length run is going (``running``: the job's name)."""
-    (tmp_path / "a.jpg").write_bytes(b"")
-    return SimpleNamespace(
-        root_length_viz=None,
-        image_manager=SimpleNamespace(original_folder=str(tmp_path), images={"a": "a.jpg"}),
-        skeleton_handler=SimpleNamespace(is_busy=lambda kind=None: kind == "length"),
-        jobs=SimpleNamespace(running_name=lambda: running),
-    )
+# ============================================================================== the title
 
 
-@pytest.mark.parametrize(
-    ("running", "title"),
-    [
-        ("Measuring root length", "Measuring root length…"),
-        ("Generating skeletons", "Generating skeletons…"),
-        (None, "Waiting for a run to finish"),
-    ],
-)
-def test_the_visualize_page_names_the_run_it_waits_for(tmp_path, running, title):
-    missing = stages.missing_dashboard_data(waiting_window(tmp_path, running), "length")
-
-    assert missing == (title, "The root length dashboard opens when it has finished.", "", None)
+def _folder(root, name: str, count: int) -> str:
+    stems = [f"24EFCAM1_T001_L0{10 + i}_2024.07.18_1115{10 + i}_001_SMM" for i in range(count)]
+    return str(write_photos(root / name, stems))
 
 
-def test_the_visualize_page_during_a_measure_run_reads_plainly(window, tmp_path):
-    window.skeleton_handler.is_busy = lambda kind=None: kind == "length"
-    window.jobs._name = "Measuring root length"
-    window.show_root_length_visualization = lambda: pytest.fail("the dashboard opened")
+def test_the_window_title_names_the_app_and_the_project(app, tmp_path, no_prompts):
+    """The title bar said "Root Viewer" (the app's old name) whatever was open."""
+    window = build_window(tmp_path / "t.ini", size=None, show=False)
     try:
-        enter(window, "Visualize")
+        assert window.windowTitle() == "SPROUTS[*]"
+        window.open_path(_folder(tmp_path, "trial_B", 2))
+        assert _wait(lambda: len(window.library_index.leaves()) == 2)
+        assert window.windowTitle() == "trial_B — SPROUTS[*]"
     finally:
-        window.jobs._name = None
-
-    page = window.visualization_widget
-    assert window.right_panel.currentIndex() == Panel.VISUALIZATION
-    assert page.title_label.text() == "Measuring root length…"
-    assert page.body_label.text() == "The root length dashboard opens when it has finished."
-    assert "is running" not in page.title_label.text()
+        delete_widgets([window])

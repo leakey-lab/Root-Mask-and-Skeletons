@@ -6,7 +6,9 @@ clicked again. Now entering the stage opens the highlighted dashboard; when its 
 not exist yet the stage page names the next step (Measure, or Generate when there is
 nothing to measure) with a button to it, instead of a message box. Every stage change is
 also reported to ``visualization_manager.stage_changed`` when that exists (it releases the
-dashboards some minutes after Visualize is left).
+dashboards some minutes after Visualize is left). The last tests check the stage page's
+words without a window (``stages.missing_dashboard_data``): before a folder, and while a run
+rewrites the data (V11: it read "Measuring root length is running").
 
 Offscreen; the dashboards themselves are replaced by recorders (building one needs Dash).
 """
@@ -14,13 +16,16 @@ Offscreen; the dashboards themselves are replaced by recorders (building one nee
 from __future__ import annotations
 
 import csv
+from types import SimpleNamespace
 
 import pytest
 from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtWidgets import QApplication
 
 from app import config
+from app.gui.key_text import platform_keys
 from app.gui.panels import Panel
+from app.gui.window import stages
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle as _settle
 from tests.window_support import build_window, open_folder, quiet_window
@@ -245,3 +250,57 @@ def test_a_missing_stage_changed_hook_is_fine(window, tmp_path, monkeypatch):
     _enter(window, "Measure")
     _enter(window, "Library")
     assert window.ribbon_buttons["Library"].isChecked()
+
+
+def test_visualize_before_a_folder_names_the_first_step():
+    window = SimpleNamespace(
+        root_length_viz=None, image_manager=SimpleNamespace(original_folder=None, images={})
+    )
+    assert stages.missing_dashboard_data(window, "length") == (
+        "No images loaded",
+        platform_keys("Open a folder of root images first (Ctrl+O)."),
+        "",
+        None,
+    )
+    window.root_length_viz = object()  # open already: the dashboard controller decides
+    assert stages.missing_dashboard_data(window, "length") is None
+
+
+def waiting_window(tmp_path, running: str | None) -> SimpleNamespace:
+    """A stand-in window whose length run is going (``running``: the job's name)."""
+    (tmp_path / "a.jpg").write_bytes(b"")
+    return SimpleNamespace(
+        root_length_viz=None,
+        image_manager=SimpleNamespace(original_folder=str(tmp_path), images={"a": "a.jpg"}),
+        skeleton_handler=SimpleNamespace(is_busy=lambda kind=None: kind == "length"),
+        jobs=SimpleNamespace(running_name=lambda: running),
+    )
+
+
+@pytest.mark.parametrize(
+    ("running", "title"),
+    [
+        ("Measuring root length", "Measuring root length…"),
+        ("Generating skeletons", "Generating skeletons…"),
+        (None, "Waiting for a run to finish"),
+    ],
+)
+def test_the_visualize_page_names_the_run_it_waits_for(tmp_path, running, title):
+    missing = stages.missing_dashboard_data(waiting_window(tmp_path, running), "length")
+
+    assert missing == (title, "The root length dashboard opens when it has finished.", "", None)
+
+
+def test_a_failing_dashboard_hook_never_stops_a_stage_change(window, tmp_path, monkeypatch, caplog):
+    from app.gui import visualization_manager
+
+    def broken(_mw, _key):
+        raise RuntimeError("the dashboard page is gone")
+
+    monkeypatch.setattr(visualization_manager, "stage_changed", broken, raising=False)
+    _open(window, _project(tmp_path / "p"))
+
+    _enter(window, "Measure")
+
+    assert window.ribbon_buttons["Measure"].isChecked()
+    assert "The dashboards could not follow the stage 'Measure'" in caplog.text

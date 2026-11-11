@@ -156,3 +156,29 @@ def test_a_method_note_says_measure_again():
     assert measure_text(1, 0, Freshness(1, False, method_note="x"), None) == (
         "1 skeleton: not measured yet · no masks to measure"
     )
+
+
+def test_generate_text_names_the_one_output_that_is_missing():
+    """Only skeletons (or only masks) to make: the phrase says so, never "every image has
+    a mask and a skeleton"."""
+    assert generate_text(["a", "b"], {"a", "b"}, {"a"}) == (
+        "2 images · 0 without a mask · 1 without a skeleton"
+    )
+    assert generate_text(["a", "b"], set(), {"a", "b"}) == (
+        "2 images · 2 without a mask · 0 without a skeleton"
+    )
+
+
+def test_entering_measure_after_the_csvs_are_read_counts_the_inputs(window, tmp_path):
+    """The count starts on entering Measure, not only when a CSV parse lands there."""
+    open_folder(window, _project(tmp_path / "p"), len(STEMS))
+    assert _wait(lambda: not window.metrics.loading and not window.metrics.index.needs_load())
+
+    _enter(window, "Measure")
+
+    assert _wait(
+        lambda: (
+            window.statusline_message.text()
+            == "Ready · 3 skeletons: not measured yet · 2 masks: 1 changed since measured"
+        )
+    ), window.statusline_message.text()

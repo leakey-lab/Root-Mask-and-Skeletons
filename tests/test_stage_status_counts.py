@@ -81,9 +81,14 @@ class _Index:
         return {"length": self.length, "area": None}
 
 
+#: The library the Measure phrase is read for: one image with a skeleton and a mask.
+MANAGER = SimpleNamespace(images={"a": "a.jpg"}, masks={"a"}, skeleton_stems={"a"})
+
+
 def _changes(status):
+    """The Measure phrase each time ``changed`` says a count came in."""
     seen = []
-    status.changed.connect(lambda: seen.append(status._freshness["length"].changed))
+    status.changed.connect(lambda: seen.append(status.text("Measure", MANAGER)))
     return seen
 
 
@@ -126,7 +131,7 @@ def test_a_failed_count_keeps_the_text_and_never_blocks_the_next(
     status.check(index, layout)
     pool.run_next()
     assert len(seen) == 1
-    before = status._freshness
+    before = status.text("Measure", MANAGER)
 
     def broken(*_a, **_k):
         raise ending
@@ -134,7 +139,7 @@ def test_a_failed_count_keeps_the_text_and_never_blocks_the_next(
     monkeypatch.setattr(stage_status, "input_freshness", broken)
     status.check(index, layout)
     pool.run_next()  # reports (None): nothing escapes the pool job
-    assert status._freshness is before and len(seen) == 1
+    assert status.text("Measure", MANAGER) == before and len(seen) == 1
     assert "Could not count the Measure inputs" in caplog.text
     status.check(index, layout)
     assert len(pool.jobs) == 1  # the next count starts at once
@@ -176,5 +181,4 @@ def test_the_measure_text_is_the_newest_counts(tmp_path, pool, counted, status):
     pool.run_next()
     pool.run_next()
     # length then area per count: the second count's length is the third call
-    assert status._freshness["length"].changed == 3
     assert status.text("Measure", manager).startswith("1 skeleton: 3 changed since measured")
