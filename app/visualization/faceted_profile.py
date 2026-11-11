@@ -283,6 +283,13 @@ def grid_layout(column_titles: Sequence[str], row_titles: Sequence[str]) -> dict
     return layout
 
 
+#: The grid's axis titles' font size (px; their colour is the template's, ``TEXT_MUTED``).
+_AXIS_TITLE_SIZE = 13
+#: The value axis's title sits this many px under the plot area: below the bottom row's
+#: tick labels (6 px ticks + 11 px text), inside the 76 px bottom margin.
+_VALUE_TITLE_SHIFT = -28
+
+
 def _x_range(max_value: float) -> int:
     """Symmetric x half-range: 10% headroom, rounded up to a multiple of 10 (min 10)."""
     if max_value <= 0:
@@ -327,6 +334,7 @@ class _FacetedFigureAssembler:
         _merge(layout, self._layout_updates())
         for annotation in layout.get("annotations", []):
             _merge(annotation, {"font": {"size": 12}})
+        layout.setdefault("annotations", []).append(self._value_title(layout))
         # Validating the dicts was 60 % of the build (6 x 3 panels: 21 -> 8 ms).
         return go.Figure(data=self._traces(), layout=layout, _validate=False)
 
@@ -423,6 +431,28 @@ class _FacetedFigureAssembler:
         }
 
     # -- layout -----------------------------------------------------------
+    def _value_title(self, layout: dict) -> dict:
+        """The value axis's title, once, centred under the grid in the bottom margin, below
+        the bottom row's tick labels; the font and colour of the axis titles.
+
+        Every bottom panel's bars are interval means (the field's left, the tube's right).
+        One title per bottom panel touched its neighbours with six tubes (twelve panels)
+        below about 790 px of graph width."""
+        left = layout["xaxis"]["domain"][0]
+        right = layout[f"xaxis{_axis_suffix(self.n_cols)}"]["domain"][1]
+        return {
+            "text": f"Mean {self.label} ({self.unit})",
+            "font": {"size": _AXIS_TITLE_SIZE, "color": theme.TEXT_MUTED},
+            "showarrow": False,
+            "x": (left + right) / 2.0,
+            "xanchor": "center",
+            "xref": "paper",
+            "y": 0,
+            "yanchor": "top",
+            "yref": "paper",
+            "yshift": _VALUE_TITLE_SHIFT,
+        }
+
     def _layout_updates(self) -> dict:
         x_half = _x_range(self.profile.max_value)
         x_step = _x_tick_step(x_half)
@@ -439,8 +469,6 @@ class _FacetedFigureAssembler:
             y_tickvals.append(y_max)
         # hide the 0 and max depth labels to reduce clutter
         y_ticktext = ["" if v in (0, y_max) else str(v) for v in y_tickvals]
-        # Each bottom panel's bars are interval means: the field's left, the tube's right.
-        value_title = f"Mean {self.label} ({self.unit})"
 
         updates: dict[str, Any] = {
             # The template itself: without validation a name is not looked up, and
@@ -460,7 +488,7 @@ class _FacetedFigureAssembler:
             "height": max(560, self.n_rows * 300),
             # Wider top margin separates the main title from the "Tube N"
             # column titles; trim the oversized right margin. The bottom one holds the
-            # value-axis titles under the tick labels.
+            # value axis's title under the tick labels (:meth:`_value_title`).
             "margin": {"l": 64, "r": 60, "t": 118, "b": 76},
             "hovermode": "closest",
             "barmode": "overlay",  # field and tube bars share each depth row
@@ -489,14 +517,15 @@ class _FacetedFigureAssembler:
                     "ticks": "outside" if bottom else "",
                     "ticklen": 6 if bottom else 0,
                     "tickfont": {"size": 11},
-                    "title": {"text": value_title if bottom else "", "font": {"size": 13}},
+                    # The value axis is titled once, under the grid (:meth:`_value_title`).
+                    "title": {"text": "", "font": {"size": _AXIS_TITLE_SIZE}},
                 }
                 depth_title = col == 1 and row == (self.n_rows + 1) // 2
                 updates[f"yaxis{suffix}"] = {
                     "range": [y_max, 0],  # depth grows downwards
                     "title": {
                         "text": POSITION_AXIS_TITLE if depth_title else "",
-                        "font": {"size": 13},
+                        "font": {"size": _AXIS_TITLE_SIZE},
                     },
                     "showgrid": True,
                     "tickfont": {"size": 11},

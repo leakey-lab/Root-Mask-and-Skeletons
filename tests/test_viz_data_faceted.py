@@ -18,6 +18,7 @@ import pytest
 
 from app.config import LENGTH_CSV_HEADERS
 from app.data_processing.data_processor import DataProcessor
+from app.visualization import theme
 from app.visualization.dash_data_cache import DataCache
 from app.visualization.faceted_profile import (
     FacetCell,
@@ -90,13 +91,20 @@ def test_figure_draws_one_panel_per_cell_with_shared_scales(cache):
         assert list(layout[key].tickvals) == [0, 20, 40]
         assert list(layout[key].ticktext) == ["", "20", ""]
     assert layout.yaxis.title.text == "Position (L)"
-    assert [layout[k].title.text for k in ("xaxis", "xaxis2", "xaxis3", "xaxis4")] == [
-        "", "", "Mean Length (mm)", "Mean Length (mm)",
-    ]  # fmt: skip
+    # The value axis is titled once, under the grid, not per bottom panel (FR-7).
+    assert [layout[k].title.text for k in ("xaxis", "xaxis2", "xaxis3", "xaxis4")] == [""] * 4
     assert layout.height == 600
     assert layout.barmode == "overlay"
     titles = [a.text for a in layout.annotations]
-    assert titles == ["Tube 1", "Tube 2", "2024-07-18", "2024-08-07"]
+    assert titles == ["Tube 1", "Tube 2", "2024-07-18", "2024-08-07", "Mean Length (mm)"]
+    value = layout.annotations[-1]
+    assert (value.xref, value.yref) == ("paper", "paper")
+    assert value.x == (layout.xaxis3.domain[0] + layout.xaxis4.domain[1]) / 2  # the grid's centre
+    assert (value.xanchor, value.y, value.yanchor) == ("center", 0, "top")
+    assert value.yshift < -20  # under the bottom row's tick labels, in the bottom margin
+    assert -value.yshift + value.font.size < layout.margin.b
+    assert value.font.size == 13 and value.font.color == theme.TEXT_MUTED  # as the axis titles
+    assert value.showarrow is False
 
 
 def test_figure_traces_follow_cells_in_row_major_order(cache):

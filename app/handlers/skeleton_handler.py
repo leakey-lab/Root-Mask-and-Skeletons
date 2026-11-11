@@ -28,6 +28,7 @@ from app.calibration import (
     load_project_calibration,
     reference_frame,
 )
+from app.config import SOURCE_COLUMN
 from app.dialogs import show_transient
 from app.feedback import UiFeedback
 from app.handlers.deps import SAVED_PATH_STATUS_MS, HandlerDependencies, folder_label
@@ -39,12 +40,12 @@ from app.inference.measure_run import (
     SPECS,
     MeasureRun,
     MetricSpec,
-    mixed_sizes,
+    mixed_size_group,
     scan_png_files,
     sizes_px,
     split_inputs,
 )
-from app.inference.measure_sources import SIZE, UNEDITED, UNREADABLE
+from app.inference.measure_sources import GT, SIZE, UNEDITED, UNREADABLE
 from app.inference.metric_thread import MetricCalculatorThread
 from app.masks.store import MASK_THRESHOLD
 from app.project_layout import ProjectLayout, project_layout_of, skip_gt_variants
@@ -309,29 +310,30 @@ class SkeletonHandler(HandlerDependencies):
           the photos show it.
         * The files of one source group have more than one size (M2): the photos differ,
           and one field of view was applied to all of them (sizes in the provenance,
-          ``inputs.sizes_px``).
-        * Measured files have another ratio than the project file's reference (O3), or,
-          when no photo was checked, than the frame. GT files are photo-sized, so this says
-          what the photo warning says: it is left out when that is shown.
+          ``inputs.sizes_px``). GT files are photo-sized, so GT files of several sizes
+          beside the photo warning are the photos' shapes again: left out then. Predictions
+          of several sizes (files the model did not write) are another cause and are said.
+        * When no photo was checked, GT files of another ratio than the frame (O3): they are
+          photo-sized, so they speak for the photos. A prediction's shape is the model's,
+          never the frame's: prediction rows are not compared with the frame.
 
-        When the last two apply (an odd-shaped file among others), one warning says both."""
+        When the last two apply (an odd-shaped GT file among others), one warning says both."""
         fov = fov_label(job.calibration.calibration)
         reference = reference_frame(job.calibration)
         photo_warning = self._photo_shape_warning(job, reference, fov)
         if photo_warning:
             self._warn(photo_warning)
-        sizes = mixed_sizes(rows)
-        # Checked photos speak for the frame; without them the measured files are checked
-        # against it (the default's frame too), else only against a project file's reference.
+        found = mixed_size_group(rows)
+        sizes = None if found is None or (photo_warning and found[0] == GT) else found[1]
+        # Checked photos speak for the frame; without them only the GT files can.
         sampled = bool(job.photo_shapes and job.photo_shapes["n_checked"])
+        n = 0
         if not sampled:
-            measured_reference = reference
-        else:
-            measured_reference = job.calibration.reference_size_px
-        n = 0 if photo_warning else aspect_mismatches(sizes_px(rows), measured_reference)
+            gt_sizes = sizes_px(row for row in rows if row.get(SOURCE_COLUMN) == GT)
+            n = aspect_mismatches(gt_sizes, reference)
         shape = None
-        if n and measured_reference is not None:
-            shape = f"another shape than the {self._frame_words(job, measured_reference, fov)}"
+        if n and reference is not None:
+            shape = f"another shape than the {self._frame_words(job, reference, fov)}"
         if sizes is None and shape is None:
             return
         if sizes is None:

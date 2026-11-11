@@ -136,6 +136,9 @@ def test_a_real_manifest_and_history_are_summarised(tmp_path):
         "models": {"mask": [hashlib.sha256(b"weights-1").hexdigest()]},
         "app_versions": [record["app"]["version"]],
         "git_commits": [record["git_commit"]] if record["git_commit"] else [],
+        "norm_stats": [],  # a mask run has none
+        "batch_sizes": [2],
+        "batch_policies": [],  # this test's run records none
         "first_utc": record["created_utc"],
         "last_utc": record["created_utc"],
     }
@@ -208,9 +211,75 @@ def test_a_history_line_keeps_only_the_named_fields(tmp_path):
         "models",
         "app_versions",
         "git_commits",
+        "norm_stats",
+        "batch_sizes",
+        "batch_policies",
         "first_utc",
         "last_utc",
     }
+
+
+def test_a_history_line_carries_the_runs_mode_parameters():
+    record = provenance.build_record(
+        "skeleton_generation",
+        parameters={"batch_size": 4, "batch_policy": "auto", "norm_stats": "image", "x": 1},
+    )
+    entry = run_record.history_entry(record, BatchReport(written=["a.jpg"]))
+    assert entry["norm_stats"] == "image"
+    assert entry["batch_size"] == 4
+    assert entry["batch_policy"] == "auto"
+    assert "x" not in entry
+
+    mask = provenance.build_record("mask_generation", parameters={"batch_size": 8})
+    entry = run_record.history_entry(mask, BatchReport(written=["a.jpg"]))
+    assert entry["batch_size"] == 8
+    assert "norm_stats" not in entry and "batch_policy" not in entry
+    minimal = provenance.minimal_record("mask_generation", outputs={}, reason="OSError: no")
+    entry = run_record.history_entry(minimal, BatchReport(written=["a.jpg"]))
+    assert not {"norm_stats", "batch_size", "batch_policy"} & set(entry)
+
+
+def test_two_runs_in_two_modes_are_both_listed(tmp_path):
+    """A *Keep predictions* run after the switch was set adds predictions of another mode
+    (and here another batch size) to the folder: the history lists both."""
+    out = tmp_path / "skeletons"
+    _write_history_lines(
+        out,
+        [
+            {"models": {"skeleton": "f" * 64}, "norm_stats": "running", "batch_size": 8},
+            {"models": {"skeleton": "f" * 64}, "norm_stats": "image", "batch_size": 4},
+            {"models": {"skeleton": "f" * 64}, "batch_policy": "fixed", "norm_stats": None},
+            {"models": {"skeleton": "f" * 64}},  # an old line: none of the three
+        ],
+    )
+
+    history = generation_summary(str(out))["history"]
+
+    assert history["n_runs"] == 4
+    assert history["norm_stats"] == ["image", "running"]
+    assert history["batch_sizes"] == [4, 8]
+    assert history["batch_policies"] == ["fixed"]
+
+
+def test_wrong_typed_mode_parameters_are_left_out(tmp_path):
+    out = tmp_path / "skeletons"
+    _write_history_lines(
+        out,
+        [
+            {"norm_stats": 3, "batch_size": "8", "batch_policy": ["auto"]},
+            {"norm_stats": {"a": 1}, "batch_size": True, "batch_policy": None},
+            {"batch_size": 2.5},
+            {"norm_stats": "image", "batch_size": 4, "batch_policy": "auto"},
+        ],
+    )
+
+    history = generation_summary(str(out))["history"]
+
+    assert history["n_runs"] == 4 and history["n_unreadable"] == 0
+    assert history["norm_stats"] == ["image"]
+    assert history["batch_sizes"] == [4]
+    assert history["batch_policies"] == ["auto"]
+    json.dumps(history)
 
 
 def test_a_minimal_record_carries_its_provenance_error(tmp_path):
@@ -357,6 +426,67 @@ def test_a_malformed_history_line_is_counted_and_the_rest_kept(tmp_path):
     assert history["first_utc"] is None and history["last_utc"] is None
 
 
+_GOOD = {
+    "kind": "mask_generation",
+    "created_utc": "2026-11-10T00:00:00Z",
+    "app": {"version": "3.0.0"},
+    "git_commit": "abc",
+    "outputs": {"status": "completed"},
+    "models": {"mask": {"sha256": "d" * 64}},
+    "parameters": {"batch_size": 4},
+}
+
+
+def _with_lone_surrogate(record: dict) -> bytes:
+    """``record`` as JSON with its ``"x"`` value written as the escape of a lone surrogate:
+    valid JSON in valid UTF-8 bytes, but no text that UTF-8 can hold once parsed."""
+    return json.dumps(record).replace('"x"', '"\\ud800"').encode()
+
+
+_SURROGATES = {
+    "parameters": (_with_lone_surrogate({**_GOOD, "parameters": {"note": "x"}}), None),
+    "git_commit": (_with_lone_surrogate({**_GOOD, "git_commit": "x"}), None),
+    "history-app-version": (
+        None,
+        _with_lone_surrogate({"app_version": "x", "models": {"mask": "d" * 64}}),
+    ),
+}
+
+
+def _write_surrogate_case(out, case: str) -> None:
+    manifest, history = _SURROGATES[case]
+    os.makedirs(out, exist_ok=True)
+    if manifest is not None:
+        _write_manifest_bytes(out, manifest)
+    if history is not None:
+        _write_history_lines(out, [history])
+
+
+@pytest.mark.parametrize("case", sorted(_SURROGATES))
+def test_a_lone_surrogate_gives_the_error_form(tmp_path, case):
+    out = tmp_path / "mask"
+    _write_surrogate_case(out, case)
+
+    summary = generation_summary(str(out))
+
+    assert set(summary) == {"record", "error"}  # no partial copy
+    assert summary["record"] == "_sprouts_run.json"
+    assert "surrogates not allowed" in summary["error"]
+    json.dumps(summary, ensure_ascii=False).encode("utf-8")
+
+
+@pytest.mark.parametrize("case", sorted(_SURROGATES))
+def test_a_lone_surrogate_keeps_the_measure_sidecar(tmp_path, case):
+    folder, images = _project(tmp_path, AREA)
+    _write_surrogate_case(folder, case)
+
+    _, record = _measure(AREA, images, folder, tmp_path)
+
+    assert record is not None  # the sidecar was written
+    assert record["calibration"]["source"] == "default"
+    assert set(record["inputs"]["generation"]) == {"record", "error"}
+
+
 def test_an_unreadable_manifest_is_an_error(tmp_path):
     out = tmp_path / "mask"
     os.makedirs(os.path.join(out, provenance.RUN_MANIFEST_FILENAME))  # a folder, not a file
@@ -435,6 +565,49 @@ def test_the_sidecar_names_the_generation_run(tmp_path, spec):
     assert record["inputs"]["generation"]["kind"] == "mask_generation"
     assert record["schema"] == "sprouts-provenance/1"
     assert record["models"] == {}
+
+
+def _tagged_manifest(folder, tag: str) -> None:
+    record = {**_GOOD, "git_commit": tag, "created_utc": tag}
+    _write_manifest_bytes(folder, json.dumps(record).encode())
+
+
+@pytest.mark.parametrize("spec", [LENGTH, AREA], ids=["length", "area"])
+def test_a_retry_of_the_write_names_the_run_the_rows_were_measured_from(tmp_path, spec):
+    """The generation record is read when the rows are measured: a Retry of the write after
+    another Generate run still names the run behind the rows."""
+    folder, images = _project(tmp_path, spec)
+    _tagged_manifest(folder, "run1")
+    run = MeasureRun(spec, images, str(folder), project_root=str(tmp_path))
+    run.compute()
+    _tagged_manifest(folder, "run2")  # a Generate run while the Retry box was open
+
+    run.write()
+
+    generation = provenance.read_sidecar(run.csv_path)["inputs"]["generation"]
+    assert generation["git_commit"] == "run1"
+
+
+def test_a_stopped_run_reads_no_generation_record(tmp_path, monkeypatch):
+    folder, images = _project(tmp_path, AREA)
+    read = []
+    monkeypatch.setattr(run_record, "generation_summary", lambda folder: read.append(folder))
+    run = MeasureRun(AREA, images, str(folder), project_root=str(tmp_path))
+    assert run.compute(should_stop=lambda: True) is None
+    assert read == []
+
+
+def test_rows_set_without_compute_write_the_record_read_at_write_time(tmp_path):
+    folder, images = _project(tmp_path, AREA)
+    _tagged_manifest(folder, "run1")
+    run = MeasureRun(AREA, images, str(folder), project_root=str(tmp_path))
+    run.rows = []  # as tests and tools build a run
+    _tagged_manifest(folder, "run2")
+
+    run.write()
+
+    generation = provenance.read_sidecar(run.csv_path)["inputs"]["generation"]
+    assert generation["git_commit"] == "run2"
 
 
 @pytest.mark.parametrize("spec", [LENGTH, AREA], ids=["length", "area"])

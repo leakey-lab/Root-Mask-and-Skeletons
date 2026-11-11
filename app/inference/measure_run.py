@@ -71,6 +71,7 @@ __all__ = [
     "MeasureRun",
     "MetricSpec",
     "csv_calibration",
+    "mixed_size_group",
     "mixed_sizes",
     "scan_png_files",
     "sizes_px",
@@ -145,6 +146,9 @@ PREDICTION_ONLY: dict[str, dict[str, str]] = {
 }
 
 
+#: :attr:`MeasureRun.generation` before :meth:`MeasureRun.compute` read it (``None`` is a
+#: summary: no Generate run wrote into the folder).
+_NOT_READ = object()
 #: The private row key holding the decoded size of the file a row was measured from.
 _SIZE_KEY = "_size_px"
 #: The private row key set on a mask whose grey decode holds levels other than 0 and 255.
@@ -169,13 +173,21 @@ def mixed_sizes(rows: Iterable[Mapping[str, Any]]) -> dict[str, int] | None:
     which one field of view cannot fit. Predictions of two sizes mean files the model did
     not write (it always writes 341 x 256 skeletons and 640 x 480 masks). A project without
     GT files is not checked for photo sizes. GT is looked at first."""
+    found = mixed_size_group(rows)
+    return None if found is None else found[1]
+
+
+def mixed_size_group(rows: Iterable[Mapping[str, Any]]) -> tuple[str, dict[str, int]] | None:
+    """``(source, sizes)`` of the group :func:`mixed_sizes` finds (``source`` is ``gt`` or
+    ``prediction``), else ``None``: the source tells the two causes apart (photos of two
+    sizes, or files the model did not write)."""
     groups: dict[str, list[Mapping[str, Any]]] = {GT: [], PREDICTION: []}
     for row in rows:
         groups.setdefault(row.get(SOURCE_COLUMN) or PREDICTION, []).append(row)
-    for group in groups.values():
+    for source, group in groups.items():
         sizes = sizes_px(group)
         if len(sizes) > 1:
-            return sizes
+            return source, sizes
     return None
 
 
@@ -284,6 +296,10 @@ class MeasureRun:
         #: The shapes of a sample of the measured images' photos (:meth:`_check_photo_shapes`),
         #: set with :attr:`rows`; ``None``: nothing checked (no photos, or the check failed).
         self.photo_shapes: dict[str, Any] | None = None
+        #: The generation run behind the predictions (:func:`run_record.generation_summary`),
+        #: read when :meth:`compute` measured the rows, so a Retry of :meth:`write` names the
+        #: run the rows came from; :data:`_NOT_READ` until then (a write reads it itself).
+        self.generation: Any = _NOT_READ
         #: input key -> (size, mtime_ns, sha256) of each file measured (filled by compute()).
         self.fingerprints: dict[str, Fingerprint] = {}
         self._fingerprints_lock = threading.Lock()
@@ -331,6 +347,7 @@ class MeasureRun:
             for row in rows:
                 row[SOURCE_COLUMN] = self.sources.get(row["Image"], PREDICTION)
             self.photo_shapes = self._check_photo_shapes(rows)
+            self.generation = run_record.generation_summary(self.output_dir)
             self.rows = rows
         return self.rows
 
@@ -576,9 +593,13 @@ class MeasureRun:
                     "files": dict(report.files),  # a read-only mapping: JSON wants a dict
                     "skipped": [{"stem": stem, "reason": why} for stem, why in report.skipped],
                 }
-            # The generation run behind the predictions (their folder is the CSV's); None
-            # (JSON null) when no Generate run of this app wrote into it.
-            inputs["generation"] = run_record.generation_summary(self.output_dir)
+            # The generation run behind the predictions (their folder is the CSV's), as read
+            # when the rows were measured; None (JSON null) when no Generate run of this app
+            # wrote into it. Rows set without compute() get the record read now.
+            generation = self.generation
+            if generation is _NOT_READ:
+                generation = run_record.generation_summary(self.output_dir)
+            inputs["generation"] = generation
             # The photos' shapes (a sample, read from their headers); None: none checked.
             photos = self.photo_shapes
             inputs["photos"] = (

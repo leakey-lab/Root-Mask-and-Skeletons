@@ -10,8 +10,9 @@ import pytest
 
 from app import provenance
 from app.inference import mask_inference, run_record
+from app.inference import skeleton_inference as si
 from app.inference.batch_engine import BatchReport
-from tests.test_generation_inference import _images, _StubMaskModel
+from tests.test_generation_inference import _images, _StubMaskModel, _StubSkeletonModel
 
 pytestmark = pytest.mark.usefixtures("cpu_runtime")
 
@@ -100,6 +101,42 @@ def test_more_than_the_limit_written_names_are_a_count_and_a_digest():
     at_limit = run_record.history_entry(record, BatchReport(written=names[:1000]))
     assert len(at_limit["written"]) == 1000
     assert "written_count" not in at_limit
+
+
+class _ModeStub(_StubSkeletonModel):
+    def __init__(self, mode):
+        super().__init__()
+        self.norm_stats = mode
+
+
+def test_history_lines_carry_each_runs_mode(tmp_path):
+    """A run in one normalisation mode, then a run of new photos only in the other, into one
+    folder (as *Keep predictions* does after the switch was set): each line names its run's
+    mode and batch size, and the summary lists both."""
+    out = str(tmp_path / "imgs" / "skeletons")
+    first = _images(str(tmp_path / "imgs"), ["a.jpg", "b.jpg"])
+    si.run_skeleton_generation(first, out, model=_ModeStub("running"), batch_size=2)
+    second = _images(str(tmp_path / "new"), ["c.jpg"])
+    si.run_skeleton_generation(second, out, model=_ModeStub("image"), batch_size=1)
+
+    lines = [json.loads(line) for line in _history_lines(out)]
+    assert [line["norm_stats"] for line in lines] == ["running", "image"]
+    assert [line["batch_size"] for line in lines] == [2, 1]
+    assert all(isinstance(line["batch_policy"], str) for line in lines)
+    summary = run_record.generation_summary(out)
+    assert summary["parameters"]["norm_stats"] == "image"  # the last run's
+    assert summary["history"]["norm_stats"] == ["image", "running"]
+    assert summary["history"]["batch_sizes"] == [1, 2]
+    assert summary["history"]["batch_policies"] == [lines[0]["batch_policy"]]
+
+
+def test_a_mask_runs_history_line_has_no_norm_stats(tmp_path):
+    src = _images(str(tmp_path / "imgs"), ["a.jpg"])
+    out = str(tmp_path / "imgs" / "mask")
+    _run(src, out)
+    (line,) = [json.loads(line) for line in _history_lines(out)]
+    assert "norm_stats" not in line
+    assert line["batch_size"] == 2
 
 
 def test_a_history_failure_never_fails_the_run(tmp_path, monkeypatch, caplog):

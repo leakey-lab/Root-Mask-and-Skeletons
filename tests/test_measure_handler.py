@@ -418,21 +418,26 @@ def test_files_of_another_shape_warn_once(tmp_path, qapp):
         '{"schema": 1, "calibration": {"fov_width_mm": 18.0, "fov_height_mm": 13.5, '
         '"reference_size_px": [640, 480]}}',
     )
+    # Model-size predictions (80 x 64 here) and a GT mask at each photo's size.
     for i in range(2):
-        _extra_image(tmp_path, f"v_T{i + 1}_L2_2024.01.02_01020{i}_001", (60, 80), "mask")
-    _extra_image(tmp_path, "v_T9_L2_2024.01.02_010209_001", (48, 96), "mask")
+        name = f"v_T{i + 1}_L2_2024.01.02_01020{i}_001"
+        _extra_image(tmp_path, name, (64, 80), "mask", photo_shape=(60, 80))
+        _extra_image(tmp_path, name, (60, 80), "gt/mask")
+    name = "v_T9_L2_2024.01.02_010209_001"
+    _extra_image(tmp_path, name, (64, 80), "mask", photo_shape=(48, 96))
+    _extra_image(tmp_path, name, (48, 96), "gt/mask")
     handler, mw = _handler(tmp_path, qapp)
     handler.calculate_root_area()
     _wait_idle(handler, qapp)
 
-    # The odd shape is said once, by the photos (T3); the measured files' two sizes are
-    # another cause and keep their warning, without the shape clause (review M2).
+    # One odd photo is one cause: the photos say it, and the GT files' two sizes (they are
+    # photo-sized) are not said again (review M2, FR-5).
+    record = provenance.read_sidecar(tmp_path / "mask" / "root_areas.csv")
+    assert record["inputs"]["sizes_px"] == {"80x60": 2, "96x48": 1}
     sizes = [w for w in _warnings(mw) if "another shape" in w or w.startswith(_MIXED)]
     assert sizes == [
         "1 of 3 photos checked has another shape than the 640×480 reference in "
-        "sprouts_project.json (96×48 ×1): the field of view was applied to each whole image.",
-        "The measured files have 2 sizes (80x60 ×2, 96x48 ×1): one 18×13.5 mm field of view "
-        "was applied to each.",
+        "sprouts_project.json (96×48 ×1): the field of view was applied to each whole image."
     ]
 
 

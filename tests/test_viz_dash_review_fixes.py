@@ -229,9 +229,31 @@ def test_the_depth_profile_grid_names_its_metric_unit_and_positions(tmp_path, bu
     )
     assert layout.yaxis.title.text == "Position (L)"  # positions, as the Depth Profile view
     assert layout.yaxis.title.text == dashboard.show_growth_lines(1).layout.yaxis.title.text
-    bottom = [layout.xaxis3.title.text, layout.xaxis4.title.text]
-    assert bottom == [f"Mean {label} ({unit})"] * 2
-    assert not layout.xaxis.title.text and not layout.xaxis2.title.text  # only the bottom row
+    # The value axis is titled once, under the grid (FR-7): no panel's x axis carries it.
+    value = f"Mean {label} ({unit})"
+    assert [a.text for a in layout.annotations].count(value) == 1
+    assert not any(layout[f"xaxis{s}"].title.text for s in ("", "2", "3", "4"))
+
+
+@pytest.mark.parametrize("n_tubes", [1, 6])
+def test_the_grid_titles_its_value_axis_once_under_the_grid(tmp_path, n_tubes):
+    """Six tubes are twelve bottom panels: one title per panel touched its neighbours below
+    about 790 px of graph width. One centred title reads with one tube and with six."""
+    rows = tuple(
+        (f"T{tube:03d}_L{pos:03d}_{date}", tube, pos, date, 1.0 + tube + pos / 10)
+        for tube in range(1, 7)
+        for pos in (5, 15, 25)
+        for date in ("2024.07.18", "2024.08.07")
+    )
+    dashboard = _length_app(write_metric_csv(str(tmp_path / "l.csv"), LENGTH_COLUMN, rows))
+    layout = dashboard.create_faceted_depth_profile(list(range(1, n_tubes + 1))).layout
+
+    titled = [k for k in layout if k.startswith("xaxis") and layout[k].title.text]
+    assert titled == []
+    (value,) = [a for a in layout.annotations if a.text == "Mean Length (mm)"]
+    first, last = layout.xaxis.domain, layout[f"xaxis{n_tubes if n_tubes > 1 else ''}"].domain
+    assert value.x == pytest.approx((first[0] + last[1]) / 2)
+    assert value.yref == "paper" and value.y == 0 and value.yanchor == "top"
 
 
 # ---- D: the grid export: no SD for a one-image bin, and its count --------------------------

@@ -329,19 +329,23 @@ def _wait_idle(handler, qapp, timeout=20.0):
     qapp.processEvents()
 
 
-def _project(tmp_path, photo_shapes, *, gt=False):
+def _project(tmp_path, photo_shapes, *, gt=False, predictions=None):
     """One photo per ``(rows, cols)`` of ``photo_shapes``, each with a 640 x 480 predicted
-    mask (the model's size); ``gt``: also a GT mask at the photo's size."""
+    mask (the model's size; ``predictions``: index -> another shape, a file the model did not
+    write); ``gt``: also a GT mask at the photo's size (``True``: every image, else the
+    indices of the images that have one)."""
     (tmp_path / "mask").mkdir(exist_ok=True)
     if gt:
         (tmp_path / "gt" / "mask").mkdir(parents=True, exist_ok=True)
+    with_gt = range(len(photo_shapes)) if gt is True else (gt or ())
     for i, shape in enumerate(photo_shapes):
         name = f"s_T{i + 1}_L2_2024.01.02_01020{i}_001"
         cv2.imwrite(str(tmp_path / f"{name}.jpg"), np.zeros(shape, np.uint8))
-        pred = np.zeros((480, 640), np.uint8)
-        cv2.line(pred, (0, 0), (639, 100 + i), 255, 3)
+        pred_shape = (predictions or {}).get(i, (480, 640))
+        pred = np.zeros(pred_shape, np.uint8)
+        cv2.line(pred, (0, 0), (pred_shape[1] - 1, 100 + i), 255, 3)
         cv2.imwrite(str(tmp_path / "mask" / f"{name}.png"), pred)
-        if gt:
+        if i in with_gt:
             mask = np.zeros(shape, np.uint8)
             cv2.line(mask, (0, 5), (shape[1] - 1, shape[0] // 2 + i), 255, 5)
             cv2.imwrite(str(tmp_path / "gt" / "mask" / f"{name}.png"), mask)
@@ -468,17 +472,122 @@ def test_gt_files_of_another_shape_still_warn_without_a_photo_sample(tmp_path, q
     ]
 
 
-def test_the_sizes_warning_still_comes_with_the_photo_warning(tmp_path, qapp):
-    """GT files of two sizes are another cause (photos of two sizes): their warning stays,
-    without the shape clause the photo warning already says."""
+def test_gt_files_of_two_sizes_with_the_photo_warning_warn_once(tmp_path, qapp):
+    """GT files are photo-sized: their two sizes are the photos' two shapes, which the photo
+    warning already says (one cause, one warning)."""
     _project(tmp_path, [_CROP, _CROP, (400, 640)], gt=True)
     mw = _measure_area(tmp_path, qapp)
     assert _size_warnings(mw) == [
         "3 of 3 photos checked have another shape than the 640×480 frame of the default "
         "18×13.5 mm field of view (640×460 ×2, 640×400 ×1): it was applied to each whole "
-        "image. State this camera's field of view in sprouts_project.json.",
-        "The measured files have 2 sizes (640x460 ×2, 640x400 ×1): one 18×13.5 mm field of "
+        "image. State this camera's field of view in sprouts_project.json."
+    ]
+
+
+def test_one_odd_photo_with_gt_masks_on_both_shapes_warns_once(tmp_path, qapp):
+    """Three photos 640 x 480 and one 640 x 460, a GT mask on one of each: the GT masks
+    differ in size because the photos do."""
+    _project(tmp_path, [_FULL, _FULL, _FULL, _CROP], gt=(0, 3))
+    mw = _measure_area(tmp_path, qapp)
+    assert _size_warnings(mw) == [
+        "1 of 4 photos checked has another shape than the 640×480 frame of the default "
+        "18×13.5 mm field of view (640×460 ×1): it was applied to each whole image. State "
+        "this camera's field of view in sprouts_project.json."
+    ]
+
+
+def test_predictions_of_two_sizes_still_warn_beside_the_photo_warning(tmp_path, qapp):
+    """Predictions of two sizes are files the model did not write: another cause."""
+    _project(tmp_path, [_FULL, _FULL, _CROP], predictions={0: (460, 640)})
+    mw = _measure_area(tmp_path, qapp)
+    assert _size_warnings(mw) == [
+        "1 of 3 photos checked has another shape than the 640×480 frame of the default "
+        "18×13.5 mm field of view (640×460 ×1): it was applied to each whole image. State "
+        "this camera's field of view in sprouts_project.json.",
+        "The measured files have 2 sizes (640x480 ×2, 640x460 ×1): one 18×13.5 mm field of "
         "view was applied to each.",
+    ]
+
+
+def test_gt_files_of_two_sizes_with_fitting_photos_still_warn(tmp_path, qapp):
+    """Photos 640 x 480 and 1280 x 960 both fit the frame: no photo warning, so the GT
+    files' two sizes (two cameras) are said."""
+    _project(tmp_path, [_FULL, (960, 1280)], gt=True)
+    mw = _measure_area(tmp_path, qapp)
+    assert _size_warnings(mw) == [
+        "The measured files have 2 sizes (640x480 ×1, 1280x960 ×1): one 18×13.5 mm field of "
+        "view was applied to each."
+    ]
+
+
+# A camera of another frame, stated in the project file (754 x 510 photos).
+_WIDE = (510, 754)
+
+
+def test_a_reference_with_fitting_photos_and_model_size_predictions_does_not_warn(tmp_path, qapp):
+    """A prediction is at the model's size whatever the photo: its shape says nothing about
+    the frame, so it is never compared with the reference."""
+    _project(tmp_path, [_WIDE] * 3)
+    _write_project_file(tmp_path, reference=(754, 510))
+    mw = _measure_area(tmp_path, qapp)
+    record = provenance.read_sidecar(tmp_path / "mask" / "root_areas.csv")
+    assert record["inputs"]["sizes_px"] == {"640x480": 3}
+    assert _size_warnings(mw) == []
+
+
+def test_a_reference_with_fitting_photos_and_one_gt_mask_does_not_warn(tmp_path, qapp):
+    _project(tmp_path, [_WIDE] * 3, gt=(0,))
+    _write_project_file(tmp_path, reference=(754, 510))
+    mw = _measure_area(tmp_path, qapp)
+    record = provenance.read_sidecar(tmp_path / "mask" / "root_areas.csv")
+    assert record["inputs"]["sizes_px"] == {"640x480": 2, "754x510": 1}
+    assert _size_warnings(mw) == []
+
+
+def test_without_a_photo_sample_only_gt_rows_are_compared_with_the_reference(
+    tmp_path, qapp, monkeypatch
+):
+    """No photo checked: the GT files (photo-sized) speak for the frame, the predictions
+    never do. Two GT masks of another shape than the reference, one prediction-only image."""
+    _project(tmp_path, [_CROP, _CROP, _WIDE], gt=(0, 1))
+    _write_project_file(tmp_path, reference=(754, 510))
+    monkeypatch.setattr(MeasureRun, "_check_photo_shapes", lambda self, rows: None)
+    mw = _measure_area(tmp_path, qapp)
+    assert _size_warnings(mw) == [
+        "2 measured files have another shape than the 754×510 reference in "
+        "sprouts_project.json: the field of view was applied to each whole image."
+    ]
+
+
+def test_without_a_photo_sample_predictions_only_give_no_shape_warning(tmp_path, qapp, monkeypatch):
+    _project(tmp_path, [_WIDE] * 2)
+    _write_project_file(tmp_path, reference=(754, 510))
+    monkeypatch.setattr(MeasureRun, "_check_photo_shapes", lambda self, rows: None)
+    mw = _measure_area(tmp_path, qapp)
+    assert _size_warnings(mw) == []
+
+
+def test_a_sample_with_no_photo_read_leaves_the_check_to_the_gt_rows(tmp_path, qapp, monkeypatch):
+    """Photos sampled but none read (``n_checked`` 0): the GT rows are checked."""
+    _project(tmp_path, [_CROP, _CROP], gt=(0,))
+    none_read = {"n_photos": 2, "n_checked": 0, "n_unreadable": 2, "sizes_px": {}}
+    monkeypatch.setattr(MeasureRun, "_check_photo_shapes", lambda self, rows: none_read)
+    mw = _measure_area(tmp_path, qapp)
+    assert _size_warnings(mw) == [
+        "1 measured file has another shape than the 640×480 frame of the default "
+        "18×13.5 mm field of view: the field of view was applied to each whole image."
+    ]
+
+
+def test_gt_files_of_two_sizes_and_another_shape_give_one_warning(tmp_path, qapp, monkeypatch):
+    """No photo sample: the GT files' two sizes and their shape are said in one warning."""
+    _project(tmp_path, [_CROP, _CROP, _FULL], gt=True)
+    monkeypatch.setattr(MeasureRun, "_check_photo_shapes", lambda self, rows: None)
+    mw = _measure_area(tmp_path, qapp)
+    assert _size_warnings(mw) == [
+        "The measured files have 2 sizes (640x460 ×2, 640x480 ×1), and 2 have another shape "
+        "than the 640×480 frame of the default 18×13.5 mm field of view: one 18×13.5 mm field "
+        "of view was applied to each whole image."
     ]
 
 

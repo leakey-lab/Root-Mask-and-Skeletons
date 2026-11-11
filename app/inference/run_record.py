@@ -41,6 +41,15 @@ HISTORY_NAMES_LIMIT = 1000
 #: left out, so the sidecar that holds the summary can always be written (its pretty-printing
 #: encoder recurses once per level).
 SUMMARY_DEPTH_LIMIT = 32
+#: The run parameters a history line carries (when the run's record has them), and the type
+#: the reader accepts for each: the history summary lists their distinct values.
+HISTORY_PARAMETERS: dict[str, type] = {"norm_stats": str, "batch_size": int, "batch_policy": str}
+#: The history summary's key for the distinct values of each of ``HISTORY_PARAMETERS``.
+_HISTORY_PARAMETER_KEYS = {
+    "norm_stats": "norm_stats",
+    "batch_size": "batch_sizes",
+    "batch_policy": "batch_policies",
+}
 #: A field the manifest does not have (unlike one recorded as ``null``).
 _MISSING = object()
 
@@ -97,22 +106,33 @@ def write_run_manifest(
 def history_entry(record: Mapping[str, Any], report: BatchReport) -> dict[str, Any]:
     """The line of ``_sprouts_runs.jsonl`` for one run: the record's identity and the outcome.
 
-    Written names are listed (sorted) up to ``HISTORY_NAMES_LIMIT``; a longer run
-    carries ``written_count`` and ``written_sha256`` instead, so a line stays small.
+    The run's parameters that decide its outputs' values (``HISTORY_PARAMETERS``:
+    ``norm_stats``, ``batch_size``, ``batch_policy``) are copied from the record's
+    ``parameters``, each only when the record has it (a mask run has no ``norm_stats``), so
+    the history tells a folder made in one mode from one that mixes modes. Written names are
+    listed (sorted) up to ``HISTORY_NAMES_LIMIT``; a longer run carries ``written_count``
+    and ``written_sha256`` instead, so a line stays small.
     """
     app = record.get("app") or {}
     models = record.get("models") or {}
+    parameters = record.get("parameters")
     entry: dict[str, Any] = {
         "created_utc": record.get("created_utc"),
         "kind": record.get("kind"),
         "app_version": app.get("version"),
         "git_commit": record.get("git_commit"),
         "models": {name: (info or {}).get("sha256") for name, info in models.items()},
-        "status": report.status,
-        "n_written": len(report.written),
-        "n_failed": len(report.failed),
-        "n_skipped": len(report.skipped),
     }
+    if isinstance(parameters, Mapping):
+        entry.update({key: parameters[key] for key in HISTORY_PARAMETERS if key in parameters})
+    entry.update(
+        {
+            "status": report.status,
+            "n_written": len(report.written),
+            "n_failed": len(report.failed),
+            "n_skipped": len(report.skipped),
+        }
+    )
     if len(report.written) <= HISTORY_NAMES_LIMIT:
         entry["written"] = sorted(report.written)
     else:
@@ -185,16 +205,19 @@ def generation_summary(output_dir: str) -> dict[str, Any] | None:
     and the SHA-256 of the bytes parsed), the manifest's ``kind``, ``created_utc``,
     ``app_version``, ``git_commit``, ``status``, ``models`` (``{name: sha256}``),
     ``parameters``, ``torch`` and ``inference`` (from ``runtime``) and, for a minimal record,
-    ``provenance_error``; and ``history``, the distinct model digests, app versions and
-    commits of every run in ``_sprouts_runs.jsonl``. The manifest describes the latest run
-    into the folder that wrote or failed an input; a prediction kept from an earlier run
-    (*Keep predictions*) can come from another run, which is why the history's distinct
-    digests are listed.
+    ``provenance_error``; and ``history``, the distinct model digests, app versions,
+    commits, ``norm_stats``, batch sizes and batch policies of every run in
+    ``_sprouts_runs.jsonl``. The manifest describes the latest run into the folder that
+    wrote or failed an input; a prediction kept from an earlier run (*Keep predictions*) can
+    come from another run, in another mode, which is why the history's distinct values are
+    listed.
 
     Never raises for anything those two files hold: a manifest that cannot be read or is not
     a JSON object gives ``record`` and ``error`` only (the history is still summarised), a
     field of the wrong type (or nested deeper than ``SUMMARY_DEPTH_LIMIT``) is left out, and
-    a history line that is not a JSON object is counted in ``n_unreadable``.
+    a history line that is not a JSON object is counted in ``n_unreadable``. A summary that
+    cannot be written as UTF-8 JSON (a lone surrogate, written as a JSON escape, in any
+    field) is ``record`` and ``error`` only, so the sidecar that holds it is still written.
     """
     try:
         summary = _manifest_summary(provenance.run_manifest_path(output_dir))
@@ -207,6 +230,11 @@ def generation_summary(output_dir: str) -> dict[str, Any] | None:
     summary = summary if summary is not None else {}
     if history is not None:
         summary["history"] = history
+    try:  # as the sidecar writes it: a lone surrogate (a JSON "\ud800") is no UTF-8
+        json.dumps(summary, ensure_ascii=False).encode("utf-8")
+    except Exception as exc:  # noqa: BLE001 - the sidecar, calibration included, must stay
+        logger.warning("The generation record of %s cannot be written: %s", output_dir, exc)
+        return {"record": provenance.RUN_MANIFEST_FILENAME, "error": _reason(exc)}
     return summary
 
 
@@ -266,13 +294,16 @@ def _manifest_summary(path: str) -> dict[str, Any] | None:
 def _history_summary(path: str) -> dict[str, Any] | None:
     """The history's part of :func:`generation_summary`; ``None`` when there is no file.
 
-    Read line by line; of each line only its models, app version, commit and time are kept
-    (a line can list 1,000 file names). A blank line is not a run."""
+    Read line by line; of each line only its models, app version, commit, time and the
+    parameters of ``HISTORY_PARAMETERS`` are kept (a line can list 1,000 file names). A
+    blank line is not a run; a value of the wrong type (``null`` too) is left out, so an
+    old line without the parameters adds none."""
     n_runs = n_unreadable = 0
     models: dict[str, set[str]] = {}
     versions: set[str] = set()
     commits: set[str] = set()
     times: set[str] = set()
+    modes: dict[str, set] = {key: set() for key in HISTORY_PARAMETERS}
     try:
         with open(path, "rb") as fh:
             for raw in fh:
@@ -300,6 +331,10 @@ def _history_summary(path: str) -> dict[str, Any] | None:
                 ):
                     if isinstance(value, str):
                         seen.add(value)
+                for key, wanted in HISTORY_PARAMETERS.items():
+                    value = entry.get(key)
+                    if isinstance(value, wanted) and not isinstance(value, bool):
+                        modes[key].add(value)
     except FileNotFoundError:
         return None
     except OSError as exc:  # a folder of that name, no permission, a read error
@@ -311,6 +346,7 @@ def _history_summary(path: str) -> dict[str, Any] | None:
         "models": {name: sorted(digests) for name, digests in models.items()},
         "app_versions": sorted(versions),
         "git_commits": sorted(commits),
+        **{_HISTORY_PARAMETER_KEYS[key]: sorted(values) for key, values in modes.items()},
         "first_utc": min(times) if times else None,
         "last_utc": max(times) if times else None,
     }
@@ -339,6 +375,7 @@ def _shallow_mapping(value: object) -> bool:
 
 __all__ = [
     "HISTORY_NAMES_LIMIT",
+    "HISTORY_PARAMETERS",
     "SUMMARY_DEPTH_LIMIT",
     "generation_summary",
     "history_entry",
