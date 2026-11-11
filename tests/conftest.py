@@ -60,6 +60,8 @@ import pytest
 # Rich assert messages in the shared helpers too (registered before any import of them).
 pytest.register_assert_rewrite(
     "tests.correct_goldens_page_support",
+    "tests.correct_mask_layer_support",
+    "tests.correct_skeleton_layer_support",
     "tests.correct_support",
     "tests.generation_support",
     "tests.guards",

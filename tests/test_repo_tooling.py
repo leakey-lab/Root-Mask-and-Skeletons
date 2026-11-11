@@ -82,6 +82,9 @@ def test_the_requirements_files_are_utf8(name):
 #: Imports between test modules that wave 2 (generation, class labels, dashboards) still has
 #: to remove; this list may only shrink.
 WAVE_2_LEFT = {
+    # Two files that came in with the merge of 30cca51..5ff4ee6 (wave 2 removes them too).
+    "test_correct_session_reopen_layer": {"test_correct_session"},
+    "test_skeleton_norm_stats": {"test_generation_inference"},
     "test_generation_failed_run_manifest": {"test_generation_batch_engine", "test_generation_inference"},
     "test_generation_fixed_batches": {"test_generation_batch_engine", "test_generation_inference"},
     "test_generation_job_folder_binding": {"test_generation_handlers"},

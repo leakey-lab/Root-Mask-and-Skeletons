@@ -4,8 +4,8 @@ The non-modal Retry prompt of Measure (``_offer_retry``) left one QMessageBox ch
 its long-lived parent (the main window) per prompt until the window closed. The modal
 "Predictions already exist" prompt of Generate (``ask_overwrite_policy``) went only with its
 last Python reference (PyQt's ``exec()`` hands the box to Python); both are now deleted
-once answered. (The task progress hide timer: ``tests/test_shell_chrome_task_progress.py``;
-the F1 sheet and About dialog: ``tests/test_integration_main_window_wiring.py``.)
+once answered. (The task progress hide timer: ``tests/test_task_progress.py``;
+the F1 sheet and About dialog: ``tests/test_main_window_wiring.py``.)
 """
 
 from __future__ import annotations

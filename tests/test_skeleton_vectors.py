@@ -5,7 +5,7 @@ isolated pixel is a dot), the links of a tile (each link belongs to the tile of 
 pixel, so the tiles of a mask give every whole-frame link exactly once), the merged
 collinear runs of a tile, and ``clip_box``. Also: the module loads no Qt and no cv2, and the
 item draws with these very functions. (The extraction tests came from
-``tests/test_canvas_layer_skeleton.py``, step 2.)
+``tests/test_canvas_skeleton.py``.)
 """
 
 from __future__ import annotations

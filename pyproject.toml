@@ -113,5 +113,6 @@ select = ["E", "F", "W", "I", "B", "UP"]
 # UP037: keep quoted annotations. Python 3.14 evaluates annotations lazily, but
 # inspect.signature() and typing.get_type_hints() still evaluate them, and an unquoted name
 # imported only under TYPE_CHECKING (the window parts' "MainWindow") then raises NameError
-# (tests/test_shell_window_split_surface.py signs every window method).
+# (found when a test signed every window method; that test is gone, the quoted annotations
+# stay as they are).
 ignore = ["E501", "UP037"]
