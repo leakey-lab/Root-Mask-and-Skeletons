@@ -10,6 +10,7 @@ Tasks that must still be running when the test acts are held on a
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import random
@@ -17,6 +18,8 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
+import weakref
 
 import pytest
 
@@ -309,3 +312,47 @@ def test_log_limiter_logs_the_first_records_then_one_count(caplog):
     assert [r.levelno for r in caplog.records[:3]] == [logging.ERROR] * 3
     passed_on = [caplog.records[i] for i in (0, 1, 2, 4)]  # the caller's line, not the limiter's
     assert {os.path.basename(r.pathname) for r in passed_on} == {os.path.basename(__file__)}
+
+
+# --- AsyncWriter: a failed save keeps no image (C6-01) -----------------------------
+# The exception kept for the run's report held the save's frames, and with them the image
+# array and its encoded bytes (0.3-0.8 MiB per failed image): a run in which every save
+# failed grew by that much per image. The frames are cleared once the failure is logged.
+
+
+class _Image:
+    """Stands in for an image array: something a frame holds that a weak reference can watch."""
+
+
+def _failing_save(refs: list):
+    def save(key):
+        image = _Image()  # a local of the failed save's frame
+        refs.append(weakref.ref(image))
+        raise OSError(errno.EACCES, "Permission denied", f"out/{key}.png")
+
+    return save
+
+
+def test_failed_saves_do_not_keep_their_images(caplog):
+    refs: list = []
+    with caplog.at_level(logging.WARNING, "app.inference.batch_pipeline"):
+        with AsyncWriter(max_workers=2, max_pending=4) as writer:
+            for i in range(6):
+                writer.submit(f"img{i}", _failing_save(refs), f"img{i}")
+        errors = writer.errors()
+
+    assert len(errors) == 6 and len(refs) == 6
+    assert all(ref() is None for ref in refs)  # every image freed while the run still holds
+    for key, exc in errors:  # ... the errors, which still say what failed and where
+        assert str(exc) == f"[Errno {errno.EACCES}] Permission denied: 'out/{key}.png'"
+        assert exc.__traceback__ is not None
+        assert "save" in "".join(traceback.format_exception(exc))
+    # The first failure is still logged with its traceback.
+    assert any(record.exc_info for record in caplog.records)
+
+
+def test_a_save_that_succeeds_is_untouched():
+    done = []
+    with AsyncWriter(max_workers=1) as writer:
+        writer.submit("a", done.append, "a")
+    assert done == ["a"] and writer.errors() == []

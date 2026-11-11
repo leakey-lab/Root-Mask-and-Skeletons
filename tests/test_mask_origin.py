@@ -1,11 +1,10 @@
-"""The pre-Generate scan lists ``mask/`` once and opens no mask file.
+"""The pre-Generate scan of ``mask/`` and the overwrite policy (``app/inference/mask_origin.py``).
 
-Before W5-T5 it read the 26-byte PNG header of every mask (about 1.4 s for 46k, on a thread
-pool) to split hand-saved from model masks; nothing read the split after WG-T7, so the
-scan is the folder listing and ``count`` is the number of masks.
-
-The overwrite prompt (WG-T7) shows only how many masks exist: "Replace all predictions" is
-the same button whatever the folder holds.
+``mask/`` holds predictions only (WG-T7): the scan lists the folder once and opens no file
+(W5-T5: it used to read every mask's PNG header), counts the stems that have a mask whatever
+the file holds, limits them to the folder's images, and reports a mask named in another case
+under its image's stem (O7: "Keep existing" must skip that image). Keep skips the existing
+stems, Replace none. Qt-free.
 """
 
 from __future__ import annotations
@@ -13,12 +12,60 @@ from __future__ import annotations
 import builtins
 import os
 
+import numpy as np
 import pytest
 from PIL import Image
 
 from app.inference import mask_origin
-from app.inference.mask_origin import ExistingMasks, scan_existing_masks
+from app.inference.mask_origin import ExistingMasks, OverwritePolicy, scan_existing_masks
 from app.project_layout import ProjectLayout
+
+
+def _save(path: str, mode: str) -> str:
+    size = (8, 6)
+    if mode == "L":
+        Image.fromarray(np.full((6, 8), 255, np.uint8), mode="L").save(path)
+    elif mode == "RGBA":
+        Image.new("RGBA", size, (255, 255, 255, 255)).save(path)
+    elif mode == "RGB":
+        Image.new("RGB", size, (255, 255, 255)).save(path)
+    else:
+        raise ValueError(mode)
+    return path
+
+
+def _project(tmp_path, masks: dict[str, str]) -> ProjectLayout:
+    for stem in ("a", "b", "c", "d"):
+        Image.new("RGB", (8, 6)).save(tmp_path / f"{stem}.jpg")
+    os.makedirs(tmp_path / "mask")
+    for stem, mode in masks.items():
+        _save(str(tmp_path / "mask" / f"{stem}.png"), mode)
+    return ProjectLayout(str(tmp_path))
+
+
+def test_scan_existing_masks_counts_every_mask_whatever_its_kind(tmp_path):
+    layout = _project(tmp_path, {"a": "RGBA", "b": "L", "c": "RGB"})
+    found = scan_existing_masks(layout)
+    assert found.stems == frozenset({"a", "b", "c"})
+    assert found.count == 3 and bool(found)
+
+
+def test_scan_existing_masks_limits_to_given_stems(tmp_path):
+    layout = _project(tmp_path, {"a": "RGBA", "b": "L", "zz_orphan": "L"})
+    found = scan_existing_masks(layout, stems={"a", "b", "c", "d"})
+    assert found.stems == frozenset({"a", "b"})
+
+
+def test_scan_existing_masks_without_mask_folder_is_empty(tmp_path):
+    found = scan_existing_masks(ProjectLayout(str(tmp_path)))
+    assert found == ExistingMasks.empty()
+    assert not found and found.count == 0
+
+
+def test_overwrite_policy_skip_sets(tmp_path):
+    found = scan_existing_masks(_project(tmp_path, {"a": "RGBA", "b": "L"}))
+    assert OverwritePolicy.KEEP_EXISTING.skip_stems(found) == frozenset({"a", "b"})
+    assert OverwritePolicy.OVERWRITE_ALL.skip_stems(found) == frozenset()
 
 
 def test_the_scan_opens_no_mask_file(tmp_path, monkeypatch):
@@ -91,37 +138,3 @@ def test_masks_named_as_their_images_are_not_remapped(tmp_path, monkeypatch):
     # A mask of no image: remapped, then left out of the count.
     (mask_dir / "orphan.png").write_bytes(b"")
     assert scan_existing_masks(layout, layout.scan_images()) == found and len(remaps) == 1
-
-
-# --------------------------------------------------------------------------- prompt label
-def _replace_button_text(existing_count):
-    """The text of the prompt's destructive button (the prompt is cancelled)."""
-    from PyQt6.QtCore import QTimer
-    from PyQt6.QtWidgets import QApplication, QMessageBox
-
-    from app.handlers import mask_generation_handler as mgh
-
-    texts = []
-
-    def read_and_cancel():
-        box = QApplication.activeModalWidget()
-        if not isinstance(box, QMessageBox):
-            QTimer.singleShot(10, read_and_cancel)
-            return
-        role = QMessageBox.ButtonRole.DestructiveRole
-        texts.extend(b.text() for b in box.buttons() if box.buttonRole(b) == role)
-        box.escapeButton().click()
-
-    QTimer.singleShot(0, read_and_cancel)
-    assert mgh.ask_overwrite_policy(None, existing_count, 5000) is None
-    [text] = texts
-    return text
-
-
-def test_the_replace_button_never_counts_hand_corrected_masks(qapp):
-    # mask/ holds predictions only (WG-T7): the prompt shows how many exist, nothing more.
-    few = ExistingMasks(stems=frozenset({"a", "b", "c"}))
-    assert _replace_button_text(few.count) == "Replace all predictions"
-
-    many = ExistingMasks(stems=frozenset(f"m{i}" for i in range(1234)))
-    assert _replace_button_text(many.count) == "Replace all predictions"

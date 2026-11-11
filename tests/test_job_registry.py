@@ -4,8 +4,7 @@ One batch job at a time: ``try_start`` refuses a second one, so Measure cannot r
 half-written ``skeletons/`` folder while generation runs. The registry clears itself on
 Qt's own ``finished`` (also when a worker shadows ``finished``), a stale ``finished`` never
 clears a later job, ``stop_all`` cancels and waits, and ``ended_name`` tells the job-end
-slot which job ended. (``shutdown``, which refuses every later job, is tested in
-``test_jobs_cancel_cpu_fallback.py`` until wave 2 moves it here.)
+slot which job ended; once ``shutdown`` (the window is closing) it refuses every job.
 
 Offscreen Qt. Threads are real ``QThread`` s held on a ``threading.Event``, so the tests
 never race them.
@@ -217,3 +216,24 @@ def test_the_job_end_slot_can_tell_which_job_ended(app):
     run_job(jobs, "Generating masks")
 
     assert seen == [(True, "Generating masks", None), (False, None, "Generating masks")]
+
+
+class _LastBatchCancelled(GuardedThread):
+    """Cancel pressed during the final batch: the engine reports completion anyway."""
+
+    def __init__(self):
+        super().__init__()
+        self.completed = False
+
+    def work(self):
+        self.cancel()
+        self.completed = True  # done == total, so the run "completed"
+
+
+def test_job_registry_refuses_new_jobs_once_shut_down(qapp):
+    registry = JobRegistry()
+    registry.shutdown()
+    thread = _LastBatchCancelled()
+    assert registry.is_closing()
+    assert registry.try_start("Generating skeletons", thread) is False
+    assert not thread.isRunning()

@@ -1,80 +1,36 @@
-"""Shared batch engine for mask + skeleton generation.
+"""The batch engine shared by mask and skeleton generation (``app/inference/batch_engine.py``).
 
-PI-03 / FR-05 / RB-10: unreadable inputs are recorded failures (never a made-up output).
-PI-06: decode / forward / save overlap without changing batch composition or outputs.
-PI-07: CUDA out-of-memory halves the batch and retries (floor 1), never skips silently.
-PI-08: cooperative cancel keeps finished outputs and reports the partial run.
-S12-01: a GPU run gives its pool threads one torch thread, and restores the count after.
-C6-02: a run in which many inputs fail logs the first few, then one count.
-CPU-only stubs: no checkpoint, no GPU.
+Promises: batches keep the serial composition and order; an input that cannot be decoded is a
+recorded failure and never an output, its slot zero-filled; cancel stops at a batch boundary
+and keeps the finished outputs; progress counts outputs on disk, never goes backwards and ends
+at the total, and a progress callback that raises changes nothing (R3: an input was listed as
+written and failed); the caller's report is filled in place also when a step raises (R7); a
+GPU run gives its pool threads one torch thread and restores the count (S12-01); failures are
+logged a few at a time (C6-02). Out of memory and fixed batches: ``test_batch_engine_memory.py``;
+failed saves: ``test_batch_engine_saves.py``. CPU stubs, no checkpoint, no GPU.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import time
 
-import numpy as np
 import pytest
 import torch
 from PIL import Image
 
-from app.inference.batch_engine import (
-    BatchReport,
-    BatchSpec,
-    OomBackoff,
-    log_failed_inputs,
-    run_batches,
-)
+from app.inference import batch_engine
+from app.inference.batch_engine import BatchReport, BatchSpec, log_failed_inputs, run_batches
 from app.inference.batch_pipeline import FAILURE_LOG_LIMIT
+from tests.generation_stubs_support import NAMES, _load, _make_images, _outputs, _spec, _step
 
 ENGINE_LOGGER = "app.inference.batch_engine"
+
+
 OPENMP_ONLY = pytest.mark.skipif(
     not torch.backends.openmp.is_available(), reason="the per-thread count is OpenMP's"
 )
-
-
-def _make_images(folder, names, *, corrupt=()):
-    os.makedirs(folder, exist_ok=True)
-    rng = np.random.default_rng(0)
-    for name in names:
-        path = os.path.join(folder, name)
-        if name in corrupt:
-            with open(path, "wb") as fh:
-                fh.write(b"\xff\xd8\xff\xe0 truncated jpeg")
-        else:
-            Image.fromarray(rng.integers(0, 255, (6, 8, 3), dtype=np.uint8)).save(path)
-    return [os.path.join(folder, n) for n in sorted(names)]
-
-
-def _load(path):
-    with Image.open(path) as im:
-        arr = np.asarray(im.convert("RGB"), dtype=np.float32) / 255.0
-    return torch.from_numpy(arr).permute(2, 0, 1).contiguous()
-
-
-def _step(x):
-    return (x.mean(1) * 255).to(torch.uint8).numpy()
-
-
-def _spec(out_dir, step=_step, save=None):
-    def default_save(arr, path):
-        stem = os.path.splitext(os.path.basename(path))[0]
-        Image.fromarray(arr, mode="L").save(os.path.join(out_dir, stem + ".png"))
-
-    os.makedirs(out_dir, exist_ok=True)
-    return BatchSpec(load=_load, step=step, save=save or default_save)
-
-
-def _outputs(folder):
-    out = {}
-    for name in sorted(os.listdir(folder)):
-        with open(os.path.join(folder, name), "rb") as fh:
-            out[name] = fh.read()
-    return out
-
-
-NAMES = [f"img{i:02d}.png" for i in range(7)]
 
 
 def test_unreadable_input_is_a_recorded_failure_not_an_output(tmp_path):
@@ -104,46 +60,12 @@ def test_batches_keep_serial_composition_and_order(tmp_path):
     assert seen == [3, 3, 1]
 
 
-def test_out_of_memory_halves_the_batch_and_writes_everything(tmp_path):
-    paths = _make_images(str(tmp_path / "in"), NAMES)
-    sizes = []
-
-    def oom_step(x):
-        sizes.append(x.shape[0])
-        if x.shape[0] > 2:
-            raise torch.cuda.OutOfMemoryError("CUDA out of memory (stub)")
-        return _step(x)
-
-    report = run_batches(paths, _spec(str(tmp_path / "out"), step=oom_step), batch_size=4)
-    assert report.failed == []
-    assert len(report.written) == 7
-    assert report.effective_batch_size == 2
-    run_batches(paths, _spec(str(tmp_path / "ref")), batch_size=4)
-    assert _outputs(tmp_path / "out") == _outputs(tmp_path / "ref")
-    # the working size is remembered: later batches do not retry at 4
-    assert sizes.count(4) == 1
-
-
 def test_the_report_records_the_batch_shapes(tmp_path):
     paths = _make_images(str(tmp_path / "in"), NAMES)
     report = run_batches(paths, _spec(str(tmp_path / "out")), batch_size=3)
     assert report.batch_shapes == {3: 6, 1: 1}
     assert report.oom_events == []
     assert report.summary()["batch_shapes"] == {"3": 6, "1": 1}
-
-
-def test_the_report_records_out_of_memory_events(tmp_path):
-    paths = _make_images(str(tmp_path / "in"), NAMES)
-
-    def oom_step(x):
-        if x.shape[0] > 2:
-            raise torch.cuda.OutOfMemoryError("CUDA out of memory (stub)")
-        return _step(x)
-
-    report = run_batches(paths, _spec(str(tmp_path / "out"), step=oom_step), batch_size=4)
-    assert report.batch_shapes == {2: 6, 1: 1}
-    assert report.oom_events == [{"at": "img00.png", "from": 4, "to": 2}]
-    assert report.summary()["oom_events"] == report.oom_events
 
 
 def test_zero_filled_slots_count_in_the_forward_shape(tmp_path):
@@ -156,65 +78,6 @@ def test_an_empty_report_has_empty_shapes():
     summary = BatchReport().summary()
     assert summary["batch_shapes"] == {}
     assert summary["oom_events"] == []
-
-
-def test_out_of_memory_at_size_one_fails_only_that_item():
-    backoff = OomBackoff(4)
-
-    def step(x):
-        if x.shape[0] > 1 or float(x[0, 0]) == 2.0:
-            raise torch.cuda.OutOfMemoryError("stub")
-        return x.clone()
-
-    results = backoff.run(step, torch.arange(4.0).reshape(4, 1))
-    ok = [(s.start, out) for s, out in results if not isinstance(out, BaseException)]
-    bad = [s.start for s, out in results if isinstance(out, BaseException)]
-    assert bad == [2]
-    assert [start for start, _ in ok] == [0, 1, 3]
-    assert backoff.size == 1
-
-
-def test_failed_batch_memory_is_released_before_the_retry():
-    """The OOM traceback pins the failed forward's activations; free them first."""
-    import gc
-    import weakref
-
-    refs = []
-    alive_at_retry = []
-
-    def step(x):
-        if x.shape[0] > 1:
-            activation = torch.zeros(1000)
-            refs.append(weakref.ref(activation))
-            raise torch.cuda.OutOfMemoryError("stub")
-        return x.clone()
-
-    def on_oom():
-        gc.collect()
-        alive_at_retry.append(any(r() is not None for r in refs))
-
-    results = OomBackoff(2, on_oom=on_oom).run(step, torch.zeros(2, 1))
-    assert alive_at_retry == [False]
-    assert len(results) == 2
-
-
-def test_single_item_failure_carries_no_traceback():
-    def step(x):
-        raise torch.cuda.OutOfMemoryError("stub")
-
-    [(chunk, result)] = OomBackoff(1).run(step, torch.zeros(1, 1))
-    assert isinstance(result, BaseException) and result.__traceback__ is None
-    assert "stub" in str(result)
-
-
-def test_non_oom_errors_are_not_retried():
-    backoff = OomBackoff(4)
-
-    def step(x):
-        raise ValueError("bad model")
-
-    with pytest.raises(ValueError):
-        backoff.run(step, torch.zeros(4, 1))
 
 
 def test_cancel_stops_at_a_batch_boundary_and_keeps_finished_outputs(tmp_path):
@@ -255,24 +118,152 @@ def test_progress_is_throttled_monotonic_and_complete(tmp_path):
     assert all(total == 7 for _, total in ticks)
 
 
-def test_save_errors_are_recorded_failures(tmp_path):
-    paths = _make_images(str(tmp_path / "in"), NAMES[:3])
-
-    def bad_save(arr, path):
-        if path.endswith("img01.png"):
-            raise OSError("disk full")
-
-    report = run_batches(paths, _spec(str(tmp_path / "out"), save=bad_save), batch_size=2)
-    assert report.failed_names == ["img01.png"]
-    assert sorted(report.written) == ["img00.png", "img02.png"]
-
-
 def test_empty_input_is_an_empty_report(tmp_path):
     report = run_batches([], _spec(str(tmp_path / "out")), batch_size=4)
     assert report == BatchReport(total=0, batch_size=4, effective_batch_size=4)
 
 
-# --- S12-01: torch threads of a GPU run ----------------------------------------------
+class _BrokenProgress:
+    """A progress callback that raises on its first ``fail_first`` calls."""
+
+    def __init__(self, fail_first=1):
+        self.fail_first = fail_first
+        self.calls = []
+
+    def __call__(self, *args):
+        self.calls.append(args)
+        if len(self.calls) <= self.fail_first:
+            raise RuntimeError("progress listener is gone (simulated)")
+
+
+def test_a_raising_progress_callback_leaves_a_written_input_written(tmp_path, caplog):
+    paths = _make_images(str(tmp_path / "in"), NAMES[:3])
+    progress = _BrokenProgress()
+
+    with caplog.at_level(logging.WARNING):
+        report = batch_engine.run_batches(
+            paths, _spec(str(tmp_path / "out")), batch_size=3, progress=progress
+        )
+
+    assert report.failed == []  # never both written and failed
+    assert report.written == sorted(NAMES[:3])
+    assert report.done == report.total == 3
+    assert len(progress.calls) == 3  # later updates still reach the callback
+    assert "progress listener is gone" in caplog.text  # logged, not swallowed silently
+
+
+def test_a_raising_progress_callback_never_ends_the_run_on_an_unreadable_input(tmp_path):
+    names = [*NAMES[:3], "bad.jpg"]
+    paths = _make_images(str(tmp_path / "in"), names, corrupt={"bad.jpg"})
+    progress = _BrokenProgress(fail_first=10)  # every call raises
+
+    report = batch_engine.run_batches(
+        paths, _spec(str(tmp_path / "out")), batch_size=2, progress=progress
+    )
+
+    assert report.failed_names == ["bad.jpg"]
+    assert report.written == sorted(NAMES[:3])
+    assert report.status == "completed" and report.done == report.total == 4
+
+
+def test_progress_updates_arrive_in_order_across_writer_threads(tmp_path):
+    # Saves finish on several writer threads. The count was taken under a lock but the
+    # callback ran after releasing it, so a slow delivery of an early count could land
+    # after later ones: the progress bar went backwards and could end on "1 of 7".
+    paths = _make_images(str(tmp_path / "in"), NAMES)
+    applied = []
+
+    def slow_first_update(done, total):
+        if done == 1:
+            time.sleep(0.2)  # e.g. the GUI thread busy when the first signal is emitted
+        applied.append(done)
+
+    batch_engine.run_batches(
+        paths,
+        _spec(str(tmp_path / "out")),
+        batch_size=len(NAMES),
+        io_threads=4,
+        progress=slow_first_update,
+    )
+
+    assert applied == sorted(applied) and applied[-1] == len(NAMES)
+
+
+@pytest.mark.parametrize("fail_first", [1, 3])
+def test_progress_still_ends_at_the_total_after_a_failing_update(tmp_path, fail_first):
+    paths = _make_images(str(tmp_path / "in"), NAMES)
+    progress = _BrokenProgress(fail_first=fail_first)
+
+    batch_engine.run_batches(paths, _spec(str(tmp_path / "out")), batch_size=3, progress=progress)
+
+    dones = [done for done, _total in progress.calls]
+    assert dones == sorted(dones) and dones[-1] == len(NAMES)
+
+
+def test_the_summary_states_the_outcome():
+    assert BatchReport().summary()["status"] == "completed"
+    assert BatchReport(cancelled=True).summary()["status"] == "cancelled"
+    summary = BatchReport(cancelled=True, error="RuntimeError: boom").summary()
+    assert summary["status"] == "failed" and summary["error"] == "RuntimeError: boom"
+    assert BatchReport().summary()["error"] is None
+
+
+def test_run_batches_fills_the_given_report_even_when_a_step_raises(tmp_path):
+    paths = _make_images(str(tmp_path / "in"), NAMES)
+    out = str(tmp_path / "out")
+    calls = []
+
+    def step(x):
+        calls.append(len(x))
+        if len(calls) == 2:
+            raise RuntimeError("boom")
+        return _step(x)
+
+    report = BatchReport()
+    with pytest.raises(RuntimeError, match="boom"):
+        run_batches(paths, _spec(out, step=step), batch_size=3, report=report)
+
+    assert report.written == sorted(os.listdir(out)) == NAMES[:3]  # what is on disk
+    assert report.total == 7 and report.done == 3
+    assert report.batch_size == report.effective_batch_size == 3
+    assert report.elapsed_s > 0
+
+
+def test_a_run_cancelled_as_a_step_raises_still_records_the_cancel(tmp_path):
+    # Cancel pressed during a batch that then fails: the error decides the status
+    # ("failed"), and the cancel flag still tells the truth.
+    paths = _make_images(str(tmp_path / "in"), NAMES)
+    out = str(tmp_path / "out")
+    cancelled, calls = [], []
+
+    def step(x):
+        calls.append(len(x))
+        if len(calls) == 2:
+            cancelled.append(True)  # Cancel pressed during the second batch...
+            raise RuntimeError("boom")  # ...which then fails
+        return _step(x)
+
+    report = BatchReport()
+    with pytest.raises(RuntimeError, match="boom"):
+        run_batches(
+            paths,
+            _spec(out, step=step),
+            batch_size=3,
+            report=report,
+            should_stop=lambda: bool(cancelled),
+        )
+    assert report.done < report.total
+    assert report.cancelled is True
+
+
+def test_run_batches_returns_the_report_it_was_given(tmp_path):
+    paths = _make_images(str(tmp_path / "in"), NAMES)
+    report = BatchReport()
+
+    returned = run_batches(paths, _spec(str(tmp_path / "out")), batch_size=3, report=report)
+
+    assert returned is report
+    assert len(report.written) == 7 and report.status == "completed"
 
 
 def _thread_recording_spec(seen):
@@ -321,9 +312,6 @@ def test_torch_threads_are_restored_when_a_step_raises(tmp_path):
     assert torch.get_num_threads() == before
 
 
-# --- C6-02: failures are logged a few at a time --------------------------------------
-
-
 def _messages(caplog, text):
     return [r for r in caplog.records if text in r.getMessage()]
 
@@ -351,20 +339,6 @@ def test_a_few_unreadable_inputs_are_all_logged_without_a_count(tmp_path, caplog
     assert _messages(caplog, " more ") == []
 
 
-def test_images_out_of_memory_alone_log_the_first_few_then_a_count(tmp_path, caplog):
-    paths = _make_images(str(tmp_path / "in"), [f"i{i:02d}.png" for i in range(25)])
-
-    def oom_step(x):
-        raise torch.cuda.OutOfMemoryError("CUDA out of memory (stub)")
-
-    with caplog.at_level(logging.WARNING, logger=ENGINE_LOGGER):
-        report = run_batches(paths, _spec(str(tmp_path / "out"), step=oom_step), batch_size=4)
-    assert len(report.failed) == 25 and report.written == []
-    assert len(_messages(caplog, "Out of memory on a single image")) == FAILURE_LOG_LIMIT
-    [more] = _messages(caplog, "more single images out of GPU memory")
-    assert more.getMessage().startswith("5 more")
-
-
 def test_the_end_of_run_line_names_the_first_failures_and_the_record(caplog):
     log = logging.getLogger("tests.end_of_run")
     report = BatchReport(failed=[(f"img{i}.jpg", "OSError: broken") for i in range(8)])
@@ -377,4 +351,4 @@ def test_the_end_of_run_line_names_the_first_failures_and_the_record(caplog):
     assert "img4.jpg" in first and "img5.jpg" not in first and "and 3 more" in first
     assert first.endswith("; every one is listed in out/_sprouts_run.json")
     assert "listed in" not in second  # no record was written: it is not named
-    assert all(r.pathname.endswith("test_generation_batch_engine.py") for r in caplog.records)
+    assert all(r.pathname.endswith("test_batch_engine.py") for r in caplog.records)

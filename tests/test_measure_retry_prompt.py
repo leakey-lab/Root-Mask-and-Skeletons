@@ -1,11 +1,11 @@
-"""RB-16: a dialog made for one prompt is freed once answered.
+"""RB-16: Measure's Retry prompt is freed once answered.
 
-The non-modal Retry prompt of Measure (``_offer_retry``) left one QMessageBox child on
-its long-lived parent (the main window) per prompt until the window closed. The modal
-"Predictions already exist" prompt of Generate (``ask_overwrite_policy``) went only with its
-last Python reference (PyQt's ``exec()`` hands the box to Python); both are now deleted
-once answered. (The task progress hide timer: ``tests/test_task_progress.py``;
-the F1 sheet and About dialog: ``tests/test_main_window_wiring.py``.)
+The non-modal Retry prompt of Measure (``SkeletonHandler._offer_retry``) left one
+QMessageBox child on its long-lived parent (the main window) per prompt until the window
+closed; it is now deleted once answered, and answering an older prompt keeps the newer one.
+(Generate's overwrite prompt: ``tests/test_generate_predictions_only.py``; the task progress
+hide timer: ``tests/test_task_progress.py``; the F1 sheet and About dialog:
+``tests/test_main_window_wiring.py``.)
 """
 
 from __future__ import annotations
@@ -14,18 +14,15 @@ from types import SimpleNamespace
 
 import pytest
 from PyQt6 import sip
-from PyQt6.QtCore import QCoreApplication, QEvent, QTimer
-from PyQt6.QtWidgets import QApplication, QMessageBox, QWidget
+from PyQt6.QtCore import QCoreApplication, QEvent
+from PyQt6.QtWidgets import QMessageBox, QWidget
 
 from app.feedback import RecordingFeedback
-from app.handlers import mask_generation_handler as mgh
 from app.handlers.job_registry import JobRegistry
 from app.handlers.skeleton_handler import SkeletonHandler
-from app.inference.mask_origin import OverwritePolicy
 from tests.qt_teardown import flush_deleted
 
 _Button = QMessageBox.StandardButton
-_Role = QMessageBox.ButtonRole
 
 
 @pytest.fixture
@@ -46,45 +43,6 @@ def _boxes(parent: QWidget) -> list[QMessageBox]:
     return parent.findChildren(QMessageBox)
 
 
-# --------------------------------------------------------------------------- Generate prompt
-def _answer_when_shown(role: QMessageBox.ButtonRole, answered: list) -> None:
-    """Click the button with ``role`` on the modal box once ``exec()`` has shown it.
-
-    The box goes into ``answered``: while any reference to it lives, only an explicit
-    delete frees it (PyQt's ``exec()`` hands the box to Python's garbage collection).
-    """
-
-    def click() -> None:
-        box = QApplication.activeModalWidget()
-        if not isinstance(box, QMessageBox):
-            QTimer.singleShot(10, click)
-            return
-        answered.append(box)
-        [button] = [b for b in box.buttons() if box.buttonRole(b) == role]
-        button.click()
-
-    QTimer.singleShot(0, click)
-
-
-@pytest.mark.parametrize(
-    ("role", "policy"),
-    [
-        (_Role.AcceptRole, OverwritePolicy.KEEP_EXISTING),  # "Keep predictions ..."
-        (_Role.DestructiveRole, OverwritePolicy.OVERWRITE_ALL),  # "Replace all predictions"
-        (_Role.RejectRole, None),  # Cancel
-    ],
-)
-def test_overwrite_prompt_is_freed_once_answered(window, role, policy):
-    answered = []
-    _answer_when_shown(role, answered)
-    assert mgh.ask_overwrite_policy(window, 2, 5) is policy
-    _flush_deferred_deletes()
-    [box] = answered
-    assert sip.isdeleted(box)  # freed although a reference to it is still held
-    assert _boxes(window) == []
-
-
-# --------------------------------------------------------------------------- Measure Retry prompt
 class _IdleGeneration:
     def is_busy(self) -> bool:
         return False

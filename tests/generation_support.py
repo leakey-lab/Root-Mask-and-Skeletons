@@ -3,7 +3,8 @@
 - ``wait_for_thread`` waits for a worker thread, then delivers the signals it queued and the
   callbacks they chain, with no fixed sleep.
 - ``generation_project`` is the body of the handler tests' ``project`` fixture: a folder of
-  3 images, the CPU runtime, stub models and a fake main window.
+  3 images, the CPU runtime, stub models (``tests/generation_stubs_support.py``) and a fake
+  main window.
 
 A handler test module keeps its own ``project`` fixture, with
 ``yield from generation_project(tmp_path, monkeypatch)`` as its body: the ``project``
@@ -27,6 +28,8 @@ from app.feedback import RecordingFeedback
 from app.handlers import generation_base
 from app.handlers import mask_generation_handler as mgh
 from app.inference import runtime
+from tests.generation_stubs_support import _StubMaskModel as StubMaskModel
+from tests.generation_stubs_support import _StubSkeletonModel as StubSkeletonModel
 from tests.qt_teardown import flush_deleted
 
 
@@ -48,32 +51,6 @@ def wait_for_thread(thread, app, timeout: float = 30.0, drain: int = 40) -> None
         QCoreApplication.sendPostedEvents()
         app.processEvents()
     assert thread.isFinished()
-
-
-class StubMaskModel(torch.nn.Module):
-    """1x1-conv mask model: ``items`` counts the rows it ran, ``on_forward()`` runs in each
-    forward, and with ``oom`` set every forward runs out of GPU memory."""
-
-    def __init__(self, on_forward=None):
-        super().__init__()
-        torch.manual_seed(0)
-        self.conv = torch.nn.Conv2d(3, 1, 1)
-        self.on_forward = on_forward
-        self.oom = False
-        self.items = 0
-
-    def forward(self, x):
-        if self.oom:
-            raise torch.cuda.OutOfMemoryError("CUDA out of memory (stub)")
-        self.items += x.shape[0]
-        if self.on_forward:
-            self.on_forward()
-        return torch.sigmoid(self.conv(x))
-
-
-class StubSkeletonModel:
-    def run_batch(self, x):
-        return torch.tanh(x)
 
 
 def generation_project(tmp_path, monkeypatch, *, list_images: bool = True):

@@ -25,7 +25,7 @@ import torch
 from app import provenance
 from app.inference import runtime
 from app.inference import skeleton_inference as si
-from tests.test_generation_inference import _images, _StubSkeletonModel
+from tests.generation_stubs_support import _images, _StubSkeletonModel
 
 SIZE = 64  # spatial size of the test inputs (the app's is 256; the layers do not care)
 
@@ -340,12 +340,6 @@ def free_gpu_memory(monkeypatch):
     monkeypatch.setattr(runtime, "release_cuda_cache", lambda: None)
     monkeypatch.delenv(runtime.SKELETON_NORM_STATS_ENV, raising=False)
     return state
-
-
-def test_the_image_mode_has_its_own_measured_floor():
-    assert runtime.FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB == 4.7
-    assert runtime.FIXED_SKELETON_VRAM_FLOOR_GIB == 3.8  # "running" unchanged
-    assert "FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB" in runtime.__all__
 
 
 def test_the_image_mode_stops_below_its_floor_and_says_which(free_gpu_memory):

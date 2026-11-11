@@ -12,6 +12,7 @@ import sys
 import types
 
 import pytest
+import torch
 
 import app
 from app import config
@@ -127,6 +128,18 @@ def test_auto_skeleton_batch_never_below_default(monkeypatch):
 
 def test_auto_skeleton_batch_survives_query_failure(monkeypatch):
     monkeypatch.setitem(sys.modules, "torch", _fake_torch(available=True, raises=True))
+    assert config._auto_skeleton_batch() == 64
+
+
+# R3: CUDA_VISIBLE_DEVICES="" makes CUDA "available" with no device; never ask it for memory.
+def test_auto_skeleton_batch_with_zero_devices_never_queries_vram(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 0)
+
+    def boom():
+        raise AssertionError("mem_get_info must not be called without a device")
+
+    monkeypatch.setattr(torch.cuda, "mem_get_info", boom)
     assert config._auto_skeleton_batch() == 64
 
 

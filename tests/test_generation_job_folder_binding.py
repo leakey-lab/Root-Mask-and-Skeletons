@@ -21,9 +21,16 @@ from app.handlers import mask_generation_handler as mgh
 from app.handlers.job_registry import JobRegistry
 from app.handlers.skeleton_handler import SkeletonHandler
 from app.inference.measure_run import LENGTH, MeasureRun
-from tests.test_generation_handlers import _wait, project  # noqa: F401
+from tests.generation_support import generation_project
+from tests.generation_support import wait_for_thread as _wait
 
 LOADING = ("A folder is loading. Try again when it has loaded.", "warn")
+
+
+@pytest.fixture
+def project(tmp_path, qapp, monkeypatch):
+    """A folder of 3 images, CPU runtime, stub models and a fake main window."""
+    yield from generation_project(tmp_path, monkeypatch)
 
 
 def _folder_b(tmp_path):

@@ -146,3 +146,29 @@ def test_rows_with_equal_sort_keys_come_out_by_image_name():
     for _ in range(3):
         rows = metrics.run_metric_pool(images, worker)
         assert [r["Image"] for r in rows] == sorted(images)
+
+
+class _BrokenProgress:
+    """A progress callback that raises on its first ``fail_first`` calls."""
+
+    def __init__(self, fail_first=1):
+        self.fail_first = fail_first
+        self.calls = []
+
+    def __call__(self, *args):
+        self.calls.append(args)
+        if len(self.calls) <= self.fail_first:
+            raise RuntimeError("progress listener is gone (simulated)")
+
+
+# R3: a progress callback that raised failed the run after every image had been measured.
+def test_a_raising_progress_callback_never_fails_a_measure_run(tmp_path):
+    images = {f"img{i}": str(tmp_path / f"img{i}.png") for i in range(4)}
+    progress = _BrokenProgress()
+
+    rows = metrics.run_metric_pool(
+        images, lambda name, path: {"Image": name, "Tube": None}, progress_cb=progress
+    )
+
+    assert sorted(row["Image"] for row in rows) == sorted(images)
+    assert progress.calls[-1] == (100,)  # progress still reaches 100 %

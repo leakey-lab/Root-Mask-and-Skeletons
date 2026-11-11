@@ -17,8 +17,9 @@ import numpy as np
 import pytest
 import torch
 from PIL import Image
-from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6 import sip
+from PyQt6.QtCore import QCoreApplication, QEvent, QTimer
+from PyQt6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from app.gui.correct.layer import MASK
 from app.handlers import generate_skeleton_handler as gsh
@@ -33,6 +34,7 @@ from tests.correct_goldens_support import png_colour_type
 from tests.correct_support import plane, write_image, write_mask
 from tests.generation_support import generation_project
 from tests.generation_support import wait_for_thread as _wait
+from tests.qt_teardown import flush_deleted
 from tests.qt_wait import settle
 from tests.window_project_support import (
     STEMS,
@@ -160,18 +162,62 @@ def test_the_prompt_counts_with_thousands_separators(qapp):
     assert shown["text"] == "1,234 of 46,000 images already have a predicted mask."
 
 
+_Role = QMessageBox.ButtonRole
+
+
+@pytest.fixture
+def window(qapp):
+    """A long-lived parent, as the main window is for every prompt."""
+    widget = QWidget()
+    yield widget
+    widget.deleteLater()
+    del widget
+    flush_deleted()
+
+
+def _flush_deferred_deletes() -> None:
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+def _boxes(parent: QWidget) -> list[QMessageBox]:
+    return parent.findChildren(QMessageBox)
+
+
+def _answer_when_shown(role: QMessageBox.ButtonRole, answered: list) -> None:
+    """Click the button with ``role`` on the modal box once ``exec()`` has shown it.
+
+    The box goes into ``answered``: while any reference to it lives, only an explicit
+    delete frees it (PyQt's ``exec()`` hands the box to Python's garbage collection).
+    """
+
+    def click() -> None:
+        box = QApplication.activeModalWidget()
+        if not isinstance(box, QMessageBox):
+            QTimer.singleShot(10, click)
+            return
+        answered.append(box)
+        [button] = [b for b in box.buttons() if box.buttonRole(b) == role]
+        button.click()
+
+    QTimer.singleShot(0, click)
+
+
 @pytest.mark.parametrize(
     ("role", "policy"),
     [
-        (QMessageBox.ButtonRole.AcceptRole, OverwritePolicy.KEEP_EXISTING),
-        (QMessageBox.ButtonRole.DestructiveRole, OverwritePolicy.OVERWRITE_ALL),
-        (QMessageBox.ButtonRole.RejectRole, None),
+        (_Role.AcceptRole, OverwritePolicy.KEEP_EXISTING),  # "Keep predictions ..."
+        (_Role.DestructiveRole, OverwritePolicy.OVERWRITE_ALL),  # "Replace all predictions"
+        (_Role.RejectRole, None),  # Cancel
     ],
 )
-def test_the_prompt_buttons_answer_keep_replace_and_cancel(qapp, role, policy):
-    shown = capture_prompt(lambda: ask_overwrite_policy(None, 2, 5), press=role)
-
-    assert shown["result"] is policy
+def test_overwrite_prompt_is_freed_once_answered(window, role, policy):
+    answered = []
+    _answer_when_shown(role, answered)
+    assert mgh.ask_overwrite_policy(window, 2, 5) is policy
+    _flush_deferred_deletes()
+    [box] = answered
+    assert sip.isdeleted(box)  # freed although a reference to it is still held
+    assert _boxes(window) == []
 
 
 # ================================================================== the run never touches gt
@@ -262,20 +308,6 @@ def test_an_rgba_file_in_mask_is_a_prediction_like_any_other(project, qapp, real
     assert run_manifest(layout)["parameters"]["overwrite_policy"] == "overwrite_all"
 
 
-def test_the_handler_asks_with_the_count_of_existing_predictions(project, qapp):
-    layout = ProjectLayout(str(project.folder))
-    write_mask_file(layout.mask_path("a"), np.ones((48, 64), bool))  # RGBA: still a prediction
-    write_mask(layout.mask_path("b"), np.zeros((48, 64), np.uint8))
-    asked = []
-    handler = mgh.MaskGenerationHandler(
-        project.window, confirm_overwrite=lambda n, t: asked.append((n, t))
-    )
-
-    assert handler.generate_masks() is False  # the stub answers Cancel (None): nothing starts
-
-    assert asked == [(2, 3)] and handler.generation_thread is None
-
-
 # ================================================================= an open GT mask stays put
 class _PatternModel(torch.nn.Module):
     """A mask model that predicts one fixed box (rows 200-259, columns 300-419)."""
@@ -327,3 +359,67 @@ def test_replace_predictions_leaves_an_open_gt_mask_as_it_is(
     assert tree_sha(os.path.join(site.folder, "gt")) == gt_before
     editor.load_prediction()
     assert (plane(editor) == new_prediction).all()
+
+
+# ======================================================= nothing outside the prediction folder
+def tree(folder: str) -> dict[str, bytes]:
+    """``relative path -> bytes`` of every file under ``folder``."""
+    files = {}
+    for dirpath, _dirs, names in os.walk(folder):
+        for name in names:
+            path = os.path.join(dirpath, name)
+            with open(path, "rb") as fh:
+                files[os.path.relpath(path, folder).replace(os.sep, "/")] = fh.read()
+    return files
+
+
+def changed(before: dict[str, bytes], after: dict[str, bytes]) -> list[str]:
+    """The files that appeared, vanished or changed bytes."""
+    return sorted(p for p in before.keys() | after.keys() if before.get(p) != after.get(p))
+
+
+@pytest.mark.parametrize("kind", ["mask", "skeleton"])
+def test_a_run_changes_no_file_outside_its_prediction_folder(gt_project, qapp, kind):
+    # Photos, gt/, both CSVs with their sidecars and the other kind's predictions are there,
+    # and stay byte for byte; old predictions of this kind are replaced (Replace all).
+    layout = gt_project.layout
+    old = np.zeros((48, 64), bool)
+    old[1:4, 1:4] = True
+    for stem in ("a", "b"):
+        write_mask_file(layout.mask_path(stem), old)  # RGBA: unlike any new prediction
+        os.makedirs(layout.skeletons_dir, exist_ok=True)
+        Image.fromarray(np.zeros((256, 341, 3), np.uint8)).save(
+            os.path.join(layout.skeletons_dir, f"{stem}_fake.png")
+        )
+    for folder, csv in (
+        (layout.mask_dir, "root_areas.csv"),
+        (layout.skeletons_dir, "root_lengths.csv"),
+    ):
+        for name in (csv, f"{csv}.provenance.json", f"{csv}.inputs.json"):
+            with open(os.path.join(folder, name), "w", encoding="utf-8") as fh:
+                fh.write(f"{name} of an earlier Measure run\n")
+    before = tree(str(gt_project.folder))
+
+    if kind == "mask":
+        handler = mgh.MaskGenerationHandler(
+            gt_project.window, confirm_overwrite=lambda n, t: OverwritePolicy.OVERWRITE_ALL
+        )
+        run(handler, qapp)
+        expected = ["a.png", "b.png", "c.png", "_sprouts_run.json", "_sprouts_runs.jsonl"]
+        folder = "mask"
+    else:
+        handler = gsh.GenerateSkeletonHandler(gt_project.window)
+        assert handler.generate_skeleton() is True
+        _wait(handler._thread, qapp)
+        expected = [
+            "a_fake.png",
+            "b_fake.png",
+            "c_fake.png",
+            "_sprouts_run.json",
+            "_sprouts_runs.jsonl",
+        ]
+        folder = "skeletons"
+
+    assert changed(before, tree(str(gt_project.folder))) == sorted(
+        f"{folder}/{n}" for n in expected
+    )

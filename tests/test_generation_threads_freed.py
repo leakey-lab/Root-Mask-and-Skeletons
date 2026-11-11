@@ -17,14 +17,23 @@ from __future__ import annotations
 import gc
 import weakref
 
+import pytest
+
 from app.feedback import NullFeedback
 from app.handlers import generate_skeleton_handler as gsh
 from app.handlers import generation_base
 from app.handlers import mask_generation_handler as mgh
 from app.inference.mask_origin import OverwritePolicy
 from app.workers import GuardedThread
+from tests.generation_support import generation_project
+from tests.generation_support import wait_for_thread as _wait
 from tests.leak_census import assert_freed, no_gc_fixture  # noqa: F401
-from tests.test_generation_handlers import _wait, project  # noqa: F401
+
+
+@pytest.fixture
+def project(tmp_path, qapp, monkeypatch):
+    """A folder of 3 images, CPU runtime, stub models and a fake main window."""
+    yield from generation_project(tmp_path, monkeypatch)
 
 
 def _collect_the_first_imports() -> None:

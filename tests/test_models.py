@@ -1,18 +1,25 @@
-"""Foundation-core: model-weights registry and identity check (FAIR4RS F1.1 / R1)."""
+"""The registry of the model checkpoints and its identity check (``app/models.py``; FAIR4RS F1.1).
+
+Promises: the registry names the files the loaders open and their SHA-256; ``verify`` says
+ok / mismatch / missing, never raises, logs a mismatch once, and hashes a file again only
+when its size or time changed; ``SPROUTS_CHECKPOINTS_DIR`` relocates the weights (CQ-12);
+URL and DOI are well formed once set. The real checkpoints: ``test_checkpoints.py``.
+"""
 
 from __future__ import annotations
 
 import hashlib
+import importlib
 import logging
 import os
 import re
-
-import pytest
 
 from app import config, models, provenance
 from app.models import MODELS, ModelSpec, ModelStatus, verify, verify_all
 
 MASK_SHA = "ca1f92d21609f9905bd407bd0562f8456cfff3987d1493c701a5585ee3a3a43f"
+
+
 SKELETON_SHA = "a312586ce086aa913b6823f1c99c064f9189d71f77bd575a6529ee9f6a0d2daa"
 
 
@@ -95,17 +102,26 @@ def test_verify_all_covers_the_registry(monkeypatch, tmp_path):
     assert all(s.state == "missing" for s in statuses.values())
 
 
-@pytest.mark.skipif(
-    not (os.path.isfile(config.MASK_WEIGHTS_PATH) and os.path.isfile(config.SKELETON_WEIGHTS_PATH)),
-    reason="model checkpoints not present (they are not committed)",
-)
-def test_shipped_checkpoints_verify():
-    statuses = verify_all()
-    assert statuses["mask"].state == "ok"
-    assert statuses["skeleton"].state == "ok"
-
-
 def test_model_url_and_doi_are_well_formed_when_set():
     for spec in MODELS.values():
         assert spec.doi is None or re.fullmatch(r"10\.\d{4,9}/\S+", spec.doi), spec.key
         assert spec.url is None or spec.url.startswith("https://"), spec.key
+
+
+def test_checkpoints_dir_can_be_overridden(tmp_path, monkeypatch):
+    from app import models
+
+    monkeypatch.setenv("SPROUTS_CHECKPOINTS_DIR", str(tmp_path))
+    try:
+        cfg = importlib.reload(config)
+        assert cfg.CHECKPOINTS_DIR == str(tmp_path)
+        assert cfg.MASK_WEIGHTS_PATH == os.path.join(
+            str(tmp_path), "mask_weights", "best_mask_model_V5.pth"
+        )
+        assert models.MODELS["skeleton"].path() == os.path.normpath(
+            os.path.join(str(tmp_path), "skeletonizer", "latest_net_G.pth")
+        )
+        assert models.MODELS["mask"].relpath.startswith("checkpoints/")
+    finally:
+        monkeypatch.delenv("SPROUTS_CHECKPOINTS_DIR")
+        importlib.reload(config)

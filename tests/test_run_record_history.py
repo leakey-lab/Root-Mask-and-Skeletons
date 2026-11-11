@@ -12,7 +12,7 @@ from app import provenance
 from app.inference import mask_inference, run_record
 from app.inference import skeleton_inference as si
 from app.inference.batch_engine import BatchReport
-from tests.test_generation_inference import _images, _StubMaskModel, _StubSkeletonModel
+from tests.generation_stubs_support import _images, _StubMaskModel, _StubSkeletonModel
 
 pytestmark = pytest.mark.usefixtures("cpu_runtime")
 

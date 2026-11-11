@@ -1,15 +1,10 @@
-"""R7: a full disk ends a generation run at the next batch boundary.
+"""Saves that fail in the batch engine (``app/inference/batch_engine.py``).
 
-A failed save is recorded per image and the run goes on (PI-03): right for a mask
-another program holds open, wrong for a full disk. Once the disk is full every later
-save fails too, but the run went on decoding and running the model over the rest of
-the folder (for 46k images, minutes of GPU time) only to report thousands of failures
-at the end. A save that fails with ENOSPC now stops the run at the next batch
-boundary with that error: the outputs already on disk are kept and listed, the run
-manifest says "failed" (R7), and the handler shows the message at once.
-
-C6-01: an output folder that takes no new files (permission denied, a read-only drive, a
-folder that is gone) stops the run the same way, with one message naming the folder.
+A save that fails for its own file is one recorded failure and the run goes on (PI-03). A full
+disk (R7) or an output folder that takes no new files (C6-01: permission denied, read-only,
+gone) ends the run at the next batch boundary with that error, naming the folder: the model
+does not run over the rest of the folder (1-1.5 h at 46k) only to list every image as failed.
+Each failure names its own file, never the hidden temp file (C6-05), and no temp file is left.
 """
 
 from __future__ import annotations
@@ -21,7 +16,19 @@ import threading
 import pytest
 
 from app.inference.batch_engine import BatchReport, run_batches
-from tests.test_generation_batch_engine import NAMES, _make_images, _spec, _step
+from tests.generation_stubs_support import NAMES, _make_images, _spec, _step
+
+
+def test_save_errors_are_recorded_failures(tmp_path):
+    paths = _make_images(str(tmp_path / "in"), NAMES[:3])
+
+    def bad_save(arr, path):
+        if path.endswith("img01.png"):
+            raise OSError("disk full")
+
+    report = run_batches(paths, _spec(str(tmp_path / "out"), save=bad_save), batch_size=2)
+    assert report.failed_names == ["img01.png"]
+    assert sorted(report.written) == ["img00.png", "img02.png"]
 
 
 def _disk_fills_after(n_saves, out_dir, *, err=errno.ENOSPC):
@@ -93,9 +100,6 @@ def test_other_save_errors_still_fail_one_image_each(tmp_path):
 
     assert report.status == "completed"
     assert len(report.written) == 2 and len(report.failed) == len(NAMES) - 2
-
-
-# --------------------------------------------------------------------------- C6-01
 
 
 def _atomic_save(out_dir):
