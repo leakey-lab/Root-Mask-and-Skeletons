@@ -1,14 +1,14 @@
-"""PgDn after a plain Select pick, and Discard with only a polyline draft pending.
+"""Leaving an image with a skeleton draft or a pick on the Correct page (PgDn, a tree
+click, the prompt's Discard).
 
-A branch picked with Select and left as it was is no unsaved work (S5): PgDn drops the pick
-and asks for the next image, instead of saying "Finish the line (Enter) or cancel it (Esc)
-first", and nothing announces a dropped draft. A picked branch whose points moved, or a new
-line of two points, still keeps the page where it is.
-
-When the skeleton is as saved and only a polyline draft is pending, the prompt's Discard
-drops the draft and keeps the skeleton's undo history and its timeline entries; it used to
-read the file again and forget both. A skeleton that differs from its file is still read
-again, as before.
+Paging never saves a polyline draft that could be finished: the page stays and says
+"Finish the line (Enter) or cancel it (Esc) first", and brings a hidden draft back (the
+skeleton becomes the edited layer, shown if it was hidden) so the keys it names reach it.
+A branch picked with Select and left as it was is no unsaved work (S5): PgDn drops it and
+moves on, and nothing announces a dropped draft; a picked branch whose points moved, or a
+new line of two points, keeps the page where it is. With the skeleton as saved and only a
+draft pending, Discard drops the draft and keeps the skeleton's history; a skeleton that
+differs from its file is read again.
 """
 
 from __future__ import annotations
@@ -24,6 +24,8 @@ import app.gui.correct.skeleton_document as skeleton_document
 from app.gui.correct.layer import MASK, SKELETON
 from app.gui.correct.skeleton_layer import SkeletonLayer
 from tests.correct_support import DISCARD, Mouse, click, paint, plane, raster, record
+
+NO_MODS = Qt.KeyboardModifier.NoModifier
 
 pytestmark = pytest.mark.usefixtures("correct_guards")
 
@@ -280,3 +282,62 @@ def test_discard_of_an_unsaved_skeleton_still_reads_the_file_again(make_editor, 
     assert raster(editor)[110, 20:180].any()
     assert not skeleton.can_undo() and editor.session.journal.undo_entries == ()
     assert skeleton.draft_state().points == 0
+
+
+def key(editor, which) -> bool:
+    """A key press on the canvas input (what the canvas does with the keys it gets)."""
+    return editor.router.canvas_key_press(QKeyEvent(QEvent.Type.KeyPress, which, NO_MODS))
+
+
+def test_paging_with_a_hidden_draft_brings_it_back_so_enter_finishes_it(make_editor, project):
+    editor = make_editor(project.a, project.folder)
+    draft(editor, (40, 60), (150, 70))
+    editor.set_active_layer(MASK)  # the draft is kept, out of sight
+    moved, notices = record(editor.navigate_requested), record(editor.notice)
+
+    editor.navigate(1)
+
+    assert moved == [] and notices == [(editor.FINISH_LINE_FIRST, "warn")]
+    assert editor.active_layer_id == SKELETON
+    assert editor.controls.prompt.isVisible()  # Finish line (Enter) / Cancel (Esc)
+    assert key(editor, Qt.Key.Key_Return)  # the advice works: Enter finishes the line
+    assert editor.layers[SKELETON].draft_state().points == 0
+    assert raster(editor)[60:71, 40:151].any()
+    editor.navigate(1)
+    assert moved == [1]  # the finished line was saved and the page moved on
+
+
+def test_esc_then_cancels_the_hidden_draft(make_editor, project):
+    editor = make_editor(project.a, project.folder)
+    draft(editor, (40, 60), (150, 70))
+    editor.set_active_layer(MASK)
+    editor.navigate(1)
+
+    assert key(editor, Qt.Key.Key_Escape)
+
+    assert editor.layers[SKELETON].draft_state().points == 0
+    assert not editor.has_unsaved_changes()
+
+
+def test_a_draft_on_a_hidden_skeleton_is_shown_again(make_editor, project):
+    editor = make_editor(project.a, project.folder)
+    draft(editor, (40, 60), (150, 70))
+    editor.set_active_layer(MASK)
+    editor.set_layer_visible(SKELETON, False)
+
+    editor.navigate(1)
+
+    assert editor.layers[SKELETON].is_visible()
+    assert editor.layer_panel.rows[SKELETON].eye_button.isChecked()
+    assert editor.active_layer_id == SKELETON
+
+
+def test_a_one_point_draft_does_not_hold_paging_or_switch_the_layer(make_editor, project):
+    editor = make_editor(project.a, project.folder)
+    draft(editor, (40, 60))
+    editor.set_active_layer(MASK)
+    moved = record(editor.navigate_requested)
+
+    editor.navigate(1)
+
+    assert moved == [1] and editor.active_layer_id == MASK

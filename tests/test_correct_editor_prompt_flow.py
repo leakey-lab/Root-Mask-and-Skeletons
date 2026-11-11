@@ -1,5 +1,7 @@
 """Save / Discard / Cancel end to end on the Correct page: open, edit both layers, save,
-leave the stage and come back, switch images (KNOWN_ISSUES #6 review, item E5)."""
+leave the stage and come back, switch images (KNOWN_ISSUES #6 review, item E5): our own
+save and Discard are no change on disk, so coming back keeps the documents and their
+history; a file someone else rewrote is read again."""
 
 from __future__ import annotations
 
@@ -122,47 +124,3 @@ def test_discard_on_leaving_then_coming_back_shows_the_files_without_reading_the
     assert np.array_equal(plane(editor), mask_before)
     assert np.array_equal(raster(editor), skeleton_before)
     assert not editor.has_unsaved_changes() and not editor.session.can_undo()
-
-
-# ---------------------------------------------------------------- focus and hold keys
-def focus_out(view) -> None:
-    from PyQt6.QtCore import QEvent, Qt
-    from PyQt6.QtGui import QFocusEvent
-    from PyQt6.QtWidgets import QApplication
-
-    QApplication.sendEvent(
-        view, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.ActiveWindowFocusReason)
-    )
-
-
-def test_losing_the_keyboard_while_b_is_held_ends_the_hold(make_editor, project):
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtTest import QTest
-
-    from tests.correct_support import record
-
-    editor = make_editor(project.a, project.folder)
-    editor.request_tool(MASK, "eraser")
-    view = editor.graphics_view
-    holds = record(editor.b_key_status_changed)
-    QTest.keyPress(view, Qt.Key.Key_B)
-    assert editor.router.b_held and holds == [True]
-
-    focus_out(view)  # e.g. Alt+Tab with B down: its release goes to another window
-
-    assert not editor.router.b_held and holds == [True, False]
-    assert editor.layers[MASK].current_tool == "eraser"  # not a tap: no brush
-
-
-def test_losing_the_keyboard_while_space_is_held_ends_the_pan(make_editor, project):
-    from PyQt6.QtCore import Qt
-    from PyQt6.QtTest import QTest
-
-    editor = make_editor(project.a, project.folder)
-    view = editor.graphics_view
-    QTest.keyPress(view, Qt.Key.Key_Space)
-    assert view.is_panning_mode()
-
-    focus_out(view)
-
-    assert not view.is_panning_mode()  # a left drag paints again

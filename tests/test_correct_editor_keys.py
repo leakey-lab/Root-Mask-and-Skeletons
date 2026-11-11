@@ -5,7 +5,8 @@ Letters that act on the whole page are ``QShortcut``s installed from the registr
 Ctrl+Shift+Z, Ctrl+S, the canvas zoom keys, and PgDn / PgUp documented by the Global rows);
 the keys that depend on the gesture (B held, S, Enter, Esc, Delete) go through the canvas
 router to the edited layer. No key is both. Every test presses real keys on the shown, active
-page. The class labels' keys (G, the digits) are in ``test_correct_classes_editor.py``.
+page. The class labels' keys (G, the digits) are in ``test_correct_classes_editor.py``. A held
+B ends when the canvas loses the keyboard (its release goes elsewhere).
 """
 
 from __future__ import annotations
@@ -401,3 +402,33 @@ def test_the_canvas_zoom_keys_fit_show_100_percent_and_step(page):
     assert view.zoom_out_limit == 1.0 and view.zoom_factor == pytest.approx(1.0)
     press(page, Key.Key_0, CTRL)
     assert view.zoom_factor == pytest.approx(fitted)
+
+
+# ---------------------------------------------------------------- focus and hold keys
+def focus_out(view) -> None:
+    from PyQt6.QtCore import QEvent, Qt
+    from PyQt6.QtGui import QFocusEvent
+    from PyQt6.QtWidgets import QApplication
+
+    QApplication.sendEvent(
+        view, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.ActiveWindowFocusReason)
+    )
+
+
+def test_losing_the_keyboard_while_b_is_held_ends_the_hold(make_editor, project):
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtTest import QTest
+
+    from tests.correct_support import record
+
+    editor = make_editor(project.a, project.folder)
+    editor.request_tool(MASK, "eraser")
+    view = editor.graphics_view
+    holds = record(editor.b_key_status_changed)
+    QTest.keyPress(view, Qt.Key.Key_B)
+    assert editor.router.b_held and holds == [True]
+
+    focus_out(view)  # e.g. Alt+Tab with B down: its release goes to another window
+
+    assert not editor.router.b_held and holds == [True, False]
+    assert editor.layers[MASK].current_tool == "eraser"  # not a tap: no brush

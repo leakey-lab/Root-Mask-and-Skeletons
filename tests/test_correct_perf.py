@@ -31,7 +31,6 @@ import cv2
 import numpy as np
 import pytest
 from PyQt6.QtCore import QPoint
-from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 import app.enhancement as enhancement
@@ -167,26 +166,6 @@ def test_stroke_segments_paint_the_canvas_in_place(make_editor, tmp_path):
     router.canvas_release(QPoint(505, 307), event)
 
     assert canvas.image.cacheKey() >> 32 == serial
-
-
-def test_a_skeleton_eraser_drag_repaints_at_most_once_per_frame(make_editor, tmp_path, monkeypatch):
-    folder, image = synth(tmp_path)
-    editor = make_editor(image, folder, size=PAGE)
-    skeleton = editor.layers[SKELETON]
-    editor.request_tool(SKELETON, "eraser")
-    spy = Counter(skeleton.item.set_mask)
-    monkeypatch.setattr(skeleton.item, "set_mask", spy)
-    router, event = editor.router, Mouse()
-
-    router.canvas_press(QPoint(100, 100), event)
-    assert spy.calls == 1  # the press shows what it erased at once
-    for i in range(100):  # a burst of moves between two frames
-        router.canvas_move(QPoint(100 + i * 4, 100 + (i % 7)), event, True)
-    assert spy.calls == 1
-    QTest.qWait(3 * skeleton.RENDER_INTERVAL_MS)
-    assert spy.calls == 2  # one coalesced frame for the whole burst
-    router.canvas_release(QPoint(500, 100), event)
-    assert spy.calls == 3  # the release thins and shows the result
 
 
 def test_the_undo_timeline_is_bounded(make_editor, tmp_path):

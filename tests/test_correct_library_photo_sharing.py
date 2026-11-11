@@ -12,7 +12,6 @@ Library the photos the Correct page holds are shown and kept instead of decoded 
 from __future__ import annotations
 
 import os
-import threading
 import time
 from concurrent.futures import Future
 
@@ -22,13 +21,11 @@ import pytest
 from PyQt6.QtCore import QEvent
 from PyQt6.QtWidgets import QApplication, QComboBox, QStatusBar, QWidget
 
-import app.enhancement as enhancement
-import app.gui.display_controller as display_module
 from app.gui.display_controller import DisplayController
 from app.gui.display_read_ahead import DisplayReadAhead
 from app.gui.image_manager import ImageManager
 from app.io_utils import file_stamp
-from tests.correct_paging_support import key, read_ahead_done, ring
+from tests.correct_paging_support import PhotoDecodes, key, read_ahead_done, ring
 from tests.correct_support import bump, write_image
 
 VALUES = {"A": 90, "B": 60, "C": 30}
@@ -95,22 +92,6 @@ def library(app, tmp_path):
     made = Library(str(tmp_path / "project"))
     yield made
     made.close()
-
-
-class PhotoDecodes:
-    """Every photo decode, on any thread: ``(file name, on the GUI thread)``."""
-
-    def __init__(self, monkeypatch) -> None:
-        self.seen: list[tuple[str, bool]] = []
-        gui = threading.current_thread()
-        for module in (enhancement, display_module):
-            real = module.imread_unicode
-
-            def spy(path, *args, _real=real, **kwargs):
-                self.seen.append((os.path.basename(str(path)), threading.current_thread() is gui))
-                return _real(path, *args, **kwargs)
-
-            monkeypatch.setattr(module, "imread_unicode", spy)
 
 
 def correct_page(make_editor, library: Library):
@@ -186,7 +167,7 @@ def test_back_in_the_library_the_correct_photos_are_shown_without_decoding(
     assert decodes.seen == []
     held = library.controller.read_ahead
     assert sorted(held.pending()) == sorted(key(p) for p in (a, b, c))
-    assert held.get(b) is editor._photo  # shared, not a copy
+    assert held.get(b) is editor.cached_photo(b)[1]  # shared, not a copy
 
 
 def test_a_correct_page_left_before_its_read_ahead_takes_nothing_from_the_library(

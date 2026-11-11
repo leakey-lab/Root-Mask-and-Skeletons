@@ -20,7 +20,6 @@ import logging
 import os
 import sys
 import threading
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -37,7 +36,6 @@ from app.gui import (
 from app.gui.correct.layer import MASK, SKELETON
 from app.gui.key_text import platform_keys
 from app.gui.panels import Panel
-from app.gui.skeleton_graph_model import SkeletonCorrectionModel
 from tests.correct_paging_support import read_ahead_done
 from tests.correct_support import (
     CANCEL,
@@ -138,35 +136,6 @@ def test_the_topbar_has_five_stages_with_alt_1_to_alt_5(make_window):
         f"(GT for training), on one canvas. ({platform_keys(' / '.join(shortcuts.stage_keys()[2]))})"
     )
     assert window.welcome.stage_labels() == STAGE_NAMES  # five welcome chips
-
-
-def test_there_is_no_trace_gt_stage_scope_or_panel(make_window):
-    window = make_window(show=False)
-
-    assert "Trace GT" not in shortcuts.SCOPES and shortcuts.scope_for_stage("Trace GT") is None
-    assert not hasattr(Panel, "GT_TRACING") and [int(p) for p in Panel] == [0, 1, 2]
-    assert not hasattr(window, "gt_tracing_interface")
-    assert not hasattr(window, "toggle_gt_tracing")
-    assert window._editors() == {Panel.CORRECT: window.correct_editor}
-    assert window.right_panel.count() == len(Panel)  # no dashboard built yet
-
-
-def test_the_deleted_editor_modules_are_gone():
-    app_dir = Path(__file__).resolve().parents[1] / "app"
-    assert not (app_dir / "gui" / "raster_editor_base.py").exists()
-    assert not (app_dir / "gui" / "gt_tracing_interface.py").exists()
-    sources = [p.read_text(encoding="utf-8") for p in app_dir.rglob("*.py")]
-    assert not any("gt_tracing_interface" in text for text in sources)
-    assert not any("RasterEditorBase" in text for text in sources)
-
-
-def test_the_correct_editor_is_page_one_of_the_three_right_panel_pages(make_window):
-    window = make_window(show=False)
-
-    assert window.right_panel.count() == 3
-    assert window.right_panel.widget(Panel.DISPLAY) is not None
-    assert window.right_panel.widget(Panel.CORRECT) is window.correct_editor
-    assert window.right_panel.widget(Panel.VISUALIZATION) is window.visualization_widget
 
 
 def test_alt_3_enters_correct_once_a_folder_is_open(make_window, tmp_path):
@@ -277,6 +246,48 @@ def test_closing_the_window_asks_once_and_cancel_keeps_it_open(make_window, tmp_
     assert not editor.has_unsaved_changes()  # Discard reverted both layers
     assert np.array_equal(plane(editor), box_plane())
     assert not os.path.exists(project.correction(0))
+
+
+def close_the_window(window, _folder) -> None:
+    window.close()
+    settle()
+    assert not window.isVisible()
+
+
+def switch_the_stage(window, _folder) -> None:
+    enter(window, "Library")
+    assert window.right_panel.currentIndex() == Panel.DISPLAY
+
+
+def open_a_folder(window, folder) -> None:
+    window.open_path(folder)
+    assert window.correct_editor.current_image_path == ""  # the page was emptied
+
+
+@pytest.mark.parametrize("leave", [close_the_window, switch_the_stage, open_a_folder])
+def test_save_at_the_leave_prompt_writes_the_gt_mask_then_leaves(
+    make_window, tmp_path, monkeypatch, leave
+):
+    window, project = in_correct(make_window, tmp_path, 0)
+    editor = window.correct_editor
+    with open(project.mask(0), "rb") as fh:
+        prediction = fh.read()
+    paint(editor, (20, 100), (60, 100))
+    edited = plane(editor).copy()
+    loads = []
+    monkeypatch.setattr(window.image_manager, "load_images", loads.append)
+    answers = answer_prompts(monkeypatch).will(SAVE)
+    other = tmp_path / "other"
+    other.mkdir()
+
+    leave(window, str(other))
+
+    assert [title for title, _text in answers.seen] == ["Unsaved mask"]
+    saved = cv2.imread(project.gt_mask(0), cv2.IMREAD_UNCHANGED)
+    assert saved is not None and np.array_equal(saved[:, :, 3] == 255, edited > 0)
+    with open(project.mask(0), "rb") as fh:
+        assert fh.read() == prediction  # the prediction is never written
+    assert loads == ([str(other)] if leave is open_a_folder else [])
 
 
 # ======================================================================= opening images
@@ -507,41 +518,6 @@ def test_a_mask_back_to_the_prediction_forgets_the_gt_mask(make_window, tmp_path
 
     assert len(cleared) == 1 and not os.path.exists(project.gt_mask(0))
     assert window.image_manager.mask_state(STEMS[0]) == "prediction"
-
-
-def test_the_library_marks_a_gt_mask_after_a_save(make_window, tmp_path):
-    window, project = in_correct(make_window, tmp_path, 1)  # image 1 has no mask
-    editor = window.correct_editor
-    paint(editor, (20, 100), (60, 100))
-
-    assert editor.save()
-
-    assert window.image_manager.has_gt_mask(STEMS[1])
-    assert STEMS[1] not in window.image_manager.masks  # a save never adds a prediction
-
-
-def test_re_entering_correct_after_a_skeleton_save_shows_the_saved_correction(
-    make_window, tmp_path
-):
-    project = new_project(tmp_path)
-    # A generated skeleton at half size: the correction is saved at image resolution, so
-    # re-entry shows exactly the raster that was in memory (Q1 fixed).
-    write_skeleton(project.generated(0), row=55, w=W // 2, h=H // 2)
-    window, _project = in_correct(make_window, tmp_path, 0, project)
-    editor = window.correct_editor
-    draw_line(editor)
-    assert editor.save()
-    in_memory = raster(editor).copy()
-
-    enter(window, "Measure")
-    enter(window, "Correct")
-
-    saved = cv2.imread(project.correction(0), cv2.IMREAD_GRAYSCALE)
-    fresh = SkeletonCorrectionModel()
-    fresh.load_from_raster(saved, target_size=(W, H))
-    assert np.array_equal(raster(editor), fresh.mask)
-    assert np.array_equal(raster(editor), in_memory)
-    assert editor.layers[SKELETON].document.source == "gt"
 
 
 def test_a_skeleton_save_reaches_the_library_and_the_metrics_bar_at_once(

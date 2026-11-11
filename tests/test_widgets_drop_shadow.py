@@ -145,7 +145,7 @@ _AT_SCALE = """
 import numpy as np
 from PyQt6.QtWidgets import QApplication, QWidget
 app = QApplication([])
-import tests.test_correct_chrome_shadow as t
+import tests.test_widgets_drop_shadow as t
 from app.gui.widgets.effects import pop_shadow
 worst = 0
 for size, pos in (((300, 60), (110, 60)), ((48, 400), (200, 20))):

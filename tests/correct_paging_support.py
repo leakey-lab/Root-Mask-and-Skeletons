@@ -62,3 +62,22 @@ class GuiDecodes:
             return real(path, *args, **kwargs)
 
         monkeypatch.setattr(enhancement, "imread_unicode", spy)
+
+
+class PhotoDecodes:
+    """Every photo decode, on any thread: ``(file name, on the GUI thread)`` (moved here from
+    ``test_correct_library_photo_sharing.py``)."""
+
+    def __init__(self, monkeypatch) -> None:
+        import app.gui.display_controller as display_module  # its first use loads it
+
+        self.seen: list[tuple[str, bool]] = []
+        gui = threading.current_thread()
+        for module in (enhancement, display_module):
+            real = module.imread_unicode
+
+            def spy(path, *args, _real=real, **kwargs):
+                self.seen.append((os.path.basename(str(path)), threading.current_thread() is gui))
+                return _real(path, *args, **kwargs)
+
+            monkeypatch.setattr(module, "imread_unicode", spy)

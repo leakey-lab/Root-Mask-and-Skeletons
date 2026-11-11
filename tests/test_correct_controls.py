@@ -1,11 +1,11 @@
-"""CorrectControls and LayerPanel (plan P7a, contract C20): the Correct page's own controls on
-the shared EditorChrome, and its Layers panel.
+"""CorrectControls (plan P7a, contract C20): the Correct page's own controls on the shared
+EditorChrome.
 
-Both are pure views. The controls put two tool groups on the rail (the mask's, then the
+A pure view. The controls put the layers' tool groups on the rail (the mask's, then the
 skeleton's), one size slider per distinct SizeSpec, the opacity slider, Load / Undo / Redo /
-Clear / Save, the polyline prompt and the topbar clear button over the chrome; they show the
-state they are handed and emit requests, never touching a layer. The Layers panel lists the
-layers, the mask on top, with their key, colour, visibility and save state.
+Clear / Save and the polyline prompt on the chrome; they show the state they are handed and
+emit requests, never touching a layer. The Layers panel: ``test_correct_layer_panel.py``; the
+page and helpers both use: ``tests/correct_controls_support.py``.
 
 Built as P7b builds the page: a canvas, the chrome, the real MaskLayer and SkeletonLayer on a
 scene parented to the view; FakeLayers where a call log proves that nothing touched a layer.
@@ -16,39 +16,25 @@ from __future__ import annotations
 
 import os
 import sys
-import time
-from collections import Counter
 
 import pytest
-from PyQt6.QtCore import QPoint, QRectF, Qt
+from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
-    QGraphicsScene,
     QLabel,
-    QVBoxLayout,
-    QWidget,
 )
 
-from app.enhancement import EnhanceDefaultsStore
-from app.gui.correct.controls import CorrectControls
 from app.gui.correct.layer import MASK, SKELETON, LayerStatus
-from app.gui.correct.layer_panel import LayerPanel
-from app.gui.correct.mask_layer import MaskLayer
-from app.gui.correct.skeleton_layer import DraftState, SkeletonLayer
-from app.gui.editor_canvas import EditorCanvasView
-from app.gui.editor_chrome import EditorChrome
-from app.gui.image_normalization_interface import NormalizationControls
+from app.gui.correct.skeleton_layer import DraftState
 from app.gui.key_text import platform_keys
 from app.gui.widgets import tokens
 from app.gui.widgets.icons import load_icon
-from app.gui.widgets.overlay_geometry import LayoutMetrics
-from tests.correct_fakes import FakeHost, FakeLayer
-from tests.qt_teardown import delete_widgets
+from tests.correct_controls_support import make_page as make_page  # fixture (the alias: no F811)
+from tests.correct_controls_support import opaque_colours, record, settle
 
-M = LayoutMetrics()
 #: The code under test: an exception it raises in a Qt slot fails the test (``slot_errors``).
 SLOT_ERRORS_FROM = (
     os.path.join("correct", "controls.py"),
@@ -94,81 +80,10 @@ def app():
 pytestmark = pytest.mark.usefixtures("no_prompts", "gl_off", "slot_errors")
 
 
-class Page(QWidget):
-    """The Correct page as P7b composes it: canvas, chrome, both layers, controls, panel."""
-
-    def __init__(self, store: EnhanceDefaultsStore, *, fake: bool):
-        super().__init__()
-        self.view = EditorCanvasView()
-        self.scene = QGraphicsScene(self.view)
-        self.view.setScene(self.scene)
-        self.view.set_content_rect(QRectF(0, 0, 640, 480))
-        column = QVBoxLayout(self)
-        column.setContentsMargins(0, 0, 0, 0)
-        column.addWidget(self.view)
-        self.norm = NormalizationControls(store=store)
-        self.chrome = EditorChrome(self, self.view, self.norm)
-        self.host = FakeHost()
-        if fake:
-            self.layers = {MASK: FakeLayer(MASK), SKELETON: FakeLayer(SKELETON)}
-        else:
-            self.layers = {
-                MASK: MaskLayer(self.host, self.scene),
-                SKELETON: SkeletonLayer(self.host, self.scene),
-            }
-        self.controls = CorrectControls(self, self.chrome, self.layers)
-        self.panel = LayerPanel(list(self.layers.values()), self)
-        self.chrome.register(side_panel=self.panel)
-
-
-@pytest.fixture
-def make_page(app, tmp_path):
-    made = []
-
-    def make(size=(1000, 700), *, show=True, fake=False):
-        store = EnhanceDefaultsStore(
-            user_path=str(tmp_path / "user.json"), factory_path=str(tmp_path / "factory.json")
-        )
-        page = Page(store, fake=fake)
-        page.resize(*size)
-        if show:
-            page.show()
-            settle(app, page)
-        made.append(page)
-        return page
-
-    yield make
-    # Delete the pages while their wrappers are intact (page -> chrome -> OverlayLayout -> page
-    # is a cycle the GC could otherwise empty while Qt still delivers teardown events).
-    delete_widgets(made, prepare=_quiet_skeleton)
-
-
-def _quiet_skeleton(page) -> None:
-    """Stop the skeleton layer's scheduled render before its page goes."""
-    skeleton = page.layers[SKELETON]
-    if isinstance(skeleton, SkeletonLayer):
-        skeleton.cancel_scheduled_render()
-
-
-# ------------------------------------------------------------------------------ helpers
-def settle(app, page=None) -> None:
-    for _ in range(3):
-        app.processEvents()
-    if page is not None:
-        page.chrome.relayout()
-        app.processEvents()
-
-
 def show_active(app, page) -> None:
     page.activateWindow()
     assert QTest.qWaitForWindowActive(page, 3000)
     settle(app, page)
-
-
-def record(signal) -> list[tuple]:
-    seen: list[tuple] = []
-    signal.connect(lambda *args: seen.append(args))
-    return seen
 
 
 def record_requests(controls) -> list[tuple]:
@@ -177,45 +92,6 @@ def record_requests(controls) -> list[tuple]:
     for name in REQUESTS:
         getattr(controls, name).connect(lambda *args, name=name: seen.append((name, args)))
     return seen
-
-
-def opaque_colours(image: QImage) -> set[str]:
-    image = image.convertToFormat(QImage.Format.Format_ARGB32)
-    return {
-        QColor(image.pixel(x, y)).name()
-        for y in range(image.height())
-        for x in range(image.width())
-        if QColor.fromRgba(image.pixel(x, y)).alpha() == 255
-    }
-
-
-def text_colours(image: QImage, min_alpha: int = 128, tolerance: int = 2) -> set[str]:
-    """The colours the text is drawn in. Antialiased glyphs of a small font (DejaVu on Linux)
-    have no fully opaque pixel, so every pixel at least ``min_alpha`` covered counts. The
-    grab is premultiplied; un-premultiplying a partly covered pixel is off by a level or two
-    (the 2 levels ``drawn_in`` allows), so colours within ``tolerance`` levels of a more
-    frequent one count as it."""
-    image = image.convertToFormat(QImage.Format.Format_ARGB32)
-    seen = Counter(
-        QColor(image.pixel(x, y)).name()
-        for y in range(image.height())
-        for x in range(image.width())
-        if QColor.fromRgba(image.pixel(x, y)).alpha() >= min_alpha
-    )
-    found: list[QColor] = []
-    for name, _count in seen.most_common():
-        colour = QColor(name)
-        if not any(
-            max(
-                abs(colour.red() - c.red()),
-                abs(colour.green() - c.green()),
-                abs(colour.blue() - c.blue()),
-            )
-            <= tolerance
-            for c in found
-        ):
-            found.append(colour)
-    return {colour.name() for colour in found}
 
 
 def icon_colours(button) -> set[str]:
@@ -246,10 +122,6 @@ def drawn_in(button, colour: str) -> bool:
     )
 
 
-def pixel(image: QImage, point: QPoint) -> str:
-    return QColor(image.pixel(point)).name()
-
-
 def visible_size_slider(controls, dock):
     shown = [s for s in controls.size_sliders.values() if s.isVisibleTo(dock)]
     assert len(shown) == 1, shown
@@ -258,10 +130,6 @@ def visible_size_slider(controls, dock):
 
 def untouched(page) -> bool:
     return all(layer.calls == [] for layer in page.layers.values())
-
-
-def right(widget) -> int:
-    return widget.geometry().x() + widget.geometry().width()
 
 
 # ============================================================================ the rail
@@ -720,223 +588,6 @@ def test_smooth_shows_the_draft_and_a_click_requests_the_other_setting(make_page
     assert toggles == [(True,), (False,)]
 
 
-# ======================================================================= the Layers panel
-def test_the_panel_lists_the_mask_above_the_skeleton_with_keys_names_and_colours(app, make_page):
-    page = make_page((1400, 900))
-    rows = page.panel.rows
-
-    assert list(rows) == [MASK, SKELETON]
-    assert rows[MASK].geometry().y() < rows[SKELETON].geometry().y()
-    assert [rows[i].key_label.text() for i in (MASK, SKELETON)] == ["M", "L"]
-    assert [rows[i].name_label.text() for i in (MASK, SKELETON)] == ["Mask", "Skeleton"]
-    for layer_id, colour in ((MASK, tokens.MASK), (SKELETON, tokens.SKEL)):
-        swatch = rows[layer_id].swatch.grab().toImage()
-        assert pixel(swatch, QPoint(swatch.width() // 2, swatch.height() // 2)) == colour
-
-
-@pytest.fixture
-def standalone(app):
-    """A LayerPanel over a plain host, placing itself (no OverlayLayout)."""
-    hosts = []
-
-    def make(layers) -> LayerPanel:
-        host = QWidget()
-        host.resize(600, 400)
-        panel = LayerPanel(layers, host)
-        host.show()
-        panel.reposition()
-        settle(app)
-        hosts.append(host)
-        return panel
-
-    yield make
-    delete_widgets(hosts)
-
-
-def test_the_panel_is_never_narrower_than_155_px(standalone):
-    """Spec 3.2: about 155 px, so the fit zoom barely changes; short names do not shrink it."""
-    tiny = FakeLayer(MASK)
-    tiny.noun = "m"
-
-    panel = standalone([tiny])
-
-    assert panel.sizeHint().width() < 155 and panel.width() == 155
-    assert right(panel) == 600 - M.margin  # its own placement: the host's right edge
-
-
-def test_the_mask_row_stays_on_top_and_keeps_its_key_whatever_the_order_given(standalone):
-    rows = standalone([FakeLayer(SKELETON), FakeLayer(MASK)]).rows
-
-    assert rows[MASK].geometry().y() < rows[SKELETON].geometry().y()
-    assert [rows[i].key_label.text() for i in (MASK, SKELETON)] == ["M", "L"]
-
-
-@pytest.mark.parametrize(
-    "status, text, colour",
-    [
-        (LayerStatus("clean"), "Saved", tokens.OK),
-        (LayerStatus("dirty"), "Unsaved", tokens.WARN),
-        (LayerStatus("error"), "Not saved", tokens.DANGER),
-        (LayerStatus("none", "No mask"), "No mask", tokens.TEXT_FAINT),
-        (LayerStatus("none", "Prediction", "Not corrected yet"), "Prediction", tokens.TEXT_FAINT),
-        (LayerStatus("error", "Not saved", "Disk full"), "Not saved", tokens.DANGER),
-        (LayerStatus("clean", "GT"), "GT", tokens.OK),
-    ],
-    ids=["clean", "dirty", "error", "none-label", "tooltip", "error-reason", "label-wins"],
-)
-def test_set_status_shows_the_label_else_the_state_name_in_the_chip_colour(
-    app, make_page, status, text, colour
-):
-    page = make_page((1400, 900))
-    row = page.panel.rows[SKELETON]
-    page.panel.set_status(SKELETON, LayerStatus("dirty", "something else", "old tip"))
-
-    page.panel.set_status(SKELETON, status)
-    settle(app, page)
-
-    assert row.state_label.text() == text
-    assert row.state_label.toolTip() == row.state_dot.toolTip() == status.tooltip
-    assert text_colours(row.state_label.grab().toImage()) == {colour}
-    assert opaque_colours(row.state_dot.grab().toImage()) == {colour}
-
-
-def test_a_status_without_a_label_shows_nothing(app, make_page):
-    page = make_page((1400, 900))
-    row = page.panel.rows[MASK]
-    page.panel.set_status(MASK, LayerStatus("clean"))
-
-    page.panel.set_status(MASK, LayerStatus("none"))
-    settle(app, page)
-
-    assert row.state_label.text() == ""
-    assert opaque_colours(row.state_label.grab().toImage()) == set()
-    assert opaque_colours(row.state_dot.grab().toImage()) == set()
-
-
-def test_a_long_status_label_is_shown_in_full(app, make_page):
-    page = make_page((1400, 900))
-    panel = page.panel
-    label = panel.rows[SKELETON].state_label
-
-    panel.set_status(SKELETON, LayerStatus("none", "Prediction · empty", "Not corrected yet"))
-    for _ in range(3):  # no relayout from the test: the panel asks for its new width itself
-        app.processEvents()
-
-    assert label.width() >= label.fontMetrics().horizontalAdvance("Prediction · empty")
-    left = label.mapTo(panel, QPoint(0, 0)).x()
-    assert left + label.width() <= panel.width()
-
-
-def test_set_active_gives_only_that_row_the_fill_and_the_bar_in_its_colour(app, make_page):
-    page = make_page((1400, 900))
-    panel = page.panel
-
-    def bar(row) -> QPoint:
-        return row.mapTo(panel, QPoint(0, row.height() // 2))
-
-    def fill(row) -> QPoint:
-        return row.mapTo(panel, QPoint(row.width() // 2, 2))
-
-    for active, other, colour in ((SKELETON, MASK, tokens.SKEL), (MASK, SKELETON, tokens.MASK)):
-        panel.set_active(active)
-        settle(app, page)
-        image = panel.grab().toImage()
-        on, off = panel.rows[active], panel.rows[other]
-        assert (pixel(image, bar(on)), pixel(image, fill(on))) == (colour, tokens.BG_2)
-        width = [pixel(image, bar(on) + QPoint(dx, 0)) for dx in (1, 3)]
-        assert width == [colour, tokens.BG_2]  # a 2 px bar
-        assert (pixel(image, bar(off)), pixel(image, fill(off))) == (tokens.BG_1, tokens.BG_1)
-        assert on.is_active() and not off.is_active()
-
-
-def test_a_click_on_a_row_requests_that_layer_and_leaves_the_active_row_to_the_editor(
-    app, make_page
-):
-    page = make_page((1400, 900))
-    panel = page.panel
-    panel.set_active(MASK)
-    requests = record(panel.activate_requested)
-
-    QTest.mouseClick(panel.rows[SKELETON].name_label, Qt.MouseButton.LeftButton)
-    QTest.mouseClick(panel.rows[SKELETON], Qt.MouseButton.RightButton, pos=QPoint(4, 4))
-    QTest.mouseClick(panel.rows[MASK], Qt.MouseButton.LeftButton, pos=QPoint(4, 4))
-
-    assert requests == [(SKELETON,), (MASK,)]  # the right click asked for nothing
-    assert panel.rows[MASK].is_active() and not panel.rows[SKELETON].is_active()
-
-
-def test_an_eye_click_requests_the_other_visibility_and_does_not_activate_the_row(app, make_page):
-    page = make_page((1400, 900))
-    panel = page.panel
-    toggles, activations = record(panel.visibility_toggled), record(panel.activate_requested)
-    eye = panel.rows[SKELETON].eye_button
-
-    QTest.mouseClick(eye, Qt.MouseButton.LeftButton)
-    panel.set_visible_state(SKELETON, False)  # the editor hid it
-    QTest.mouseClick(eye, Qt.MouseButton.LeftButton)
-    panel.set_visible_state(SKELETON, False)  # the editor kept it hidden
-    QTest.mouseClick(eye, Qt.MouseButton.LeftButton)
-
-    assert toggles == [(SKELETON, False), (SKELETON, True), (SKELETON, True)]
-    assert activations == []
-
-
-def test_set_visible_state_changes_only_the_eye_and_emits_nothing(app, make_page):
-    page = make_page((1400, 900))
-    panel = page.panel
-    row = panel.rows[MASK]
-    panel.set_active(MASK)
-    panel.set_status(MASK, LayerStatus("dirty"))
-    toggles, activations = record(panel.visibility_toggled), record(panel.activate_requested)
-
-    def eye_image() -> QImage:
-        return row.eye_button.icon().pixmap(row.eye_button.iconSize(), 1.0).toImage()
-
-    shown_eye, shown_tip = eye_image(), row.eye_button.toolTip()
-    button = row.eye_button.grab().toImage()
-    assert QColor.fromRgba(button.pixel(1, button.height() // 2)).alpha() == 0  # no checked pill
-    panel.set_visible_state(MASK, False)
-    hidden_eye, hidden_tip = eye_image(), row.eye_button.toolTip()
-    panel.set_visible_state(MASK, True)
-
-    assert hidden_eye != shown_eye and eye_image() == shown_eye
-    assert "Hide" in shown_tip and "Show" in hidden_tip and "mask" in hidden_tip
-    assert all("H: every layer" in tip and "Shift+H" in tip for tip in (shown_tip, hidden_tip))
-    assert toggles == [] and activations == []
-    assert row.is_active() and row.state_label.text() == "Unsaved"
-
-
-def test_flash_highlights_the_row_for_about_300_ms_then_restores_it(app, make_page):
-    page = make_page((1400, 900))
-    panel = page.panel
-    panel.set_active(MASK)
-    settle(app, page)
-    row = panel.rows[SKELETON]
-    before = row.grab().toImage()
-
-    start = time.perf_counter()
-    panel.flash(SKELETON)
-    assert row.grab().toImage() != before
-    while row.grab().toImage() != before:
-        assert time.perf_counter() - start < 3.0, "the flash never ends"
-        QTest.qWait(10)
-
-    assert time.perf_counter() - start >= 0.25
-
-
-def test_the_panel_takes_its_side_panel_place_and_fits_a_shorter_height(app, make_page):
-    page = make_page((1400, 900))
-    panel = page.panel
-    natural = panel.preferred_height(900)
-
-    assert right(panel) == 1400 - M.margin and panel.height() == natural
-    panel.fit_height(natural - 20)
-    assert panel.height() == natural - 20
-    assert panel.preferred_height(900) == natural
-    panel.fit_height(natural + 50)
-    assert panel.height() == natural
-
-
 # ================================================================ focus and the layout
 def test_clicking_any_control_leaves_the_keys_on_the_canvas(app, make_page):
     page = make_page((1400, 900))
@@ -973,16 +624,6 @@ def test_clicking_any_control_leaves_the_keys_on_the_canvas(app, make_page):
         assert widget.isVisible(), widget
         QTest.mouseClick(widget, Qt.MouseButton.LeftButton)
         assert QApplication.focusWidget() is page.view, widget
-
-
-def test_a_click_never_gives_the_panel_the_focus_but_tab_reaches_rows_and_eyes(make_page):
-    """W18: the rows and their eyes are Tab stops (TabFocus); nothing takes click focus."""
-    panel = make_page(show=False).panel
-    tab_stops = {w for row in panel.rows.values() for w in (row, row.eye_button)}
-
-    for widget in (panel, *panel.findChildren(QWidget)):
-        wanted = Qt.FocusPolicy.TabFocus if widget in tab_stops else Qt.FocusPolicy.NoFocus
-        assert widget.focusPolicy() == wanted, widget
 
 
 @pytest.mark.parametrize("shown", [MASK, SKELETON])
@@ -1028,12 +669,6 @@ def test_save_and_clear_follow_the_image_and_the_unsaved_state(make_page):
     controls.set_image_actions(False, True)  # no image wins over a stale dirty flag
     assert not controls.save_button.isEnabled() and not controls.clear_icon_button.isEnabled()
     assert controls.save_button.text() == "Save"  # the label never changes
-
-
-def test_there_is_one_clear_and_it_is_in_the_dock(make_page):
-    controls = make_page(show=False).controls
-    assert not hasattr(controls, "clear_button")  # the top-bar twin is gone
-    assert controls.clear_icon_button.toolTip().startswith("Clear ")
 
 
 @pytest.mark.parametrize(

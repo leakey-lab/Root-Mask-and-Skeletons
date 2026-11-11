@@ -1,6 +1,7 @@
-"""The status chip keeps what identifies an image when it is narrow, and shows the image's
-place in the library ("Image 12 / 40"). KNOWN_ISSUES #6: at 1280 x 800 the polyline prompt
-shares the chip's row, and middle elision dropped the L-number and the date."""
+"""StatusChip (``app/gui/widgets/overlays.py``): it keeps what identifies an image when
+it is narrow (``name_forms``), and shows the image's place in the library ("Image 12 / 40").
+KNOWN_ISSUES #6: at 1280 x 800 the polyline prompt shares the chip's row, and middle elision
+dropped the L-number and the date. The Correct page's use of it: test_correct_editor_controls.py."""
 
 from __future__ import annotations
 
@@ -9,13 +10,12 @@ from PyQt6.QtWidgets import QWidget
 
 from app.gui.widgets.overlays import StatusChip, name_forms
 from app.gui.widgets.text_fit import label_advance
-from tests.correct_support import new_project
 from tests.qt_teardown import flush_deleted
 
 CAMERA = "24EFCAM1_T001_L044_2024.07.18_111530_001_SMM.jpg"
-CORE = "T001_L044_2024.07.18"
 
-pytestmark = pytest.mark.usefixtures("correct_guards")
+
+CORE = "T001_L044_2024.07.18"
 
 
 @pytest.fixture
@@ -161,40 +161,3 @@ def test_a_narrow_chip_shortens_then_hides_the_position_before_the_name_loses_it
         "short position": ("12 / 40", "…T001_L044_2024.07.18…"),
         "no position": ("", "…T001_L044_2024.07.18…"),
     }
-
-
-# ------------------------------------------------------------------ the page
-def test_the_page_shows_the_library_position_its_provider_gives(make_editor, tmp_path):
-    project = new_project(tmp_path)
-    editor = make_editor()
-    order = [project.a, project.b]
-
-    editor.set_position_provider(lambda path: (order.index(path) + 1, len(order)))
-    editor.load_image(project.b, project.folder)
-
-    chip = editor.status_chip
-    assert chip.position_label.text() == "Image 2 / 2" and not chip.position_label.isHidden()
-    editor.load_image(project.a, project.folder)
-    assert chip.position_label.text() == "Image 1 / 2"
-
-
-def test_without_a_provider_or_a_place_the_page_shows_no_position(make_editor, tmp_path, caplog):
-    project = new_project(tmp_path)
-    editor = make_editor(project.a, project.folder)
-    assert editor.status_chip.position_label.isHidden()
-
-    editor.set_position_provider(lambda path: None)  # not in the library
-    assert editor.status_chip.position_label.isHidden()
-
-    def broken(path):
-        raise KeyError(path)
-
-    editor.set_position_provider(broken)
-    editor.load_image(project.b, project.folder)
-    assert editor.status_chip.position_label.isHidden()
-    assert "library position" in caplog.text
-
-
-def test_correct_with_no_image_says_select_an_image(make_editor):
-    editor = make_editor()
-    assert editor.status_chip.hint_label.text() == "Select an image in the Library"

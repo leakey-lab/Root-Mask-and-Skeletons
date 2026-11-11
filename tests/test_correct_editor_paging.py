@@ -1,6 +1,12 @@
 """CorrectEditor paging: the neighbours of the open image are read ahead on a worker thread
 and the next open adopts them (KNOWN_ISSUES #6, background prefetch of the neighbour
-images). Real page, real layers; the neighbour provider stands in for MainWindow's."""
+images). Real page, real layers; the neighbour provider stands in for MainWindow's.
+
+The neighbours are read again when they may have changed: a library search changes the order
+(MainWindow hands the page its position provider again), or the page comes back to the open
+image after the read-ahead was dropped (a Generate run); what is still current is kept, not
+read twice.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +17,7 @@ import numpy as np
 import pytest
 
 from app.gui.correct.layer import MASK, SKELETON
-from tests.correct_paging_support import GuiDecodes, key, read_ahead_done, ring
+from tests.correct_paging_support import GuiDecodes, PhotoDecodes, key, read_ahead_done, ring
 from tests.correct_support import bump, plane, write_image
 
 pytestmark = pytest.mark.usefixtures("correct_guards")
@@ -179,7 +185,7 @@ def test_the_enhance_render_uses_the_photo_the_page_opened(make_editor, project,
 
     assert decodes.paths == []
     assert editor.photo_item.pixmap().toImage().pixelColor(5, 5).red() == 60
-    photo = editor._photo
+    _stamp, photo = editor.cached_photo(project.b)  # the photo the page holds, shared
     assert isinstance(photo, np.ndarray) and not photo.flags.writeable
 
 
@@ -213,3 +219,94 @@ def test_deleting_the_page_stops_its_read_ahead_worker(app, project):
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
 
     assert ahead._closed  # the worker thread ends instead of idling until collection
+
+
+class Library:
+    """The library order MainWindow's providers read (a search can hide images)."""
+
+    def __init__(self, paths) -> None:
+        self.shown = list(paths)
+
+    def neighbours(self, path):
+        keys = [key(p) for p in self.shown]
+        i = keys.index(key(path))
+        return [self.shown[(i + 1) % len(self.shown)], self.shown[i - 1]]
+
+    def position(self, path):
+        keys = [key(p) for p in self.shown]
+        return (keys.index(key(path)) + 1, len(keys)) if key(path) in keys else None
+
+
+@pytest.fixture
+def library(tmp_path):
+    folder = str(tmp_path / "project")
+    paths = [write_image(os.path.join(folder, f"{name}.png")) for name in "abcde"]
+    return folder, paths, Library(paths)
+
+
+def test_a_search_that_changes_the_order_reads_the_new_neighbours(make_editor, library):
+    folder, (a, b, c, _d, e), lib = library
+    editor = make_editor()
+    editor.set_neighbour_provider(lib.neighbours)
+    editor.set_position_provider(lib.position)
+    editor.load_image(a, folder)
+    assert sorted(read_ahead_done(editor)) == sorted([key(b), key(e)])
+
+    lib.shown.remove(b)  # the search hides b: PgDn from a now opens c
+    editor.set_position_provider(lib.position)  # what MainWindow does on a search
+
+    assert sorted(read_ahead_done(editor)) == sorted([key(c), key(e)])
+
+
+def test_what_is_still_current_is_not_read_again(make_editor, library, monkeypatch):
+    folder, (a, b, _c, _d, e), lib = library
+    editor = make_editor()
+    editor.set_neighbour_provider(lib.neighbours)
+    editor.load_image(a, folder)
+    read_ahead_done(editor)
+    decodes = PhotoDecodes(monkeypatch)  # on every thread: a new read decodes its photo
+
+    editor.set_position_provider(lib.position)  # same order
+
+    assert sorted(read_ahead_done(editor)) == sorted([key(b), key(e)]) and decodes.seen == []
+
+
+def test_coming_back_to_the_open_image_reads_its_neighbours_again(make_editor, library):
+    folder, (a, b, _c, _d, e), lib = library
+    editor = make_editor()
+    editor.set_neighbour_provider(lib.neighbours)
+    editor.load_image(a, folder)
+    read_ahead_done(editor)
+    editor.discard_read_ahead()  # a Generate run rewrote the outputs
+    assert editor.paging.pending() == []
+
+    editor.load_image(a, folder)  # the stage again, or a click on its row: nothing reloads
+
+    assert sorted(read_ahead_done(editor)) == sorted([key(b), key(e)])
+
+
+def test_a_search_while_the_page_is_hidden_reads_on_the_way_back(make_editor, library):
+    folder, (a, b, c, _d, e), lib = library
+    editor = make_editor()
+    editor.set_neighbour_provider(lib.neighbours)
+    editor.load_image(a, folder)
+    read_ahead_done(editor)
+    editor.hide()  # another stage: the page keeps its image
+
+    lib.shown.remove(b)
+    editor.set_position_provider(lib.position)
+    assert sorted(read_ahead_done(editor)) == sorted([key(b), key(e)])  # no work while hidden
+
+    editor.show()
+    editor.load_image(a, folder)  # back in Correct on the same image
+    assert sorted(read_ahead_done(editor)) == sorted([key(c), key(e)])
+
+
+def test_nothing_is_read_while_no_image_is_open(make_editor, library):
+    _folder, _paths, lib = library
+    editor = make_editor()
+    editor.set_neighbour_provider(lib.neighbours)
+
+    editor.set_position_provider(lib.position)
+
+    assert read_ahead_done(editor) == []

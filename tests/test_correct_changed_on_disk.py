@@ -16,9 +16,7 @@ import os
 import cv2
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QMessageBox
 
-from app.gui import editor_prompts
 from app.gui.correct.layer import MASK, SKELETON
 from app.gui.key_text import platform_keys
 from tests.correct_support import (
@@ -38,7 +36,6 @@ from tests.correct_support import (
     write_mask,
     write_skeleton,
 )
-from tests.editor_prompts_support import ESCAPE, Answer
 
 PROMPT = ("Mask changed on disk", "gt/mask/a.png changed on disk after you opened it.")
 INFO = "Overwrite it with your edits, reload it from disk (your edits are lost), or cancel."
@@ -288,29 +285,3 @@ def test_a_rewritten_gt_skeleton_asks_but_a_rewritten_prediction_does_not(
 
     assert editor.save() is False
     assert answers.seen == [CORRECTION_PROMPT] and editor.has_unsaved_changes()
-
-
-# ------------------------------------------------------------------------------- the box
-@pytest.mark.parametrize(
-    ("pressed", "expected"),
-    [
-        (QMessageBox.StandardButton.Save, editor_prompts.OVERWRITE),
-        (QMessageBox.StandardButton.Discard, editor_prompts.RELOAD),
-        (QMessageBox.StandardButton.Cancel, editor_prompts.CANCEL),
-        (ESCAPE, editor_prompts.CANCEL),
-    ],
-)
-def test_the_changed_on_disk_box_names_the_file_and_cancels_by_default(
-    app, monkeypatch, pressed, expected
-):
-    answer = Answer(monkeypatch, pressed)
-
-    assert editor_prompts.ask_changed_on_disk(None, "mask", "gt/mask/a.png") == expected
-
-    seen, button = answer.seen, QMessageBox.StandardButton
-    assert (seen["title"], seen["text"]) == PROMPT
-    assert seen["info"] == INFO
-    assert set(seen["buttons"]) == {button.Save, button.Discard, button.Cancel}
-    assert seen["buttons"][button.Save] == "Overwrite"
-    assert seen["buttons"][button.Discard] == "Reload (lose my edits)"
-    assert seen["default"] == seen["escape"] == button.Cancel

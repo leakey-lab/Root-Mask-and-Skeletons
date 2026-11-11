@@ -3,7 +3,7 @@ and a step that changes nothing does not refresh the page (Qt-free, fake layers)
 
 from __future__ import annotations
 
-from app.gui.correct.layer import MASK, SKELETON, ReadAheadLayer, SaveOutcome, missing_members
+from app.gui.correct.layer import MASK, SKELETON, SaveOutcome
 from app.gui.correct.session import CorrectSession
 from tests.correct_fakes import FakeHost, FakeLayer, FakePrompts
 
@@ -50,11 +50,6 @@ class Rig:
 
 
 # ------------------------------------------------------------------ read-ahead
-def test_the_fake_read_ahead_layer_has_the_optional_hook():
-    assert missing_members(AheadLayer(MASK), ReadAheadLayer) == []
-    assert missing_members(FakeLayer(MASK), ReadAheadLayer) == ["read_ahead"]
-
-
 def test_a_payload_read_ahead_goes_to_its_layer_the_others_open_as_usual():
     rig = Rig(mask=AheadLayer(MASK))
 

@@ -14,14 +14,11 @@ import os
 import cv2
 import numpy as np
 import pytest
-from PyQt6.QtWidgets import QMessageBox
 
-from app.gui import editor_prompts
 from app.gui.correct.layer import MASK, LayerStatus
 from app.gui.key_text import platform_keys
 from app.masks import write_mask_file
 from tests.correct_support import CANCEL, SAVE, paint, record, write_image
-from tests.editor_prompts_support import ESCAPE, Answer
 
 NOT_SHOWN_SIZE = (
     "Saved mask size does not match the image: it is not shown and is kept unless you save over it"
@@ -131,25 +128,3 @@ def test_an_undecodable_mask_gives_a_notice_and_survives_ctrl_s(make_editor, tmp
 
     assert read_bytes(mask) == b"not a png"
     assert notices[-1] == NOTHING_UNSAVED
-
-
-@pytest.mark.parametrize(
-    ("pressed", "expected"),
-    [
-        (QMessageBox.StandardButton.Save, editor_prompts.REPLACE),
-        (QMessageBox.StandardButton.Cancel, editor_prompts.CANCEL),
-        (ESCAPE, editor_prompts.CANCEL),
-    ],
-)
-def test_the_replace_box_names_the_file_and_keeps_it_by_default(
-    app, monkeypatch, pressed, expected
-):
-    answer = Answer(monkeypatch, pressed)
-
-    assert editor_prompts.ask_replace_unloaded(None, "mask", "gt/mask/a.png") == expected
-
-    seen, button = answer.seen, QMessageBox.StandardButton
-    assert (seen["title"], seen["text"]) == PROMPT
-    assert seen["info"] == "Your edits replace the whole file. Keep it leaves the file as it is."
-    assert seen["buttons"] == {button.Save: "Replace", button.Cancel: "Keep it"}
-    assert seen["default"] == seen["escape"] == button.Cancel

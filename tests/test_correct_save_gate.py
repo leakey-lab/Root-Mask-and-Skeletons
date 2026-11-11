@@ -14,6 +14,7 @@ from app.gui.correct.save_gate import (
     OVERWRITE,
     RELOAD,
     REPLACE,
+    SAVE,
     SaveGate,
     SaveReport,
     matches_disk_of,
@@ -426,3 +427,25 @@ def test_write_stamps_of_and_matches_disk_of_read_the_methods_else_fall_back():
     assert write_stamps_of(mask) == AT_OPEN and matches_disk_of(mask) is True
     assert write_stamps_of(_StampsOnly(REWRITTEN)) == REWRITTEN  # its file_stamps()
     assert matches_disk_of(_StampsOnly(REWRITTEN)) is False and matches_disk_of(object()) is False
+
+
+def test_the_leave_prompts_save_over_a_rewritten_file_then_reload_shows_the_file_and_stays():
+    mask, session, prompts, events = _rewritten(unsaved=[SAVE], changed=[RELOAD])
+
+    assert session.release() is False  # the page stays on the image, now as on disk
+
+    assert [a[0] for a in prompts.asked] == ["unsaved", "changed"]  # no failed-save question
+    assert "open" in mask.names() and "save" not in mask.names()
+    assert not mask.is_dirty() and MASK not in session.journal.undo_entries
+    assert ("notice", RELOADED, "info") in events
+
+
+def test_the_leave_prompts_save_over_a_rewritten_file_then_cancel_keeps_edits_and_file():
+    mask, session, prompts, events = _rewritten(unsaved=[SAVE], changed=[CANCEL])
+
+    assert session.release() is False
+
+    assert [a[0] for a in prompts.asked] == ["unsaved", "changed"]
+    assert "save" not in mask.names() and "open" not in mask.names()
+    assert mask.is_dirty() and session.journal.undo_entries == (MASK,)
+    assert ("notice", CHANGED_KEPT, "info") in events

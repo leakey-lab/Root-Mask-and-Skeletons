@@ -772,3 +772,46 @@ def test_a_save_report_is_ok_only_when_every_outcome_is():
     assert SaveReport((ok,)).ok
     assert not SaveReport((ok, bad)).ok
     assert SaveReport((ok, bad)).failed == (SKELETON,)
+
+
+# --------------------------------------------------------------- the hand-back's stamps
+def test_saved_stamps_are_given_only_while_every_layer_is_clean_and_on_disk():
+    """What the page hands back to its read-ahead when it leaves an image: never the
+    documents of an unsaved edit, never those of a file changed since."""
+    rig = _Rig()
+    rig.mask.stamps = (("mask/a.png", 1, 10),)
+    assert rig.session.saved_stamps() is None  # nothing open
+
+    rig.session.open(IMAGE, SIZE, BASE)
+    assert rig.session.saved_stamps() == {MASK: (("mask/a.png", 1, 10),), SKELETON: ()}
+
+    rig.mask.dirty = True
+    assert rig.session.saved_stamps() is None
+    rig.mask.dirty = False
+    rig.mask.stamps = (("mask/a.png", 2, 10),)  # rewritten on disk
+    assert rig.session.saved_stamps() is None
+
+
+# ------------------------------------------------------------------------ refused input
+def test_two_layers_with_one_id_are_refused():
+    with pytest.raises(ValueError, match="mask"):
+        CorrectSession(
+            [FakeLayer(MASK), FakeLayer(MASK)],
+            prompts=FakePrompts(),
+            parent=lambda: None,
+            on_dirty_changed=lambda _dirty: None,
+            on_notice=lambda _m, _k: None,
+            on_history_changed=lambda: None,
+            on_undone=lambda _i, _h: None,
+            on_saved=lambda _o: None,
+        )
+
+
+def test_saving_an_unknown_layer_raises_and_saves_nothing():
+    rig = _Rig().opened()
+    rig.mask.dirty = True
+
+    with pytest.raises(KeyError):
+        rig.session.save(CLASSES)  # the rig has no class labels
+
+    assert rig.saved() == [] and "save" not in rig.mask.names()
