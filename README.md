@@ -216,6 +216,9 @@ stage's keys work wherever the keyboard is while the stage is on screen, also ri
 after a click in the library tree. In the Library, `Ctrl+0`, `Ctrl+1` and `Ctrl+=` /
 `Ctrl+-` fit the photo, show it at 100 % and zoom. *Visualize* opens the dashboard you
 chose last (root length at first); with nothing to chart yet it says what to run first.
+Its totals and means count each position once per date: when a position was imaged more
+than once on one date, the last image is used, and the dashboard's notice and its exports
+name the rows left out (the CSVs keep every row).
 
 Each Library row shows a badge of three marks: mask (green), skeleton (orange) and class
 labels (purple). A ring means none, a filled circle a model prediction, a filled diamond
@@ -255,7 +258,7 @@ never measured.
 | `gt/skeletons/<stem>.png` | skeleton saved in *Correct* after an edit: the GT skeleton (8-bit grey, 1-pixel lines at the photo's resolution, so a saved skeleton reopens unchanged); Measure reads it first where it is valid |
 | `gt/mask/<stem>.png` | root mask saved in *Correct* after an edit: the GT mask (white on transparent, at the photo's size); Measure reads it first |
 | `gt/<stem>.png`, `gt/classes.json` | multi-class ground truth (see below) |
-| `<csv>.provenance.json` | how a CSV was made: app version, git commit, calibration, runtime, input digest, error and zero counts |
+| `<csv>.provenance.json` | how a CSV was made: app version, git commit, calibration, runtime, input digest, error and zero counts, the generation run behind its predictions (model SHA-256) and the shapes of a sample of the photos |
 | `<csv>.inputs.json` | the files a CSV was measured from: each one's size, time and SHA-256, and the CSV's SHA-256 (what "changed since measured" compares) |
 | `mask/_sprouts_run.json`, `skeletons/_sprouts_run.json` | the latest generation run into that folder: model SHA-256, device and precision, parameters, failed inputs |
 | `mask/_sprouts_runs.jsonl`, `skeletons/_sprouts_runs.jsonl` | one line per generation run that wrote or failed an input (the run file holds the latest) |
@@ -264,9 +267,11 @@ Generating masks into a folder that already has predicted masks asks first: keep
 predictions and predict only the missing ones (the default), or replace every prediction.
 Masks you save in *Correct* are GT: they live in `gt/` and Generate never reads or touches them. On a GPU, outputs
 are reproducible run to run (cuDNN autotuning is off, deterministic algorithms on, batches
-at one fixed size, see below). They are numerically
-equivalent to earlier versions, not bit-identical: root length is unchanged and area moves
-by under 0.1 % (see `CHANGELOG.md`). On
+at one fixed size, see below). Masks are numerically
+equivalent to earlier versions, not bit-identical: area moves by under 0.1 %. Skeleton
+predictions, and the root length measured from them, differ from earlier versions, because
+the skeleton model now normalises each image with its own statistics by default (see
+below and `CHANGELOG.md`). On
 Ampere and newer GPUs convolutions use TF32, recorded as `precision` in the run file.
 Set `SPROUTS_CUDNN_BENCHMARK=1` to allow cuDNN autotuning (faster on some GPUs, not
 bit-reproducible).
@@ -274,14 +279,27 @@ bit-reproducible).
 Batches run at one fixed size (masks 4, skeletons 64 on a GPU; 4 and 8 on the CPU), the
 last one padded with blank images whose outputs are dropped, so a mask or skeleton does not
 depend on how many images were in the folder or how much GPU memory was free. Before the
-first batch a GPU run checks free GPU memory (3.6 GiB for masks, 3.8 GiB for skeletons,
-after the model has loaded) and stops with a message if there is less, because under memory
+first batch a GPU run checks free GPU memory (3.6 GiB for masks, 4.7 GiB for skeletons and
+3.8 GiB with `SPROUTS_SKELETON_NORM_STATS=running`, after the model has loaded) and stops with a message if there is less, because under memory
 pressure the GPU can silently switch to other kernels and change a few pixels. If the GPU
 runs out of memory at the fixed size, the run stops with a message (no smaller retry).
 `SPROUTS_BATCH_POLICY=auto` restores the earlier behaviour (masks in batches of 16, skeleton
 batch sized to free memory, batches halved on out of memory; a few pixels can then differ).
 Outputs are reproducible on one machine and software stack, not across GPUs, drivers or
 PyTorch / cuDNN versions.
+
+`SPROUTS_SKELETON_NORM_STATS` says where the skeleton model's BatchNorm layers take their
+statistics from: `image` (the default: each image's own statistics) or `running` (the
+checkpoint's running statistics, the mode of earlier versions). On the model's 73 held-out
+labelled images `image` gives length R² 0.857 and bias −11.3 %, against 0.317 and −36.3 %
+for `running`, and no all-black prediction on the 726 labelled images (38 with `running`).
+Its limit: it draws skeleton fragments on more photos that show no roots, and on
+low-contrast photos it can trace soil texture, smears and glare, so review such
+predictions in *Correct*. It is about 10 % slower than `running` (`docs/MODELS.md`). The run
+file records the mode (`parameters.norm_stats`), and so do the run history and a length
+CSV's provenance. A folder topped up with *Keep predictions* after an update from a
+version with `running` holds skeletons of both modes; *Replace all predictions* makes it
+one mode (`docs/KNOWN_ISSUES.md` N7).
 
 Tube, position, date and time come from the image file name,
 `<field>_T<tube>_L<position>_<YYYY.MM.DD>_<HHMMSS>_...`. A row that could not be measured
@@ -332,10 +350,19 @@ measured again.
 
 Each CSV's `.provenance.json` records the field of view it was measured with
 (`calibration`) and the pixel sizes of the measured files (`inputs.sizes_px`); the
-dashboards' export, the metrics bar and About show that recorded value. Measure warns once
+dashboards' export, the metrics bar and About show that recorded value. The dashboards'
+export compares it with the open project's field of view. Measure warns once
 when the GT files of a run have more than one size (the photos differ, and one field of
 view is applied to each), or when the predictions do (files the model did not write); a
 project without GT files is not checked for photo sizes.
+
+The field of view belongs to a frame: `reference_size_px` in `sprouts_project.json`, or
+640 × 480 for the default. Since a prediction is at the model's size whatever its photo,
+Measure reads the headers of up to 200 of the measured images' photos
+(`inputs.photos` in the provenance) and warns once when some have another width / height
+ratio than that frame, by more than 1 %: the field of view was then applied to frames of
+another shape. State the camera's field of view in `sprouts_project.json` then. A project
+file without `reference_size_px` is not checked.
 
 ## Correcting masks and skeletons (Correct)
 
@@ -412,7 +439,8 @@ its last point.
 - `Ctrl+S` (or **Save**) saves every layer with unsaved changes, the mask first. **Save**
   is available only while something is unsaved; with nothing unsaved `Ctrl+S` writes nothing
   and says *Nothing unsaved*. **Clear** (dock, bin icon) empties the active layer as one
-  undoable step; it is the page's only Clear. A
+  undoable step (on a layer that is already empty it adds no step and says so); it is the
+  page's only Clear. A
   skeleton is saved only when it differs from the prediction: saving is not acceptance, and
   a skeleton edited back to the prediction (or **Load prediction** and Save) removes its GT
   file `gt/skeletons/<stem>.png`.
@@ -457,7 +485,8 @@ at 100 %, whichever is smaller.
 retires the project's classes (`gt/classes.json`; the gear of the class panel opens it
 too). **Export dataset…** saves the open image's edits first, then exports the images and
 their class-id label images (`masks/`). **Mark empty** saves the open image's class labels
-with nothing labelled (see *Class labels* below). **Remove GT…** (on while an image is open
+with nothing labelled, and **Unmark** on the same button takes that back (see *Class
+labels* below). **Remove GT…** (on while an image is open
 and nothing is unsaved) asks, then deletes the image's `gt/mask/<stem>.png`,
 `gt/skeletons/<stem>.png` and `gt/<stem>.png` and reopens it from its predictions; the
 predictions in `mask/` and `skeletons/` and `gt/classes.json` are kept. This cannot be undone.
@@ -491,7 +520,10 @@ you did not paint on, so for an image that shows none of the classes, click **Ma
 `gt/classes.json` when it is missing). It saves only the class labels: unsaved mask or
 skeleton edits stay unsaved. It is on only while the image's class labels are untouched,
 `gt/classes.json` is valid and the image has no labels file yet, so it never replaces saved
-labels; its tooltip says why when it is off. **Remove GT…** deletes the file again.
+labels; its tooltip says why when it is off. While the image's saved class labels are all
+background and nothing is unsaved on them, the button reads **Unmark**: it deletes that
+labels file only (the GT mask and skeleton stay); **Remove GT…** deletes every GT file of
+the image.
 
 **Painting:** the class labels use Correct's Brush, Eraser and Fill, with the class panel
 under the Layers panel while they are edited. The brush paints the active class and replaces whatever was

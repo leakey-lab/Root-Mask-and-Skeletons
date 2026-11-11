@@ -8,6 +8,8 @@ export filter are superseded (owner decision "Tick = active class"); see the dat
 **Amended 2026-11-02:** **Mark empty** on the Correct page saves an empty labels file for an
 image with none of the classes (owner decision "yes empty label file is necessary"); see the
 notes in §1.3 and §3.4.
+**Amended 2026-11-10:** **Unmark** on the same button takes Mark empty back (see the note
+in §1.3), and §2 and §4 give Root's default colour, `#56b4e9` since 2026-10-30.
 **Branch:** `feat/multiclass-labels`, rebased on `1fb1b13` (tracing-editor overhaul, skeleton dock fix, opaque canvas background).
 **Worktree:** `D:\Root-Mask-and-Skeletons-gt`.
 
@@ -82,6 +84,12 @@ convention as `mask/`).
 > the normal save, and it is on only while the class labels are untouched, `gt/classes.json`
 > is valid and no labels file is saved or kept for the image, so it never replaces saved labels.
 > Remove GT… deletes the file again.
+
+> **Note 2026-11-10:** Mark empty has a way back that keeps the other GT. While the image's
+> saved labels are all background and nothing is unsaved on them (from Mark empty, an older
+> version or a save of erased paint), the same button reads **Unmark**: it deletes that
+> labels file only, never `gt/classes.json`, the GT mask or the GT skeleton, with no question
+> and no undo step. Remove GT… still deletes every GT file of the image.
 - Read/write with **Pillow** (mode `P`, text chunk via `PngInfo`) through Python file handles
   (non-ASCII Windows paths work). Writes are atomic: `<path>.tmp` then `os.replace`.
 - Verified in the venv: a palette PNG round-trips exact class ids and the text chunk.
@@ -105,7 +113,7 @@ no-op except for files copied between projects.
 
 ```json
 {"version": 1, "classes": [
- {"id": 1,   "key": "root",     "name": "Root",     "color": "#5fd6a0", "retired": false},
+ {"id": 1,   "key": "root",     "name": "Root",     "color": "#56b4e9", "retired": false},
  {"id": 2,   "key": "nodule",   "name": "Nodule",   "color": "#ff7eb6", "retired": false},
  {"id": 3,   "key": "root_tip", "name": "Root tip", "color": "#ffd166", "retired": false},
  {"id": 255, "key": "ignore",   "name": "Ignore",   "color": "#8a8f98", "retired": false}
@@ -262,7 +270,7 @@ Output layout:
 <out>/masks/<stem>.png        8-bit grayscale ("L") class-id PNG
 <out>/classes.json            {"version": 1, "ignore_index": 255, "classes": [
                                 {"id": 0, "key": "background", "name": "Background"},
-                                {"id": 1, "key": "root", "name": "Root", "color": "#5fd6a0"}, …]}
+                                {"id": 1, "key": "root", "name": "Root", "color": "#56b4e9"}, …]}
 <out>/splits/train.txt        one stem per line
 <out>/splits/val.txt
 <out>/manifest.csv            stem, source_image, split, tube, position, date, classes_present

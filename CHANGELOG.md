@@ -11,8 +11,19 @@ produced before and after the change can be told apart.
 
 ## [Unreleased]
 
-Eight passes, not yet released:
+Nine passes, not yet released:
 
+- **Review and fix pass** (branch `feat/unified-correct-editor`, 2026-11-10,
+  `5209e6d`..`aea9116` and the default change after it): a review of the code (the
+  measurement chain, provenance, the class labels, the dashboards) and of the open items,
+  then fixes in tasks with disjoint files, each reviewed and committed on its own. Entries
+  carry the finding ID (for example RV1-1); `docs/KNOWN_ISSUES.md` resolves them. The owner
+  decided the two open questions of the pass (`docs/KNOWN_ISSUES.md` N1, N2): the skeleton
+  model now normalises each image with its own statistics by default (`image`), which
+  changes every skeleton prediction generated from now on and every length measured from
+  one, and the dashboards count a position imaged more than once on one date once (the
+  last image). *Scientific output changes* lists both, and the dashboard export column and
+  figure texts that change. No mask, area or saved GT pixel changes.
 - **Owner-answers build, waves 1 and 2** (branch `feat/unified-correct-editor`,
   2026-10-31, `0b4d352`..`a2ea0a5`): the owner answered the 43 open questions of the
   2026-10-29 decision sheet on 2026-10-31, and two waves built all 28 "yes" answers in
@@ -68,6 +79,135 @@ Eight passes, not yet released:
   a 161-finding audit implemented by per-area packages, then integrated and reviewed.
 
 ### Fixed
+- **Dashboards: a position imaged more than once on one date counts once, the last image
+  (2026-11-10, `aea9116`, owner decision, N2).** The dashboards summed every row of a tube
+  and date, so a tube scanned again on the same day had each position counted once per
+  image and a total about doubled, while the export said "(sum over positions)". One image
+  per field, tube, position and date is now kept when the dashboards' frame is built
+  (`data_processor.repeated_scans`): the last by capture time, then by image name; a row
+  without a capture time counts as earlier than every row with one. Rows whose image names
+  give different fields are not repeats of each other. The rows left out are a fourth cause
+  of `RowExclusions`, named in the dashboards' notice ("N rows from repeated scans of a
+  position on one date (the last image is kept)"), and an export of such a table has
+  `# rows_used` and `# rows_left_out` header lines. The photo hover shows the kept image.
+  The metric CSVs keep every row; Measure is unchanged. See *Scientific output changes*.
+- **Measure warnings, the generation record and the Depth Profile Grid: fixes of the final
+  review (2026-11-10, FR-1 to FR-5, FR-7).**
+  - **No false shape warning for a project whose frame is not 4:3** (FR-1). A project file
+    stating `reference_size_px` `[754, 510]` for its 754 × 510 photos was told on every
+    Measure that its 640 × 480 predictions "have another shape than the 754×510 reference":
+    a prediction is at the model's size whatever the photo. Prediction rows are no longer
+    compared with the frame; the measured-file shape clause looks only at GT rows (they are
+    photo-sized), and only when no photo was checked (`inputs.photos` `null` or
+    `n_checked` 0).
+  - **One warning for one cause** (FR-5). With photos of two shapes and GT masks on both,
+    Measure also said "The measured files have 2 sizes (...)": GT files differ in size
+    because the photos do. That warning is now left out beside the photo warning when the
+    group of several sizes is the GT group; predictions of several sizes (files the model did
+    not write), and GT files of several sizes whose photos all fit the frame, still warn
+    (`measure_run.mixed_size_group`). The warning texts are unchanged.
+  - **The history names each run's mode** (FR-2). A line of `_sprouts_runs.jsonl` now
+    carries its run's `norm_stats`, `batch_size` and `batch_policy` (each when the run
+    recorded it; a mask run has no `norm_stats`), and a Measure sidecar's
+    `inputs.generation.history` lists their distinct values as `norm_stats`, `batch_sizes`
+    and `batch_policies`, so a folder whose predictions mix `running` and `image` (a *Keep
+    predictions* run after the switch was set) or two batch sizes shows it. Old history
+    files stay readable; their lines add no value.
+  - **A lone surrogate no longer removes the Measure sidecar** (FR-3). A `"\ud800"` escape
+    in `_sprouts_run.json` or a history line passed the reader, then the sidecar's UTF-8
+    write failed and the sidecar, calibration record included, was removed. The generation
+    summary is now checked as the sidecar writes it; one that cannot be written is
+    `record` + `error` only.
+  - **A Retry of the CSV save names the run the rows came from** (FR-4). The generation
+    record was read when the sidecar was written, so a Retry after another Generate run
+    recorded that newer run. It is now read once when the rows are measured (on the
+    worker, not for a stopped run) and kept with them.
+  - **Depth Profile Grid: the value axis is titled once** (FR-7). Every bottom panel carried
+    "Mean Length (mm)"; with six tubes (twelve bottom panels) the titles touched below about
+    790 px of graph width. One title is now centred under the grid, in the bottom margin
+    below the tick labels, in the axis titles' font and colour.
+  - The Library not following a labels file re-read by Reload or Discard is recorded as
+    `docs/KNOWN_ISSUES.md` N6. No CSV value or saved pixel changes.
+- **Generate: the pre-flight memory floor follows the skeleton model's normalisation mode;
+  the batch-size note corrected (2026-11-10, `8cddf4f`).** With norm statistics `image` the
+  skeleton model changed its outputs, without an error, below about 4.3 GiB of allocatable
+  memory at batch 64; the 3.8 GiB floor was measured for `running`. The pre-flight check
+  (`runtime.check_fixed_batch_memory(..., norm_stats=...)`) now uses
+  `FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB` = 4.7 GiB for `image` (one GPU, RTX 5070 Ti, one
+  build, torch 2.15.0+cu132), and `run_skeleton_generation` passes the mode of the model
+  that runs. Checked on 300 photos: at 4.71 GiB free and above the files are byte-identical
+  to an unconstrained run; at 4.65 and below the run stops before its first batch with the
+  usual message ("… 4.6 GiB free, 4.7 GiB needed."). The `running` floor, the masks' floors
+  and every output are unchanged. Since `image` is the default (see *Changed*), a default
+  skeleton run checks the 4.7 GiB floor. The O4 note in `app/inference/runtime.py` said
+  skeletons at batch 64 give the same output as every N >= 3; that was measured on an older
+  torch build. On torch 2.15.0+cu132, on 300 field photos, batches 3, 8, 16 and
+  32 give identical files, batch 64 differs from them in 62 of 300 files by one grey level
+  (`running`; 203 files by up to two levels for `image`), batch 1 from both, and at most 5
+  measured lengths move, by at most 0.12 mm. The note and `docs/MODELS.md` ("Known
+  limits") now say what was measured.
+- **Correct, Mask and Skeleton layers: Clear on a layer with no set pixel adds no step and
+  says so (2026-11-10, T4-b).** On an image without a prediction, an empty prediction or
+  GT, or a plane the eraser already emptied, Clear added an undo step that undid nothing,
+  and the mask's notice promised that Save writes an empty GT mask while nothing was unsaved,
+  so Save wrote nothing. Now Clear there adds no step and says `No mask to clear` / `No
+  skeleton to clear`; a layer with a set pixel clears as before. An unsaved, eraser-emptied
+  plane is still written by Save. The rule lives in `RasterLayer.clear` (mask and class
+  labels) and `SkeletonCorrectionModel.clear_step` (skeleton). With a pending polyline on an
+  empty skeleton, Clear still drops the polyline without a notice (`docs/KNOWN_ISSUES.md`
+  N5). Unmark's toast replaces Mark empty's in place, as a save's toast does (V6), and the
+  page reads the class labels alone again through `CorrectSession.reopen_layer`. No CSV
+  value or saved pixel changes; the golden tests pass unchanged.
+- **Correct, class labels: Mark empty can be taken back, and four smaller fixes
+  (2026-11-10, RV1-1 to RV1-4, RV1-6).**
+  - **Unmark** (RV1-1). Mark empty had no way back except **Remove GT…**, which deletes the
+    image's GT mask and skeleton too. While the image's saved class labels are all
+    background (from Mark empty, an older version or a save of erased paint) and nothing is
+    unsaved on them, the same button reads **Unmark** (one width for both texts, so the top
+    bar keeps its 900 px budget): it deletes that labels file only (`app.gt.files.remove_labels`
+    refuses any other path), never `gt/classes.json`, the GT mask or skeleton, and other
+    layers' unsaved edits and undo steps stay. No question and no undo step; the toast reads
+    `Unmarked · <name>`. When the file changed on disk since the open, Unmark deletes
+    nothing and reads the class labels again. A file that cannot be deleted is named with
+    the reason, and nothing changes.
+  - Clear on class labels that are all background (RV1-2) adds no undo step and says `No
+    class labels to clear`, with `· Mark empty saves an empty file` when no labels file is
+    saved. It promised an empty file that Save did not write.
+  - Mark empty on an image whose labels file another program wrote after the open (RV1-3)
+    now shows the file in the Library and the metrics bar at once (it read the file, wrote
+    nothing, and the mark waited for a rescan).
+  - The colours **Add** offers for a new class (RV1-4) are at least CIE76 ΔE 30 from every
+    default class colour and from the mask, skeleton and accent colours (two blues of the
+    old list, `#4c9bd6` and `#00bbf9`, were 10.5 and 8.9 from Root `#56b4e9`); saved
+    registries keep their colours.
+  - Export dataset with nothing to export (RV1-6) also names Mark empty: "No image in this
+    folder has class labels yet. Paint some on the Correct page (G) first, or use Mark empty
+    for an image that shows none of the classes."
+
+  None of these changes a CSV value or a saved pixel; Unmark deletes a labels file only on
+  the user's click.
+- **Dashboards: the open project's field of view in exports, visible figure errors, honest
+  labels (2026-11-10, M7, RV2-2 to RV2-5, T5-F).**
+  - The export's `# calibration:` line compares with the open project's
+    `sprouts_project.json` (M7): the dashboard windows read the project folder on the GUI
+    thread (`viz_window.project_root_of`) and pass it to the export. Before, the file was
+    looked up above the CSV: a `root_lengths.csv` in the project folder itself never read
+    its own project file (the line named the app's default), and a project opened inside
+    another project could read the outer one. A dashboard built without a project (a
+    script) still looks above the CSV.
+  - A Totals by Tube, Growth Over Time or Depth Profile figure whose builder fails shows
+    `Error: <reason>` in the chart (RV2-2), as the Depth Profile Grid did; it showed an empty
+    chart.
+  - Depth Profile Grid (RV2-3, RV2-4): the title names the metric, the depth axis reads
+    `Position (L)` (it holds positions, not centimetres), the bottom panels title their value
+    axis; the export has a `Field Count` column and an empty `Field SD` for a field mean
+    over one image. See *Scientific output changes*.
+  - A value, tube or position of `inf` / `-inf` in a hand-edited metric CSV (RV2-5) is an
+    unreadable row, left out and counted in the notice under the header; it reached the
+    exports as `inf`, and the Depth Profile Grid failed on it ("cannot convert float
+    infinity to integer"). An infinite tube or position no longer fails the whole CSV.
+  - The Growth Over Time band is named for what it is, ±1 SD of the field mean, not a
+    variance (T5-F): see *Scientific output changes*.
 - **Correct, skeleton layer: a picked branch goes on from its end nearest the pointer
   (2026-11-02, owner bug report).** "The spline starts from a random node and not the node
   closest to where my cursor/mouse pointer is." Select handed the picked branch to Polyline
@@ -832,6 +972,62 @@ Eight passes, not yet released:
   3-7x faster; first GPU run no longer spends 40-70 s in cuDNN autotuning.
 
 ### Added
+- **Generate: a switch for the skeleton model's normalisation statistics (2026-11-10, F1;
+  the default is unchanged).** The skeleton generator runs with `netG.eval()` (since
+  `dd696e8`), so its BatchNorm layers use the checkpoint's running statistics; the
+  checkpoint was validated the pix2pix way, with each image's own statistics.
+  `SPROUTS_SKELETON_NORM_STATS` picks the mode when the model loads: `running` (the default:
+  every output byte as before, 726 of 726 regenerated files identical) or `image`
+  (`ImageStatsBatchNorm2d`: each image is normalised with its own per-channel mean and
+  variance and the checkpoint's weight and bias). Dropout is off in both, so both are
+  deterministic, and in `image` an image's result does not depend on the other rows of its
+  batch. Unset or blank is `running`; an unknown value logs a warning and gives `running`.
+  The mode is part of the skeleton model's cache key and is recorded in
+  `skeletons/_sprouts_run.json` as `parameters.norm_stats` (`null` when no model was
+  loaded). Measured on 2026-11-10 on an RTX 5070 Ti with torch 2.15.0+cu132, batch 64,
+  through the app's own Generate and length chain and a copy of the paper's scorer:
+  - the 73 held-out images: length R² 0.317 and bias −36.3 % in `running`; R² 0.857 [0.778,
+    0.913] and bias −11.3 % in `image` (R² against the 1:1 line; bias in % of the mean
+    reference length);
+  - all-black predictions: 38 of 726 in `running`, 0 in `image`;
+  - `image` draws on more root-free images: of the RootQuant root-free images, those
+    with more than 1 mm of predicted length are soybean 31.4 % against 34.4 %, maize 13.2 %
+    against 22.7 % (`running` against `image`); and on low-contrast photos (of a sample of
+    an unlabelled field season used for internal checks, the photos with a grey standard
+    deviation below 10: 7,149 mm in `image` where the thinned mask prediction gives
+    1,304 mm);
+  - `image` is about 10 % slower: 165.9 against 148.8 images per second (median of three
+    runs over 2,309 field photos, `running` against `image`);
+  - the pre-flight GPU memory floor of `image` was not set yet (since `8cddf4f` it is
+    4.7 GiB: see *Fixed*).
+
+  This commit kept the default at `running` and changed no output. The owner then chose
+  `image` as the default (`docs/KNOWN_ISSUES.md` N1): see *Changed* and *Scientific output
+  changes*.
+- **Measure: the photos' shape is checked against the field of view's frame (2026-11-10,
+  F4).** The field of view spans each measured file's whole frame, and a prediction is
+  always at the model's size, so photos that are not 4:3 (a cropped frame, another camera)
+  were measured from their predictions with the 4:3 field of view and no warning: the shape
+  check looked at the measured files only, and only with a project `reference_size_px`.
+  Measure now reads the headers of up to 200 photos of the measured images (evenly spaced
+  over the sorted image names, on the job's worker; 0.06 s for 46,000 photos), records them
+  as `inputs.photos` in each CSV's provenance, and warns once when photos have another
+  width / height ratio, by more than 1 %, than the frame the field of view belongs to
+  (`calibration.reference_frame`: the project file's `reference_size_px`, or 640 × 480 for
+  the default, `config.CALIBRATION_REFERENCE_SIZE_PX`; a project file without
+  `reference_size_px` is not checked). With the default the warning reads, for example, "3
+  of 3 photos checked have another shape than the 640×480 frame of the default 18×13.5 mm
+  field of view (640×460 ×3): it was applied to each whole image. State this camera's field
+  of view in sprouts_project.json." The measured-file shape clause is left out when the
+  photo warning says the same thing. No CSV value changes.
+- **Measure: the CSV's provenance names the generation run behind its predictions
+  (2026-11-10, F2).** A Measure sidecar had `models: {}`, and nothing linked a CSV to the
+  weights behind the predictions it measured. `inputs.generation` now holds the summary of
+  the folder's `_sprouts_run.json` (its SHA-256, kind, time, app version, git commit,
+  status, the models' SHA-256 and the parameters) and of `_sprouts_runs.jsonl` (the
+  distinct model digests, app versions and commits of every run), or `null` when no
+  Generate run of this app wrote into the folder (`run_record.generation_summary`). No CSV
+  value changes.
 - **Correct, Classes layer: Mark empty saves empty class labels (2026-11-02, owner decision
   "yes empty label file is necessary").** Since the class tick became the active class
   (2026-11-01, *Fixed*), an image nobody painted on had nothing unsaved, so it got no labels
@@ -844,7 +1040,9 @@ Eight passes, not yet released:
   image is open, its class labels are untouched (nothing painted that Save would write),
   `gt/classes.json` is valid and no labels file is saved or kept for the image (also none
   that could not be read or has another size), so it never replaces saved labels; its tooltip
-  says why when it is off. No shortcut and no question: Remove GT… deletes the file again.
+  says why when it is off. No shortcut and no question: Remove GT… deletes the file again
+  (since 2026-11-10 the same button reads **Unmark** and deletes that labels file only: see
+  *Fixed*).
   The label is short and has no icon so that the top bar keeps the window within its 900 px
   minimum-width budget (879 px with it; "Save empty labels" with an icon needed 937 px). No
   CSV value, mask or skeleton pixel or existing GT file changes: the files it writes are
@@ -922,6 +1120,16 @@ Eight passes, not yet released:
   app version, commit, model SHA-256, calibration and runtime precision.
 
 ### Changed
+- **Generate: the skeleton model normalises each image with its own statistics by default
+  (2026-11-10, owner decision, N1).** `runtime.DEFAULT_SKELETON_NORM_STATS` is `image`:
+  the generator's BatchNorm layers use each image's own per-channel mean and variance with
+  the checkpoint's weight and bias (`ImageStatsBatchNorm2d`), Dropout off, as the
+  checkpoint was validated. Unset or blank `SPROUTS_SKELETON_NORM_STATS` and an unknown
+  value now give `image`; `SPROUTS_SKELETON_NORM_STATS=running` brings back the earlier
+  behaviour (`netG.eval()`, the checkpoint's running statistics, bit for bit). A default
+  skeleton run on a GPU now checks the 4.7 GiB pre-flight floor (3.8 GiB for `running`)
+  and is about 10 % slower. Every skeleton prediction generated from now on, and every
+  length measured from one, changes: see *Scientific output changes*.
 - **The area dashboard has the length dashboard's views and controls (2026-11-02).** One
   class, `MetricDashApp` (`app/visualization/dash_metric_app.py`), now builds both
   dashboards; `DashApp` and `DashAppArea` only set their page title, shell and file-name
@@ -1569,6 +1777,80 @@ Eight passes, not yet released:
   as pre-commit already ran it.
 
 ### Scientific output changes
+- **Skeleton predictions and root length: the skeleton model's default normalisation is
+  `image` (2026-11-10, owner decision, N1; see *Changed*).** Every skeleton prediction
+  that Generate writes from this version on comes from the generator with each image's own
+  BatchNorm statistics, so it differs from what earlier versions wrote (they used the
+  checkpoint's running statistics), and so does every length measured from it. Masks,
+  areas, GT files and Correct's saves are not touched, and predictions already on disk
+  are not rewritten: a `root_lengths.csv` changes only after Generate has written new
+  skeletons and Measure has run again.
+  - Why: on the 73 held-out labelled images length R² (against the 1:1 line) is 0.857
+    [0.778, 0.913] against 0.317, bias −11.3 % against −36.3 % and MAE 6.93 against
+    16.90 mm; F1 at 1 / 2 / 3 px is 0.292 / 0.432 / 0.541 against 0.201 / 0.300 / 0.382;
+    all-black predictions are 0 of the 726 labelled images against 38 (`image` against
+    `running`; RTX 5070 Ti, torch 2.15.0+cu132, batch 64, the app's own Generate and
+    length chain). On the RootQuant root-present images R² is 0.483 against 0.449
+    (soybean, 2,782 images) and 0.961 against 0.743 (maize, 1,839 images, labels
+    unconfirmed).
+  - Limit: `image` draws skeleton fragments on more photos that show no roots (RootQuant
+    root-free images with more than 1 mm of length: soybean 34.4 % against 31.4 %, maize
+    22.7 % against 13.2 %), and on low-contrast photos it can trace soil texture, smears and
+    glare; review such predictions in *Correct*. It is about 10 % slower (148.8 against
+    165.9 images per second) and needs 4.7 GiB of free GPU memory at batch 64 (3.8 GiB for
+    `running`).
+  - The earlier mode: `SPROUTS_SKELETON_NORM_STATS=running` (`netG.eval()`, bit for bit).
+  - Where the mode is recorded: `parameters.norm_stats` in `skeletons/_sprouts_run.json`,
+    the run's line in `skeletons/_sprouts_runs.jsonl`, and a Measure CSV's provenance
+    (`inputs.generation.parameters.norm_stats` and `inputs.generation.history.norm_stats`).
+  - A folder filled before the change and topped up after it with *Keep predictions* holds
+    skeleton predictions of both modes, and its length CSV mixes them; the CSV's provenance
+    then lists both modes in `inputs.generation.history` (a run of a version that recorded
+    no mode shows there only by its commit and app version; one from before the history
+    file, by nothing: `docs/KNOWN_ISSUES.md` N7). *Replace all predictions* makes the folder
+    one mode again.
+  - The example project (`docs/examples`): the two skeletons with roots were generated
+    again with the new default (GPU, the published checkpoint, batch 64), the third, empty,
+    is byte-identical. Root length of the three images, in the order of its README:
+    17.94 → 21.70 mm, 0.0 → 0.0 mm, 2.73 → 6.14 mm. Its masks, areas and photos are
+    byte-identical; the real-image Correct goldens (`tests/data/correct_goldens_real.json`)
+    were recorded again for the two changed skeletons only, and every mask golden is
+    unchanged.
+- **Dashboards: totals, means and exports of a tube scanned more than once on a date
+  (2026-11-10, `aea9116`, owner decision, N2; see *Fixed*).** A position imaged more than
+  once on one date now counts once (the last image) in every chart and export, so a
+  tube's total, the field mean and their exports change for each tube and date with such
+  repeats (summed, they counted each position once per image). The metric CSVs keep every
+  row and no CSV value changes; a CSV without repeated scans gives byte-identical figures
+  and exports.
+- **Dashboards: the Depth Profile Grid export and some figure texts (2026-11-10, RV2-3,
+  RV2-4, T5-F, M7, RV2-5; see *Fixed*).** In the review and fix pass (`5209e6d`..`a21ff3f`)
+  no value in `root_lengths.csv` / `root_areas.csv` and no mask, skeleton or GT pixel
+  changes, and the skeleton model's normalisation switch changed nothing at the default it
+  had then (`running`, see *Added*; the default changed later: see above). What a user sees
+  change is on the dashboards only:
+  - Depth Profile Grid export (`root_{length|area}_faceted_*.csv`): a new last column
+    `Field Count` (the images behind the field mean) after `Field SD (<unit>)`, and `Field SD`
+    is empty where the field mean is over one image (it was `0.0`, an undefined SD). Rows
+    with two or more images keep their SD text exactly; the figure still draws such an SD as
+    0. The other views' exports are byte-identical.
+  - Depth Profile Grid figure: the title is `Root Length Depth Profile Grid - Field Average
+    (Left) vs Tube (Right)` / `Root Area …` (it had no metric), the depth axis is `Position
+    (L)` (was `Vertical Depth (cm)`; the axis holds positions, not centimetres), and the
+    bottom panels title their value axis `Mean Length (mm)` / `Mean Area (mm²)`.
+  - Growth Over Time: the field's band is `Field Mean ±1 SD` in the legend (was `Field
+    Variance (±1 SD)`), `Field ±1 SD Range` in the hover (was `Field Variance Range`), and
+    the option reads `Show Field ±1 SD Shading` (was `Show Field Variance Shading`). The band
+    itself is unchanged.
+  - The exports' `# calibration:` line compares with the open project's field of view: a
+    CSV in the project folder itself named the app's default before, and a project inside
+    another project named the outer project's.
+  - A metric CSV value, tube or position of `inf` / `-inf` (only a hand-edited CSV holds
+    one) is left out as an unreadable row; an infinite value reached the charts and the
+    exports as `inf`, and an infinite tube or position failed the whole CSV.
+
+  Not changed in these commits: the dashboards summed every row of a tube position imaged
+  more than once on one date; `aea9116` counts it once (see above).
 - **The area dashboard's charts and Export CSV tables are the length dashboard's
   (2026-11-02; see *Changed*).** No value in `root_lengths.csv` / `root_areas.csv` and no
   pixel changes; only what the area dashboard shows and exports differs. Growth Over Time
@@ -1871,7 +2153,12 @@ Eight passes, not yet released:
   padding or process. Masks at 4 against today's 16: 96 of 300 mask files differ (199 pixels,
   a few per image), 9 of 300 CSV areas change at 2 dp, by at most 0.003 mm² (median of the
   changed ones 0.026 %). Skeletons at 64: identical to 128 and to 32 (0 of 300 files); the
-  auto size in a Generate run on this card was already 64. Today's unpadded mask tail (12
+  auto size in a Generate run on this card was already 64. (Correction 2026-11-10: that
+  was measured on an older torch build. On torch 2.15.0+cu132 skeletons at 64 differ from
+  smaller batches: on 300 field photos batches 3, 8, 16 and 32 agree, 64 differs from them
+  in 62 files by one grey level, at most 5 lengths by at most 0.12 mm; on the 726 labelled
+  photos 64 and 16 differ in 681 files, at most 3 levels, 24 lengths by at most 0.16 mm.
+  See *Fixed*, `8cddf4f`.) Today's unpadded mask tail (12
   images) against the padded one differed in 4 files / 5 pixels; that dependence on folder
   size is gone. CPU tails are now padded too (not measured). Masks run at N = 4 instead of
   the proposed 16 (a build decision from the GPU session, to be confirmed by the owner):

@@ -94,7 +94,38 @@ in `app/models.py` records it for each checkpoint.
   Smeulders (1982) (0.980 per orthogonal step, 1.406 per diagonal step, −0.091 per change of
   direction, m-adjacent steps, per-axis pixel pitch). |
 | Precision | fp32, no autocast (mixed precision visibly changes the generator's output). Same CUDA runtime caveats as the mask model. |
+| Inference mode | Where the BatchNorm layers take their statistics from, set by `SPROUTS_SKELETON_NORM_STATS` when the model loads and recorded as `parameters.norm_stats` in `skeletons/_sprouts_run.json` (since 2026-11-10): `image` (the default; `ImageStatsBatchNorm2d`: each image normalised with its own per-channel mean and variance and the checkpoint's weight and bias, as the checkpoint was validated) or `running` (`SPROUTS_SKELETON_NORM_STATS=running`; `netG.eval()`, the checkpoint's running statistics, the mode of every version before the owner's decision of 2026-11-10, `docs/KNOWN_ISSUES.md` N1). Dropout is off in both, so both are deterministic; in `image` an image's result does not depend on the other rows of its batch. |
 | Training data | TODO(owner): not documented in the repository. |
+
+**Accuracy of the two modes** (measured 2026-11-10 on an RTX 5070 Ti with torch
+2.15.0+cu132, batch 64, through the app's own Generate and length chain and a copy of the
+paper's scorer; root length; R² against the 1:1 line, the interval from the scorer's
+tube-clustered bootstrap; bias in % of the mean reference length):
+
+| Set | `image` (the default) | `running` |
+|---|---|---|
+| Held-out 73 images (26 tubes): length | R² 0.857 [0.778, 0.913], bias −11.3 %, MAE 6.93 mm | R² 0.317, bias −36.3 %, MAE 16.90 mm |
+| Held-out 73 images: skeleton F1 at 1 / 2 / 3 px | 0.292 / 0.432 / 0.541 | 0.201 / 0.300 / 0.382 |
+| All-black predictions, of the 726 labelled images | 0 | 38 |
+| RootQuant, root-present soybean images (2,782) | R² 0.483 | R² 0.449 |
+| RootQuant, root-present maize images (1,839; labels unconfirmed) | R² 0.961 | R² 0.743 |
+| RootQuant, root-free images with more than 1 mm of length: soybean / maize | 34.4 % / 22.7 % | 31.4 % / 13.2 % |
+
+Caveats: the held-out split shares tubes with the training images (all 73 have a training
+image in the same tube), so it measures generalisation within a tube. The reference
+skeletons are derived from the masks (no skeleton was traced by hand), which favours a
+thinned mask over this model. The maize labels' definition is not confirmed, and the
+soybean values assume the default 18 x 13.5 mm field of view, which is not established for
+those photos.
+
+Limit of `image`, the default: it draws skeleton fragments on more photos that show no
+roots (the root-free row above), and on low-contrast photos it can trace soil texture,
+smears and glare where the mask prediction finds little or nothing; review such
+predictions in *Correct*. It is about 10 % slower than `running` (148.8 against 165.9
+images per second at batch 64) and needs 4.7 GiB of free GPU memory at batch 64
+(`FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB`; 3.8 GiB for `running`), measured on one GPU and one
+torch build. `running` fails the other way: it gives more all-black predictions, length
+0 (38 of the 726 labelled images, against 0).
 
 `checkpoints/experiment_name/test_opt.txt` is left over from the original pix2pix test
 run (dataroot `D:/2024 EF image data`). It says `netG: resnet_9blocks`,
@@ -112,7 +143,14 @@ enhanced generator with batch normalisation and aspect ratio 3/4.
 - **Domain.** Behaviour on other cameras, soils, crops or lighting is untested.
 - **GPU reproducibility.** cuDNN autotuning is off by default, so repeated GPU runs at the
   same batch size reproduce; a different batch size can flip a few pixels (the batch
-  shape decides which kernel runs), and GPU and CPU differ slightly.
+  shape decides which kernel runs), and GPU and CPU differ slightly. For skeletons this
+  holds for every batch size, also 3 and more: on torch 2.15.0+cu132 (RTX 5070 Ti,
+  2026-11-10), on 300 field photos, batches 3, 8, 16 and 32 gave identical
+  files, batch 64 differed from them in 62 of 300 files by one grey level (203 files by up
+  to two levels with `image`), and batch 1 from both; at most 5 measured lengths moved, by
+  at most 0.12 mm. On the 726 labelled photos (`running`) batch 64 and 16 differed in 681 files (at
+  most 3 levels, 24 lengths, at most 0.16 mm). A fixed batch size keeps runs comparable; it
+  does not make the output independent of the size chosen.
   `SPROUTS_CUDNN_BENCHMARK=1` brings back the run-to-run noise measured in a 2026-09-28
   audit of 12 images: 18 of 24 output files differed between two identical runs and one
   image's CSV values moved (length 60.75 vs 60.77 mm, area 126.62 vs 126.63 mm²).
@@ -127,6 +165,11 @@ enhanced generator with batch normalisation and aspect ratio 3/4.
   pixel count by 1 or 2), 6 raw skeleton predictions in 1 to 25 pixels each by one
   intensity level (1 of 255), their thinned skeletons and the lengths not at all, and 3
   area values by 0.01 mm² (`CHANGELOG.md`, "Scientific output changes", lists the files).
+  Those counts are for those 40 images. On the 726 labelled photos at batch 16
+  (2026-11-10), the nightly and 2.15.0+cu132 differed in 681 skeleton files by up to 3
+  levels and in 28 measured lengths by up to 0.25 mm. The held-out length R² (0.317) and
+  bias (−36.3 %) of the nightly's saved predictions are the same with 2.15.0+cu132 at
+  batch 64.
   The Python version (3.10, 3.13, 3.14) changed nothing, and on the CPU torch 2.7.1 and
   2.14.1 both reproduced the nightly's CPU outputs bit for bit, as does 2.15.0. The cu134 build
   of 2.15.0 is not the same: against cu132 it moves 1 mask pixel and 6 raw skeleton

@@ -167,7 +167,7 @@ once, then keep your existing per-axis range/tick logic (that's data-driven, kee
 ```python
 fig = make_subplots(rows=num_dates, cols=num_tubes, ...)
 ...
-fig.update_layout(template="sprouts", title_text="Depth Profile Grid - Field Average (Left) vs Tube (Right)")
+fig.update_layout(template="sprouts", title_text=f"Root {label} Depth Profile Grid - Field Average (Left) vs Tube (Right)")
 ```
 
 For the manual `fig.add_shape` background rectangles in the faceted view, change
@@ -347,10 +347,19 @@ Both dashboards name their views with the same words (keys unchanged: `stacked`,
 | `stacked` | Totals by Tube | `Root {Length\|Area} by Tube and Date` |
 | `time` | Growth Over Time | `Root {Length\|Area} Growth Over Time` |
 | `lines` | Depth Profile | `Root {Length\|Area} Depth Profile - Tube N` |
-| `faceted` | Depth Profile Grid | `Depth Profile Grid - Field Average (Left) vs Tube (Right)` |
+| `faceted` | Depth Profile Grid | `Root {Length\|Area} Depth Profile Grid - Field Average (Left) vs Tube (Right)` |
 
-The legend title is "Measurement date" everywhere, hover dates are ISO (`%Y-%m-%d`) and both
-depth axes are titled "Position (L)". The faceted options card is "Depth Profile Grid Options".
+The legend title is "Measurement date" everywhere, hover dates are ISO (`%Y-%m-%d`), the
+depth axes of the Depth Profile and the Depth Profile Grid are titled "Position (L)" (the
+axis holds positions, not centimetres), and the grid titles its value axis once,
+`Mean {Length|Area} ({mm|mm²})`: one annotation centred under the grid (paper coordinates,
+in the bottom margin below the bottom row's tick labels, 13 px in `theme.TEXT_MUTED` as the
+axis titles), not one per bottom panel (twelve of them collided with six tubes). The
+faceted options card is "Depth Profile Grid Options".
+Growth Over Time names its band for what it is: "Field Mean ±1 SD" in the legend, "Field
+±1 SD Range" in the hover and "Show Field ±1 SD Shading" in its options (since 2026-11-10;
+it was called a variance). A figure whose builder fails shows `Error: <reason>` as a
+`theme.message_figure` in `theme.DANGER`.
 
 **Date ramp.** Measurement dates are drawn on one blue ramp, `theme.DATE_RAMP`, oldest darkest,
 newest lightest:
