@@ -6,12 +6,13 @@ their state-dict layout is the one recorded in ``tests/data/model_checkpoint_lay
 networks); and the real models, run on the CPU through the app's own entry points
 (``generate_masks``, ``run_skeleton_generation``, fixed batches) on a copy of the three photos
 of ``docs/examples``, give exactly the pixels recorded in ``tests/data/model_outputs_cpu.json``,
-with both norm-statistics modes of the skeleton model (``running``, today's default, and
-``image``), and the same pixels at batch size 1.
+with both norm-statistics modes of the skeleton model (``image``, the default, and
+``running``), and the same pixels at batch size 1.
 
 The recorded outputs are the CPU's, not the committed ``docs/examples`` files: those are GPU
-outputs of the production run (2026-05/06) that no configuration reproduces bit for bit, and
-they stay as they are. The CPU outputs were the same under torch 2.8 nightly and 2.15.0, with
+outputs (the masks of the production run of 2026-05/06, which no configuration reproduces
+bit for bit; the skeletons of a Generate run in the ``image`` mode at batch 64), and they
+stay as they are. The CPU outputs were the same under torch 2.8 nightly and 2.15.0, with
 1, 2 or 16 threads and batch 1, 4 or 8; CPU kernels differ by instruction set, so the outputs
 are compared only on the machine kind they were recorded on (the test skips elsewhere).
 
