@@ -359,22 +359,25 @@ def _row(column: str, value: float, **extra) -> dict:
 
 
 def test_measurement_reads_an_optional_source_column(tmp_path):
+    """A CSV written before O1 has seven columns, no ``Source``: its rows have no source. A CSV
+    of today's schema names ``gt`` / ``prediction``. The values are the same in both."""
+    assert LENGTH_CSV_HEADERS[7] == AREA_CSV_HEADERS[7] == "Source"
     assert Measurement(18.77, 16.41, None) == Measurement(18.77, 16.41, None, None, None)
 
-    old = tmp_path / "old"  # a CSV written before the Source column
+    old = tmp_path / "old"  # the seven columns written before the Source column
     length_row = _row(LENGTH_CSV_HEADERS[5], 1.5)
     area_row = _row(AREA_CSV_HEADERS[5], 2.5)
-    _csv(old / "skeletons", "root_lengths.csv", LENGTH_CSV_HEADERS, length_row)
-    _csv(old / "mask", "root_areas.csv", AREA_CSV_HEADERS, area_row)
+    _csv(old / "skeletons", "root_lengths.csv", LENGTH_CSV_HEADERS[:7], length_row)
+    _csv(old / "mask", "root_areas.csv", AREA_CSV_HEADERS[:7], area_row)
+    with open(old / "skeletons" / "root_lengths.csv", encoding="utf-8") as fh:
+        assert "Source" not in fh.readline()
     index = MeasurementIndex(str(old))
-    assert index.lookup("a").length_source is None
-    assert index.lookup("a") == Measurement(1.5, 2.5, None)
+    assert index.lookup("a") == Measurement(1.5, 2.5, None, None, None)
 
     new = tmp_path / "new"
     length_row = _row(LENGTH_CSV_HEADERS[5], 1.5, Source="gt")
     area_row = _row(AREA_CSV_HEADERS[5], 2.5, Source="prediction")
-    _csv(new / "skeletons", "root_lengths.csv", [*LENGTH_CSV_HEADERS, "Source"], length_row)
-    _csv(new / "mask", "root_areas.csv", [*AREA_CSV_HEADERS, "Source"], area_row)
+    _csv(new / "skeletons", "root_lengths.csv", LENGTH_CSV_HEADERS, length_row)
+    _csv(new / "mask", "root_areas.csv", AREA_CSV_HEADERS, area_row)
     index = MeasurementIndex(str(new))
-    assert index.lookup("a").length_source == "gt"
     assert index.lookup("a") == Measurement(1.5, 2.5, None, "gt", "prediction")

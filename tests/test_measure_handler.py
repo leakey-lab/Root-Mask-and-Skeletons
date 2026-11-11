@@ -18,10 +18,9 @@ from PyQt6 import sip
 from PyQt6.QtWidgets import QMessageBox
 
 from app import provenance
-from app.gui.ui_feedback import QtUiFeedback
 from app.inference import measure_run
 from app.io_utils import FileLockedError
-from tests.measure_support import _handler, _project, _wait_idle
+from tests.measure_support import _handler, _project, _wait_idle, _warnings, _write_project_file
 
 
 def test_measure_length_runs_as_named_job_with_feedback(tmp_path, qapp):
@@ -133,30 +132,6 @@ def test_cancel_stops_the_run_without_writing(tmp_path, qapp):
     assert not os.path.exists(tmp_path / "skeletons" / "root_lengths.csv")
 
 
-def test_qt_ui_feedback_drives_task_progress_status_and_toasts():
-    calls = []
-    tp = SimpleNamespace(
-        start=lambda label, cancelable=False, on_cancel=None: calls.append(("start", label)),
-        set_progress=lambda pct: calls.append(("pct", pct)),
-        set_counts=lambda done, total: calls.append(("counts", done, total)),
-        finish=lambda msg=None: calls.append(("finish", msg)),
-        fail=lambda msg: calls.append(("fail", msg)),
-    )
-    bar = SimpleNamespace(showMessage=lambda msg, ms=0: calls.append(("status", msg)))
-    fb = QtUiFeedback(tp, status_bar=bar, notifier=lambda msg, kind: calls.append((kind, msg)))
-    fb.task_started("Measuring root length", total=12)
-    fb.task_progress(3)  # the total is the one given at the start
-    fb.task_finished("done")
-    fb.task_started("Measuring root area")  # no total: a percent
-    fb.task_progress(42)
-    fb.status("saved")
-    fb.notify("saved")
-    assert ("start", "Measuring root length") in calls
-    assert ("counts", 3, 12) in calls and ("pct", 42) in calls
-    assert ("finish", "done") in calls and ("status", "saved") in calls
-    assert ("success", "saved") in calls
-
-
 def test_retry_prompt_buttons_drive_retry(tmp_path, qapp, monkeypatch):
     from PyQt6.QtWidgets import QMessageBox
 
@@ -173,155 +148,7 @@ def test_retry_prompt_buttons_drive_retry(tmp_path, qapp, monkeypatch):
     assert "area" not in handler._retry_jobs and handler._retry_box is None
 
 
-# --------------------------------------------------------------------------- M2: mixed sizes
-
-_MIXED = "The measured files have"
-
-
-def _mixed_warnings(mw):
-    return [
-        call.args[0]
-        for call in mw.feedback.calls
-        if call.name == "notify" and call.args[1] == "warn" and call.args[0].startswith(_MIXED)
-    ]
-
-
-def _extra_image(tmp_path, name, shape, folder, *, suffix=".png", photo_shape=None):
-    """One more image of the project (``photo_shape``, default ``shape``) with its file in
-    ``folder`` at ``shape`` (rows, cols)."""
-    cv2.imwrite(str(tmp_path / f"{name}.jpg"), np.zeros(photo_shape or shape, np.uint8))
-    img = np.zeros(shape, np.uint8)
-    cv2.line(img, (0, 0), (shape[1] - 1, shape[0] - 1), 255, 2)
-    (tmp_path / folder).mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(tmp_path / folder / f"{name}{suffix}"), img)
-
-
-def test_mixed_sizes_warn_once(tmp_path, qapp):
-    _project(tmp_path, n=2, skeletons=False)
-    _extra_image(tmp_path, "y_T9_L2_2024.01.02_010209_001", (48, 96), "mask")
-    handler, mw = _handler(tmp_path, qapp)
-    handler.calculate_root_area()
-    _wait_idle(handler, qapp)
-
-    warnings = _mixed_warnings(mw)
-    assert len(warnings) == 1
-    assert warnings[0].startswith("The measured files have 2 sizes (80x64 ×2, 96x48 ×1): ")
-    assert warnings[0].endswith("one 18×13.5 mm field of view was applied to each.")
-
-
-def test_same_size_files_do_not_warn(tmp_path, qapp):
-    _project(tmp_path, n=3)
-    handler, mw = _handler(tmp_path, qapp)
-    handler.calculate_root_length()
-    _wait_idle(handler, qapp)
-    assert os.path.isfile(tmp_path / "skeletons" / "root_lengths.csv")
-    assert _mixed_warnings(mw) == []
-
-
-def test_at_most_three_sizes_are_listed(tmp_path, qapp):
-    _project(tmp_path, n=2, skeletons=False)
-    for i, shape in enumerate([(48, 96), (50, 96), (52, 96)]):
-        _extra_image(tmp_path, f"z_T{i + 5}_L2_2024.01.02_01020{i}_001", shape, "mask")
-    handler, mw = _handler(tmp_path, qapp)
-    handler.calculate_root_area()
-    _wait_idle(handler, qapp)
-    (message,) = _mixed_warnings(mw)
-    assert message.startswith("The measured files have 4 sizes (80x64 ×2, ")
-    assert message.count(" ×") == 3 and "…" in message
-
-
-def _photo_size_project(tmp_path, photo_shapes):
-    """Photos of ``photo_shapes`` (rows, cols), each with a model-size prediction (256 x 341)
-    and a GT skeleton at the photo's size (``None``: no GT file for that image)."""
-    (tmp_path / "skeletons").mkdir()
-    (tmp_path / "gt" / "skeletons").mkdir(parents=True)
-    for i, (photo, has_gt) in enumerate(photo_shapes):
-        name = f"w_T{i + 1}_L2_2024.01.02_01020{i}_001"
-        cv2.imwrite(str(tmp_path / f"{name}.jpg"), np.zeros(photo, np.uint8))
-        pred = np.zeros((256, 341), np.uint8)
-        cv2.line(pred, (0, 0), (340, 100 + i), 255, 2)
-        cv2.imwrite(str(tmp_path / "skeletons" / f"{name}_fake.png"), pred)
-        if has_gt:
-            gt = np.zeros(photo, np.uint8)
-            cv2.line(gt, (0, 5), (photo[1] - 1, photo[0] // 2), 255, 3)
-            cv2.imwrite(str(tmp_path / "gt" / "skeletons" / f"{name}.png"), gt)
-    return tmp_path
-
-
-def test_photo_size_gt_beside_model_size_predictions_is_not_mixed(tmp_path, qapp):
-    """Every measured file spans its photo's frame, so one field of view is right for each:
-    GT files (photo size) and predictions (model size) are not compared with each other."""
-    _photo_size_project(
-        tmp_path, [((480, 640), True), ((480, 640), True), ((480, 640), False), ((480, 640), False)]
-    )
-    handler, mw = _handler(tmp_path, qapp)
-    handler.calculate_root_length()
-    _wait_idle(handler, qapp)
-
-    rows = open(tmp_path / "skeletons" / "root_lengths.csv", encoding="utf-8").read()
-    assert rows.count(",gt") == 2 and rows.count(",prediction") == 2
-    record = provenance.read_sidecar(tmp_path / "skeletons" / "root_lengths.csv")
-    assert record["inputs"]["sizes_px"] == {"640x480": 2, "341x256": 2}
-    assert _mixed_warnings(mw) == []
-
-
-def test_gt_files_of_two_sizes_warn_once(tmp_path, qapp):
-    """GT files of two sizes mean photos of two sizes (two cameras): that is the signal."""
-    _photo_size_project(
-        tmp_path, [((480, 640), True), ((240, 320), True), ((480, 640), False), ((480, 640), False)]
-    )
-    handler, mw = _handler(tmp_path, qapp)
-    handler.calculate_root_length()
-    _wait_idle(handler, qapp)
-
-    (message,) = _mixed_warnings(mw)
-    assert message.startswith("The measured files have 2 sizes (640x480 ×1, 320x240 ×1): ")
-
-
-# --------------------------------------------------------------------------- M5: grey masks
-
-_GREY = "grey levels: pixels above 127 were counted as root."
-
-
-def _grey_warnings(mw):
-    return [
-        call.args[0]
-        for call in mw.feedback.calls
-        if call.name == "notify" and call.args[1] == "warn" and _GREY in call.args[0]
-    ]
-
-
-def test_grey_masks_warn_once(tmp_path, qapp):
-    _project(tmp_path, n=3, skeletons=False)
-    mask = next((tmp_path / "mask").iterdir())
-    grey = cv2.imread(str(mask), cv2.IMREAD_GRAYSCALE)
-    grey[0, 0] = 100
-    cv2.imwrite(str(mask), grey)
-    handler, mw = _handler(tmp_path, qapp)
-    handler.calculate_root_area()
-    _wait_idle(handler, qapp)
-    assert _grey_warnings(mw) == ["1 mask has grey levels: pixels above 127 were counted as root."]
-
-
-def test_binary_masks_and_length_runs_do_not_warn_about_grey(tmp_path, qapp):
-    _project(tmp_path, n=2)
-    handler, mw = _handler(tmp_path, qapp)
-    handler.calculate_root_area()
-    _wait_idle(handler, qapp)
-    handler.calculate_root_length()
-    _wait_idle(handler, qapp)
-    assert _grey_warnings(mw) == []
-
-
 # --------------------------------------------------------------------------- O3: project FOV
-
-
-def _write_project_file(tmp_path, text):
-    (tmp_path / "sprouts_project.json").write_text(text, encoding="utf-8")
-
-
-def _warnings(mw):
-    return [c.args[0] for c in mw.feedback.calls if c.name == "notify" and c.args[1] == "warn"]
 
 
 def test_measure_reads_the_project_file(tmp_path, qapp):
@@ -368,54 +195,6 @@ def test_an_invalid_project_file_warns_once_and_measures_with_the_default(tmp_pa
     ]
     record = provenance.read_sidecar(tmp_path / "mask" / "root_areas.csv")
     assert record["calibration"]["source"] == "default"
-
-
-def test_files_of_another_shape_warn_once(tmp_path, qapp):
-    _write_project_file(
-        tmp_path,
-        '{"schema": 1, "calibration": {"fov_width_mm": 18.0, "fov_height_mm": 13.5, '
-        '"reference_size_px": [640, 480]}}',
-    )
-    # Model-size predictions (80 x 64 here) and a GT mask at each photo's size.
-    for i in range(2):
-        name = f"v_T{i + 1}_L2_2024.01.02_01020{i}_001"
-        _extra_image(tmp_path, name, (64, 80), "mask", photo_shape=(60, 80))
-        _extra_image(tmp_path, name, (60, 80), "gt/mask")
-    name = "v_T9_L2_2024.01.02_010209_001"
-    _extra_image(tmp_path, name, (64, 80), "mask", photo_shape=(48, 96))
-    _extra_image(tmp_path, name, (48, 96), "gt/mask")
-    handler, mw = _handler(tmp_path, qapp)
-    handler.calculate_root_area()
-    _wait_idle(handler, qapp)
-
-    # One odd photo is one cause: the photos say it, and the GT files' two sizes (they are
-    # photo-sized) are not said again (review M2, FR-5).
-    record = provenance.read_sidecar(tmp_path / "mask" / "root_areas.csv")
-    assert record["inputs"]["sizes_px"] == {"80x60": 2, "96x48": 1}
-    sizes = [w for w in _warnings(mw) if "another shape" in w or w.startswith(_MIXED)]
-    assert sizes == [
-        "1 of 3 photos checked has another shape than the 640×480 reference in "
-        "sprouts_project.json (96×48 ×1): the field of view was applied to each whole image."
-    ]
-
-
-def test_files_all_of_another_shape_warn_once(tmp_path, qapp):
-    _write_project_file(
-        tmp_path,
-        '{"schema": 1, "calibration": {"fov_width_mm": 18.0, "fov_height_mm": 13.5, '
-        '"reference_size_px": [640, 480]}}',
-    )
-    for i in range(2):
-        _extra_image(tmp_path, f"v_T{i + 1}_L2_2024.01.02_01020{i}_001", (48, 96), "mask")
-    handler, mw = _handler(tmp_path, qapp)
-    handler.calculate_root_area()
-    _wait_idle(handler, qapp)
-
-    sizes = [w for w in _warnings(mw) if "another shape" in w or w.startswith(_MIXED)]
-    assert sizes == [  # the photos say it (T3): the measured files' clause is left out
-        "2 of 2 photos checked have another shape than the 640×480 reference in "
-        "sprouts_project.json (96×48 ×2): the field of view was applied to each whole image."
-    ]
 
 
 def test_a_refused_run_says_nothing_about_the_project_file(tmp_path, qapp):
@@ -527,3 +306,103 @@ def test_editing_the_gt_mask_measures_without_asking(tmp_path, qapp):
     )
     assert handler._again_box is None
     assert csv.stat().st_mtime_ns > mtime
+
+
+# ------------------------------------------------------------------ the older layout (#38)
+def test_an_older_mask_folder_next_to_mask_is_ignored(tmp_path, qapp):
+    _project(tmp_path, skeletons=False)  # mask/: where Generate and Correct save
+    older = tmp_path / "output" / "mask"
+    older.mkdir(parents=True)
+    cv2.imwrite(str(older / "x_T1_L2_2024.01.02_010200_001.png"), np.zeros((64, 80), np.uint8))
+    handler, mw = _handler(tmp_path, qapp)
+
+    handler.calculate_root_area()
+    _wait_idle(handler, qapp)
+
+    assert _warnings(mw) == []
+    assert (tmp_path / "mask" / "root_areas.csv").is_file()
+    assert sorted(p.name for p in older.iterdir()) == ["x_T1_L2_2024.01.02_010200_001.png"]
+
+
+def test_an_older_layout_alone_has_nothing_to_measure(tmp_path, qapp):
+    """Skeletons only in ``skeletonizer/test_latest/images`` and masks only in
+    ``output/mask``: Measure says there is nothing to measure and writes no CSV."""
+    _project(tmp_path, skeletons=False, masks=False)
+    plane = np.zeros((64, 80), np.uint8)
+    for folder, suffix in (
+        (tmp_path / "skeletonizer" / "test_latest" / "images", "_fake.png"),
+        (tmp_path / "output" / "mask", ".png"),
+    ):
+        folder.mkdir(parents=True)
+        cv2.imwrite(str(folder / f"x_T1_L2_2024.01.02_010200_001{suffix}"), plane)
+    handler, mw = _handler(tmp_path, qapp)
+
+    handler.calculate_root_length()
+    handler.calculate_root_area()
+    _wait_idle(handler, qapp)
+
+    assert _warnings(mw) == [
+        "No skeleton images found. Generate skeletons first.",
+        "No mask images found. Generate masks first.",
+    ]
+    assert "task_started" not in mw.feedback.names()
+    assert sorted(p.name for p in tmp_path.rglob("*.csv")) == []
+
+
+# ------------------------------------------------------------------ cancel and failure
+def test_a_cancelled_remeasure_leaves_the_previous_results_untouched(tmp_path, qapp):
+    """Cancel during a second run: the CSV, its sidecar and its inputs record of the first run
+    stay byte for byte, and no temp file is left beside them or in the project folder."""
+    _project(tmp_path, n=12, skeletons=False)
+    handler, mw = _handler(tmp_path, qapp)
+    handler.calculate_root_area()
+    _wait_idle(handler, qapp)
+    mask_dir = tmp_path / "mask"
+    files = [
+        mask_dir / "root_areas.csv",
+        mask_dir / "root_areas.csv.provenance.json",
+        mask_dir / "root_areas.csv.inputs.json",
+    ]
+    before = {path.name: path.read_bytes() for path in files}
+    listing = {folder: sorted(os.listdir(folder)) for folder in (tmp_path, mask_dir)}
+    # A changed input, so the second run measures instead of asking "Measure again?".
+    mask = next(mask_dir.glob("x_*.png"))
+    cv2.imwrite(str(mask), np.full((64, 80), 255, np.uint8))
+
+    handler.calculate_root_area()
+    mw.feedback.cancel()  # the Cancel button
+    _wait_idle(handler, qapp)
+
+    assert "cancel" in mw.feedback.last_message.lower()
+    assert {path.name: path.read_bytes() for path in files} == before
+    assert {folder: sorted(os.listdir(folder)) for folder in (tmp_path, mask_dir)} == listing
+
+
+def test_a_run_whose_measuring_fails_says_so_and_keeps_nothing_to_retry(
+    tmp_path, qapp, monkeypatch
+):
+    """Not the write but the measuring fails (a worker raises): a "Measure failed" box with
+    the error, a failed task, no CSV, and no rows kept for a Retry."""
+    from app.handlers import skeleton_handler
+
+    _project(tmp_path, skeletons=False)
+    shown = []
+    monkeypatch.setattr(
+        skeleton_handler.QMessageBox,
+        "warning",
+        lambda parent, title, text: shown.append((title, text)),
+    )
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("simulated measuring failure")
+
+    monkeypatch.setattr(measure_run, "run_metric_pool", broken)
+    handler, mw = _handler(tmp_path, qapp)
+    handler.calculate_root_area()
+    _wait_idle(handler, qapp)
+
+    assert len(shown) == 1 and shown[0][0] == "Measure failed"
+    assert "simulated measuring failure" in shown[0][1]
+    assert "task_failed" in mw.feedback.names()
+    assert handler.retry_measure("area") is False
+    assert not os.path.exists(tmp_path / "mask" / "root_areas.csv")

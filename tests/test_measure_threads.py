@@ -13,7 +13,6 @@ from app.inference import measure_run
 from app.inference.measure_run import AREA, LENGTH, MeasureRun
 from app.inference.metric_thread import MetricCalculatorThread
 from app.io_utils import FileLockedError
-from app.workers import GuardedThread
 
 
 @pytest.fixture(scope="module")
@@ -57,16 +56,6 @@ def _lock(monkeypatch):
         raise FileLockedError(filename)
 
     monkeypatch.setattr(measure_run, "write_metric_csv", locked)
-
-
-def test_threads_keep_their_public_signals(tmp_path):
-    for spec in (LENGTH, AREA):
-        thread = _thread(spec, {"a": "p"}, str(tmp_path))
-        assert isinstance(thread, GuardedThread)
-        assert thread.job.images == {"a": "p"}
-        assert thread.output_dir == str(tmp_path)
-        for sig in ("finished", "progress", "failed", "cancelled", "unchanged"):
-            assert hasattr(thread, sig)
 
 
 def test_success_emits_finished_with_csv_path(tmp_path, qapp):
@@ -118,8 +107,3 @@ def test_cancel_emits_cancelled_and_writes_no_csv(tmp_path, qapp):
     assert got["cancelled"] == [True]
     assert thread.job.rows is None
     assert not os.path.exists(os.path.join(str(tmp_path / "skeletons"), "root_lengths.csv"))
-
-
-def test_generic_thread_reports_its_spec(tmp_path):
-    thread = MetricCalculatorThread(MeasureRun(LENGTH, {}, str(tmp_path)))
-    assert thread.spec is LENGTH

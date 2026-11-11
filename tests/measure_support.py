@@ -256,3 +256,14 @@ def _write_areas(root, rows) -> str:
 def _bump_mtime(path: str, seconds: float = 5.0) -> None:
     st = os.stat(path)
     os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + int(seconds * 1e9)))
+
+
+# --------------------------------------------------------------------------- handler notices
+
+
+def _write_project_file(tmp_path, text):
+    (tmp_path / "sprouts_project.json").write_text(text, encoding="utf-8")
+
+
+def _warnings(mw):
+    return [c.args[0] for c in mw.feedback.calls if c.name == "notify" and c.args[1] == "warn"]

@@ -29,8 +29,6 @@ from tests.window_support import build_window, open_folder, write_photos
 STEM = "24EFCAM1_T001_L044_2024.07.18_111530_001_SMM"
 #: Where Measure writes root_lengths.csv.
 SKELETONS = ("skeletons",)
-#: The older layout's folder (#38): not searched.
-OLDER = ("skeletonizer", "test_latest", "images")
 
 pytestmark = pytest.mark.usefixtures("no_temp_sweep")
 
@@ -51,83 +49,38 @@ def _lengths(root, parts: tuple[str, ...] = SKELETONS) -> str:
     return path
 
 
-def test_the_gui_thread_never_parses_the_worker_prewarm_does(tmp_path):
-    written = _lengths(tmp_path)
-    index = MeasurementIndex(str(tmp_path))
-    assert index.lookup(STEM, load=False).length_mm is None  # never parsed on the GUI thread
-    assert index.needs_load() is True and index.sources()["length"] == written
-
-    index.prewarm()  # a worker's job
-
-    assert index.lookup(STEM, load=False).length_mm == 9.25
-
-
-@pytest.mark.parametrize(
-    "parts",
-    [OLDER, ("output", *OLDER), ("results", "run1", "test_latest", "images")],
-    ids=["skeletonizer", "output", "walked"],
-)
-def test_a_csv_of_the_older_layout_is_not_found(tmp_path, parts):
-    _lengths(tmp_path, parts)
-    index = MeasurementIndex(str(tmp_path))
-    index.prewarm()
-
-    assert index.lookup(STEM, load=False).length_mm is None
-    assert index.sources()["length"] is None and index.needs_load() is False
-
-
-def test_a_csv_is_found_again_after_a_job_end(tmp_path):
-    """invalidate() (every Measure job end) forgets the located CSV: the GUI thread's search
-    finds it again (a stat), so the bar asks for its parse."""
-    written = _lengths(tmp_path)
-    now = [0.0]
-    index = MeasurementIndex(str(tmp_path), clock=lambda: now[0])
-    index.prewarm()
-    assert index.lookup(STEM, load=False).length_mm == 9.25
-
-    index.invalidate()
-    now[0] += 5.0
-
-    assert index.needs_load() is True
-    assert index.sources()["length"] == written
-    index.prewarm()
-    assert index.lookup(STEM, load=False).length_mm == 9.25
-
-
-def test_a_csv_measure_writes_later_is_found(tmp_path):
-    now = [0.0]
-    index = MeasurementIndex(str(tmp_path), clock=lambda: now[0])
-    index.prewarm()
-    folder = tmp_path / "skeletons"
-    folder.mkdir()
-    row = {"Image": STEM, "Tube": 1, "Position": 44, "Date": "d", "Time": "t"}
-    row[LENGTH_CSV_HEADERS[5]] = 3.5
-    write_metric_csv([row], str(folder / "root_lengths.csv"), LENGTH_CSV_HEADERS)
-    now[0] += 5.0
-
-    assert index.needs_load() is True
-    index.prewarm()
-    assert index.lookup(STEM, load=False).length_mm == 3.5
-
-
 # ------------------------------------------------------------------------ the window
-def test_the_bar_never_waits_for_a_csv_the_pool_is_parsing(app, tmp_path):
+def test_the_bar_never_waits_for_a_csv_the_pool_is_parsing(tmp_path):
     """needs_load() takes the CSV lock, which the pool's parse holds (about 50 ms at 46k
     rows here): while a parse runs, a selection must not ask it (the parse's ready signal
     refreshes the bar)."""
-    window = build_window(tmp_path / "s.ini", size=None, show=False)
-    try:
-        index = MeasurementIndex(str(tmp_path))
-        asked = []
-        index.needs_load = lambda: asked.append(1) or False
-        window._measurements = index
-        window._measurements_loading = True  # a pool job is parsing
+    from app.gui.window.metrics import MetricsController
 
-        window._refresh_metrics_bar(STEM)
+    shown: list[dict] = []
+    window = SimpleNamespace(
+        image_manager=SimpleNamespace(
+            mask_state=lambda _n: "prediction",
+            skeleton_state=lambda _n: "prediction",
+            has_gt_labels=lambda _n: False,
+        ),
+        display_controller=SimpleNamespace(current_name=STEM),
+        metrics_bar=SimpleNamespace(
+            set_metrics=lambda **k: shown.append(k), set_fov=lambda *a: None
+        ),
+    )
+    controller = MetricsController(window)
+    index = MeasurementIndex(str(tmp_path))
+    asked = []
+    index.needs_load = lambda: asked.append(1) or False
+    controller.index = index
 
-        assert asked == []
-    finally:
-        delete_widgets([window])
+    controller.loading = True  # a pool job is parsing
+    controller.refresh(STEM)
+    assert asked == [] and len(shown) == 1  # the bar was refreshed, the lock never asked
+
+    controller.loading = False  # no parse: a selection asks whether the CSV changed
+    controller.refresh(STEM)
+    assert asked == [1]
 
 
 def test_a_csv_reaches_the_metrics_bar(app, tmp_path):

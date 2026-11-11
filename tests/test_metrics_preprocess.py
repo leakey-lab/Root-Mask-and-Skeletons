@@ -1,12 +1,11 @@
-"""R6: the faster Measure-length preprocessing returns the same skeleton, pixel for pixel.
+"""``metrics.preprocess_image``: Otsu, inverted when mostly white, thinned (R6).
 
-``metrics.preprocess_image`` (Otsu, invert if mostly white, thin) spent more time on
-temporaries than on the thinning: ``skeletonize(binary / 255)`` made a float64 copy that
-skimage then turned back into booleans, ``(skeleton * 255).astype(np.uint8)`` went through
-int64, and ``np.mean`` summed every pixel as float64 to decide the inversion. The same
-results come from ``skeletonize(binary > 0)``, a uint8 view and an exact integer count
-(about 1.5 ms less per 640 x 480 image). The reference below is the pre-R6 function,
-verbatim; the Measure CSV itself stays pinned by test_measure_core's legacy pipeline.
+The function was made faster (R6: no float64 copy, no int64 temporary, an exact integer
+count for the inversion rule). ``_pre_r6_preprocess_image`` below is the plain reference of
+that optimisation, the function before R6 verbatim: the fast path must give the same skeleton,
+pixel for pixel, and the same length. An image without foreground comes back empty without
+thinning. The Measure CSV itself is pinned by ``tests/test_measure_run.py``'s legacy
+differential.
 """
 
 from __future__ import annotations

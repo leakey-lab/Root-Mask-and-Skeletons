@@ -362,3 +362,30 @@ def test_unchanged_is_true_only_when_every_input_matches(tmp_path):
     layout, run, _stems = _measured(tmp_path / "unrecorded")
     os.remove(inputs_record_path(run.csv_path))
     assert run.unchanged() is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "not json",
+        "[1, 2]",
+        '{"csv_sha256": "<sha>", "inputs": []}',
+        '{"csv_sha256": "<sha>", "inputs": {"mask/a.png": [1, 2, "short"]}}',
+        '{"csv_sha256": "<sha>", "inputs": {"mask/a.png": [1.5, 2, "<64>"]}}',
+    ],
+    ids=["not-json", "a-list", "inputs-not-a-dict", "short-hash", "float-size"],
+)
+def test_a_corrupt_record_is_ignored(tmp_path, text):
+    """A damaged ``<csv>.inputs.json`` is no record: never an exception, so Measure measures
+    (it does not ask "Measure again?") and the bar compares by file time."""
+    layout, run, _stems = _measured(tmp_path)
+    text = text.replace("<sha>", _sha256(run.csv_path)).replace("<64>", "0" * 64)
+    with open(inputs_record_path(run.csv_path), "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+    assert load_inputs_record(run.csv_path) is None
+    assert run.unchanged() is False
+    assert _freshness(layout, run.csv_path).by_content is False
+    index = MeasurementIndex(layout.root)
+    index.prewarm()
+    assert index.by_content()["area"] is False

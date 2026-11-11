@@ -5,8 +5,8 @@ Length measures ``gt/skeletons/<stem>.png`` where it is valid, else the predicti
 ``mask/<stem>.png`` (:mod:`app.inference.measure_sources`). The CSVs gain a last column
 ``Source`` (``gt`` / ``prediction``). Each image is decided and measured in one task on the
 Measure job's worker (never on the GUI thread), each GT file read once. The provenance and
-the record of the inputs follow the measured file, and so do the metrics bar's freshness,
-its tooltips and the status line.
+the record of the inputs follow the measured file, and so do the metrics bar's tooltips and
+the status line. The index's freshness on such a project: ``test_measurement_index_gt_first.py``.
 """
 
 from __future__ import annotations
@@ -16,13 +16,11 @@ import os
 import threading
 import time
 
-import cv2
 import numpy as np
 import pytest
 from PyQt6.QtWidgets import QApplication, QGraphicsScene
 
 from app.config import AREA_CSV_HEADERS, LENGTH_CSV_HEADERS
-from app.data_processing.measurement_index import MeasurementIndex
 from app.gui.stage_summary import Freshness, input_freshness, measure_text
 from app.inference import measure_run, measure_sources, metrics
 from app.inference.measure_inputs import input_key, load_inputs_record
@@ -47,8 +45,6 @@ from tests.measure_sources_support import (
 )
 from tests.measure_support import (
     _csv_path,
-    _legacy_csv,
-    _make_dataset,
     _rows,
     _run,
     run_area,
@@ -77,36 +73,7 @@ def _notices(mw) -> list[tuple]:
     return [c.args for c in mw.feedback.calls if c.name == "notify"]
 
 
-def other_skeleton() -> np.ndarray:
-    """Another hand-traced 1 px skeleton at the photo's size."""
-    w, h = PHOTO_SIZE
-    gray = np.zeros((h, w), np.uint8)
-    cv2.line(gray, (30, 30), (w - 30, h // 2), 255, 1)
-    return gray
-
-
 # ------------------------------------------------------------------ the CSVs
-def test_the_csvs_gain_a_last_source_column():
-    assert LENGTH_CSV_HEADERS == [
-        "Image",
-        "Tube",
-        "Position",
-        "Date",
-        "Time",
-        "Length (mm)",
-        "Error",
-        "Source",
-    ]
-    assert AREA_CSV_HEADERS == [
-        "Image",
-        "Tube",
-        "Position",
-        "Date",
-        "Time",
-        "Area (mm²)",
-        "Error",
-        "Source",
-    ]
 
 
 def test_rows_say_gt_or_prediction_and_values_follow_the_measured_file(gt_project, qapp):
@@ -169,32 +136,6 @@ def test_the_synthetic_goldens_corrections_measure_their_recorded_lengths(
     rows = run_length(layout, qapp)
 
     assert float(rows[SYNTH_STEM][LENGTH_COL]) == length and rows[SYNTH_STEM]["Source"] == "gt"
-
-
-@pytest.mark.parametrize("spec", [measure_run.LENGTH, measure_run.AREA], ids=["length", "area"])
-def test_prediction_rows_are_byte_identical_to_the_legacy_writer_in_the_first_seven_columns(
-    tmp_path, spec
-):
-    images = _make_dataset(tmp_path / "in", spec.kind)
-    bad = tmp_path / "in" / "corrupt_T001_L001.png"
-    bad.write_bytes(b"not a png")
-    images["corrupt_T001_L001"] = str(bad)
-    legacy = _legacy_csv(images, spec.kind, str(tmp_path / "legacy.csv"), source=False)
-    out = tmp_path / "out"
-    out.mkdir()
-    run = measure_run.MeasureRun(spec, images, str(out), gt_files={}, photos={})  # GT-first, no GT
-    run.compute()
-
-    with open(run.write(), "rb") as fh:
-        lines = fh.read().split(b"\r\n")
-    with open(legacy, "rb") as fh:
-        legacy_lines = fh.read().split(b"\r\n")
-    assert [line.rsplit(b",", 1)[0] for line in lines if line] == [
-        line for line in legacy_lines if line
-    ]
-    assert [line.rsplit(b",", 1)[1] for line in lines if line] == [b"Source"] + [b"prediction"] * (
-        len(images)
-    )
 
 
 # ------------------------------------------------------------------ inputs and records
@@ -339,42 +280,7 @@ def test_gt_files_are_decided_on_the_worker_and_read_once(gt_project, qapp, monk
     assert gt_reads == expected  # each GT file once: validated, hashed and measured
 
 
-# ------------------------------------------------------------------ freshness
-def test_outdated_follows_the_measured_file(gt_project, qapp):
-    layout, _ = gt_project
-
-    def fresh() -> MeasurementIndex:
-        _run(layout, qapp, "length")
-        _run(layout, qapp, "area")
-        made = MeasurementIndex(layout.root)
-        made.prewarm()
-        return made
-
-    def again(index: MeasurementIndex) -> MeasurementIndex:
-        index.invalidate()
-        index.prewarm()
-        return index
-
-    index = fresh()
-    assert index.outdated("g") == {"length": False, "area": False}
-    assert index.outdated("s") == {"length": False, "area": False}  # its unused GT is recorded
-
-    write_gt_skeleton(layout, "g", other_skeleton())
-    assert again(index).outdated("g")["length"] is True  # the measured GT file changed
-    write_gt_skeleton(layout, "p")
-    assert again(index).outdated("p")["length"] is True  # a GT saved after the CSV
-    os.remove(layout.gt_skeleton_path("o"))
-    assert again(index).outdated("o")["length"] is True  # the measured GT file is gone
-
-    index = fresh()
-    _write_png(layout.skeleton_path("g"), np.roll(prediction_skeleton(), 9, axis=1))
-    # a regenerated prediction under a gt row does not outdate it
-    assert again(index).outdated("g") == {"length": False, "area": False}
-    write_gt_mask(layout, "p")
-    assert again(index).outdated("p") == {"length": False, "area": True}
-    assert index.gt_skip_reason("s") == {"length": "size"}
-    assert index.gt_skip_reason("x") == {"length": "unreadable", "area": "unreadable"}
-    assert index.gt_skip_reason("g") == {}
+# ------------------------------------------------------------------ the status line
 
 
 def test_the_status_line_counts_gt_files():
@@ -524,7 +430,7 @@ def test_the_metrics_bar_names_the_source_and_the_skip_reason(measured_window):
     assert shown["area_note"] in bar._area_cell.toolTip()
 
 
-# ------------------------------------------------------------------ review round 1
+# ------------------------------------------------------------------ the metrics bar notes
 class _NoteIndex:
     """A measured image whose sidecar lists a skipped GT file for both metrics (stale when
     the rows say ``gt``)."""
@@ -630,153 +536,6 @@ def test_the_skip_note_for_a_gt_mask_of_another_size_says_so():
     )
 
 
-def test_a_failed_provenance_write_removes_the_earlier_sidecar(gt_project, qapp, monkeypatch):
-    layout, _ = gt_project
-    _run(layout, qapp, "length")
-    csv_path = _csv_path(layout, "length")
-    assert _sidecar(csv_path)["inputs"]["gt"]["skipped"]
-
-    def broken(*_a, **_k):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(measure_run.provenance, "write_sidecar", broken)
-    # Force a re-measure: nothing changed, so the run would stop at "Measure again?".
-    os.remove(csv_path + ".inputs.json")
-    _run(layout, qapp, "length")
-
-    assert os.path.isfile(csv_path)
-    # an earlier run's inputs.gt.skipped can never pair with the new CSV
-    assert not os.path.exists(csv_path + ".provenance.json")
-    index = MeasurementIndex(layout.root)
-    index.prewarm()
-    assert index.gt_skip_reason("s") == {}
-
-
-@pytest.mark.parametrize(
-    "spec, words",
-    [(measure_run.LENGTH, "generated skeletons (*_fake.png)"), (measure_run.AREA, "masks (*.png)")],
-    ids=["length", "area"],
-)
-def test_a_run_without_gt_inputs_records_the_prediction_rule(tmp_path, spec, words):
-    """A run built without gt_files (scripts, tests) measures predictions only: its
-    provenance says so."""
-    images = _make_dataset(tmp_path / "in", spec.kind)
-    run = measure_run.MeasureRun(spec, images, str(tmp_path / "out"))
-    run.compute()
-    rec = _sidecar(run.write())
-    assert (rec["parameters"]["source_rule"], rec["parameters"]["input"]) == ("prediction", words)
-    assert "gt" not in rec["inputs"]
-
-    gt_first = measure_run.MeasureRun(spec, images, str(tmp_path / "gt"), gt_files={})
-    gt_first.compute()
-    assert _sidecar(gt_first.write())["parameters"]["source_rule"] == "gt-first"
-
-
-def test_a_browse_step_does_not_list_the_gt_folders(gt_project, qapp, monkeypatch):
-    """A case-sensitive disk (Linux) simulated: the GUI thread finds a GT file by its exact
-    name, else in the listing read with the CSVs on the worker; it never lists gt/."""
-    from app import project_layout
-
-    layout, _ = gt_project
-    os.remove(layout.gt_skeleton_path("o"))  # o's GT skeleton named O.png: a case variant
-    _write_png(os.path.join(layout.gt_skeletons_dir, "O.png"), other_skeleton())
-    _run(layout, qapp, "length")
-    _run(layout, qapp, "area")
-    index = MeasurementIndex(layout.root)
-    index.prewarm()  # the worker's load lists gt/ (once)
-
-    listed: list[str] = []
-    real_scandir = os.scandir
-
-    def scandir(path="."):
-        listed.append(os.path.normcase(os.path.abspath(os.fspath(path))))
-        return real_scandir(path)
-
-    monkeypatch.setattr(project_layout, "_ignores_case", lambda _directory: False)
-    monkeypatch.setattr(os, "scandir", scandir)
-    for stem in ("p", "g", "s", "o", "x", "nothing"):
-        index.outdated(stem)
-        index.measured_from(stem)
-        index.gt_skip_reason(stem)
-    monkeypatch.setattr(os, "scandir", real_scandir)
-
-    gt_dir = os.path.normcase(os.path.abspath(layout.gt_dir))
-    assert [path for path in listed if path.startswith(gt_dir)] == []
-    # the case variant is still found, by the name it has on disk
-    assert index.measured_from("o")["length"] == ("gt/skeletons/O.png", "gt")
-    assert index.outdated("o") == {"length": False, "area": False}
-
-
-def _age(*folders: str, seconds: float = -60.0) -> None:
-    """Move every file of ``folders`` back in time by ``seconds``."""
-    for folder in folders:
-        for entry in os.scandir(folder):
-            st = entry.stat()
-            os.utime(entry.path, ns=(st.st_atime_ns, st.st_mtime_ns + int(seconds * 1e9)))
-
-
-def _by_time(layout: ProjectLayout, images: dict[str, str], csv_path: str) -> Freshness:
-    """The status line's count of length without a record (file times)."""
-    return input_freshness(
-        layout.skeletons_dir,
-        "_fake.png",
-        csv_path,
-        record=None,
-        project_root=layout.root,
-        images=images,
-        gt_folder=layout.gt_skeletons_dir,
-    )
-
-
-def test_without_a_record_the_bar_and_the_status_line_compare_the_gt_file_only(gt_project, qapp):
-    layout, images = gt_project
-    _run(layout, qapp, "length")
-    csv_path = _csv_path(layout, "length")
-    os.remove(csv_path + ".inputs.json")  # no record: file times
-    _age(layout.skeletons_dir, layout.gt_skeletons_dir)
-    measured_at = time.time_ns()
-    os.utime(csv_path, ns=(measured_at, measured_at))  # the CSV is the newest file
-    later = (measured_at + 60_000_000_000,) * 2  # explicit: file-time ticks are coarse
-
-    def outdated(stem: str) -> bool:
-        index = MeasurementIndex(layout.root)
-        index.prewarm()
-        return index.outdated(stem)["length"]
-
-    assert _by_time(layout, images, csv_path).changed == 0
-    assert not outdated("g") and not outdated("s")
-    # a regenerated prediction of an image with a GT file: the GT file is what Measure reads
-    _write_png(layout.skeleton_path("g"), np.roll(prediction_skeleton(), 9, axis=1))
-    os.utime(layout.skeleton_path("g"), ns=later)
-    assert _by_time(layout, images, csv_path).changed == 0 and not outdated("g")
-    write_gt_skeleton(layout, "g", other_skeleton())  # the GT file changed after the CSV
-    os.utime(layout.gt_skeleton_path("g"), ns=later)
-    assert _by_time(layout, images, csv_path).changed == 1 and outdated("g")
-
-
-def test_a_csv_without_source_is_outdated_beside_a_gt_file(tmp_path):
-    """A CSV written before WG-T8 measured predictions only: where a GT file exists now,
-    Measure would read it, whatever the file times."""
-    layout = ProjectLayout(str(tmp_path))
-    images = {stem: write_photo(layout, stem) for stem in ("a", "b")}
-    for stem in ("a", "b"):
-        _write_png(layout.skeleton_path(stem), prediction_skeleton())
-    write_gt_skeleton(layout, "a")
-    rows = [
-        {"Image": stem, "Tube": None, "Position": None, "Date": None, "Time": None, LENGTH_COL: 1.0}
-        for stem in ("a", "b")
-    ]
-    csv_path = _csv_path(layout, "length")
-    metrics.write_metric_csv(rows, csv_path, LENGTH_CSV_HEADERS[:7])  # no Source column
-    _age(layout.skeletons_dir, layout.gt_skeletons_dir)
-    os.utime(csv_path)
-
-    index = MeasurementIndex(layout.root)
-    index.prewarm()
-    assert index.outdated("a")["length"] is True and index.outdated("b")["length"] is False
-    assert _by_time(layout, images, csv_path).changed == 1
-
-
 def test_a_removed_gt_file_counts_its_image_once(gt_project, qapp):
     layout, images = gt_project
     _run(layout, qapp, "length")
@@ -799,72 +558,3 @@ def test_a_removed_gt_file_counts_its_image_once(gt_project, qapp):
     os.remove(layout.gt_skeleton_path("o"))  # o has no prediction: it is no longer an input
     fresh = freshness()
     assert (fresh.inputs, fresh.new, fresh.removed) == (len(STEMS) - 1, 1, 1)
-
-
-# ------------------------------------------------------------------ review round 3
-def test_without_a_record_a_prediction_row_compares_its_prediction_too(gt_project, qapp):
-    """s was measured from its prediction (its GT file is not the photo's size): a
-    regenerated prediction outdates it, by file time too; a gt row ignores its prediction."""
-    layout, _ = gt_project
-    _run(layout, qapp, "length")
-    csv_path = _csv_path(layout, "length")
-    os.remove(csv_path + ".inputs.json")  # no record: file times
-    _age(layout.skeletons_dir, layout.gt_skeletons_dir)
-    measured_at = time.time_ns()
-    os.utime(csv_path, ns=(measured_at, measured_at))
-    for stem in ("s", "g"):  # both predictions regenerated after the CSV
-        _write_png(layout.skeleton_path(stem), np.roll(prediction_skeleton(), 9, axis=1))
-        os.utime(layout.skeleton_path(stem), ns=(measured_at + 60_000_000_000,) * 2)
-
-    index = MeasurementIndex(layout.root)
-    index.prewarm()
-
-    assert index.outdated("s")["length"] is True  # the file its row was measured from
-    assert index.outdated("g")["length"] is False  # a gt row: its GT file only
-
-
-def _case_sensitive(folder: str) -> bool:
-    probe = os.path.join(folder, "Probe")
-    with open(probe, "wb"):
-        pass
-    try:
-        return not os.path.exists(os.path.join(folder, "probe"))
-    finally:
-        os.remove(probe)
-
-
-def test_with_both_names_the_bar_compares_the_file_measure_read(tmp_path, qapp):
-    """A case-sensitive disk with gt/skeletons/o.png and O.png: Measure reads o.png (named
-    like the image o.jpg, as split_inputs keeps it); the bar compares that file, not the
-    listing's pick (O.png sorts first)."""
-    layout = ProjectLayout(str(tmp_path))
-    os.makedirs(layout.gt_skeletons_dir)
-    if not _case_sensitive(layout.gt_skeletons_dir):
-        pytest.skip("needs a case-sensitive file system (runs on the ubuntu CI)")
-    write_photo(layout, "o")
-    write_gt_skeleton(layout, "o")
-    _write_png(os.path.join(layout.gt_skeletons_dir, "O.png"), other_skeleton())
-
-    _run(layout, qapp, "length")
-    index = MeasurementIndex(layout.root)
-    index.prewarm()
-
-    assert index.measured_from("o")["length"] == ("gt/skeletons/o.png", "gt")
-    assert index.outdated("o")["length"] is False
-
-
-def test_the_image_named_gt_file_wins_over_another_listed_one(gt_project, qapp):
-    """The same rule on any disk: the listing names another file for o's stem key (what a
-    case-sensitive disk lists for O.png beside o.png); the bar still compares o.png."""
-    layout, _ = gt_project
-    _run(layout, qapp, "length")
-    index = MeasurementIndex(layout.root)
-    index.prewarm()
-    other = os.path.join(layout.gt_skeletons_dir, "o_listed.png")
-    _write_png(other, other_skeleton())
-    index._gt_listing["length"]["o"] = other  # as listed beside o.png
-
-    assert index.measured_from("o")["length"] == ("gt/skeletons/o.png", "gt")
-    assert index.outdated("o")["length"] is False
-    os.remove(layout.gt_skeleton_path("o"))  # only the listed file left: it is the GT file
-    assert index.measured_from("o")["length"] == ("gt/skeletons/o_listed.png", "gt")

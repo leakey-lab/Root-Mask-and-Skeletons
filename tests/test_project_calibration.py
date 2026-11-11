@@ -8,7 +8,6 @@ for length, another length method) is flagged outdated, never hidden.
 from __future__ import annotations
 
 import csv
-import inspect
 import json
 import os
 
@@ -30,8 +29,9 @@ from app.calibration import (
 )
 from app.config import AREA_VALUE_COLUMN, Calibration
 from app.data_processing.measurement_index import MeasurementIndex
-from app.inference import metrics
+from app.inference import measure_run
 from app.inference.measure_run import AREA, MeasureRun
+from tests.measure_support import _NAMES, _write_png
 
 PROJECT = {
     "schema": 1,
@@ -145,18 +145,6 @@ def test_the_record_names_its_source(tmp_path):
         "evidence": "Rajurkar et al. 2022",
         "reference_size_px": [640, 480],
     }
-
-
-def test_metric_functions_keep_their_signatures():
-    for function in (metrics.root_length_mm, metrics.root_area_mm2):
-        params = list(inspect.signature(function).parameters.values())
-        assert params[0].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
-        assert params[1].name == "calibration"
-        assert params[1].kind is inspect.Parameter.KEYWORD_ONLY
-        assert params[1].default is None
-    full = np.full((480, 640), 255, np.uint8)
-    assert metrics.root_area_mm2(full) == pytest.approx(18.0 * 13.5)
-    assert metrics.root_area_mm2(full, calibration=Calibration(18.0, 13.0)) == pytest.approx(234.0)
 
 
 def _masks(folder, n=2) -> dict[str, str]:
@@ -491,3 +479,108 @@ def test_the_default_field_of_view_is_18_by_13_5():
         "fov_height_mm": 13.5,
         "source": "default",
     }
+
+
+# ------------------------------------------------------------------ the recorded field of view
+def _masks_of_sizes(folder, sizes):
+    """One mask per ``(name, (rows, cols))``: a white block in a black image."""
+    folder.mkdir(parents=True, exist_ok=True)
+    images = {}
+    for name, shape in sizes:
+        img = np.zeros(shape, np.uint8)
+        img[4:20, 4:30] = 255
+        _write_png(folder / f"{name}.png", img)
+        images[name] = str(folder / f"{name}.png")
+    return images
+
+
+def test_the_index_reads_each_csvs_own_calibration(tmp_path):
+    """M2: ``MeasurementIndex.calibrations()`` is what the CSV's sidecar recorded, not the
+    running calibration; a CSV without a sidecar has none."""
+    from app.data_processing.measurement_index import MeasurementIndex
+
+    images = _masks_of_sizes(tmp_path / "mask", [(_NAMES[0], (64, 80))])
+    run = MeasureRun(AREA, images, str(tmp_path / "mask"), project_root=str(tmp_path))
+    run.compute()
+    csv_path = run.write()
+    index = MeasurementIndex(str(tmp_path))
+    index.prewarm()
+    assert index.calibrations() == {
+        "length": None,
+        "area": {"fov_width_mm": 18.0, "fov_height_mm": 13.5},
+    }
+
+    record = provenance.read_sidecar(csv_path)
+    record["calibration"] = {"fov_width_mm": 18.0, "fov_height_mm": 13.0}
+    provenance.write_sidecar(csv_path, record)
+    os.utime(csv_path, ns=(1, 2_000_000_000))  # the CSV changed: it is read again
+    index.prewarm()
+    assert index.calibrations()["area"] == {"fov_width_mm": 18.0, "fov_height_mm": 13.0}
+
+    os.remove(provenance.sidecar_path(csv_path))
+    os.utime(csv_path, ns=(1, 3_000_000_000))
+    index.prewarm()
+    assert index.calibrations()["area"] is None
+
+
+@pytest.mark.parametrize(
+    "width, height",
+    [
+        (float("nan"), 13.0),
+        (18.0, float("inf")),
+        (float("-inf"), 13.0),
+        (0, 13.0),
+        (18.0, -13.5),
+        (True, 13.0),
+        (18.0, False),
+        ("18", 13.0),
+        (None, 13.0),
+        ([18.0], 13.0),
+    ],
+)
+def test_csv_calibration_refuses_a_field_of_view_that_is_not_a_positive_number(
+    tmp_path, width, height
+):
+    csv_path = tmp_path / "root_areas.csv"
+    provenance.write_sidecar(
+        csv_path, {"calibration": {"fov_width_mm": width, "fov_height_mm": height}}
+    )
+    assert measure_run.csv_calibration(str(csv_path)) is None
+
+
+def test_csv_calibration_takes_integers_as_floats(tmp_path):
+    csv_path = tmp_path / "root_areas.csv"
+    provenance.write_sidecar(csv_path, {"calibration": {"fov_width_mm": 18, "fov_height_mm": 14}})
+    assert measure_run.csv_calibration(str(csv_path)) == {
+        "fov_width_mm": 18.0,
+        "fov_height_mm": 14.0,
+    }
+
+
+# ------------------------------------------------------------------ files that cannot be used
+def test_a_project_file_that_is_not_utf8_falls_back_and_says_why(tmp_path):
+    with open(os.path.join(tmp_path, PROJECT_FILENAME), "wb") as fh:
+        fh.write(b'{"schema": 1, "calibration": {"source": "\xe9t\xe9"}}')  # latin-1 bytes
+    pc = load_project_calibration(tmp_path)
+    assert pc.source == "default" and pc.calibration == config.CALIBRATION
+    assert pc.problem == "it is not valid JSON"
+
+
+def test_a_project_file_that_cannot_be_read_falls_back_and_says_why(tmp_path):
+    os.mkdir(os.path.join(tmp_path, PROJECT_FILENAME))  # a folder of that name
+    pc = load_project_calibration(tmp_path)
+    assert pc.source == "default" and pc.calibration == config.CALIBRATION
+    assert pc.problem == "it could not be read"
+
+
+def test_a_schema_of_true_is_refused(tmp_path):
+    _write_project(tmp_path, json.dumps({**PROJECT, "schema": True}))
+    pc = load_project_calibration(tmp_path)
+    assert pc.source == "default" and pc.problem == '"schema" must be 1'
+
+
+def test_the_shape_tolerance_is_one_percent():
+    # 640 x 476 is 0.84 % off 4:3, 640 x 475 is 1.05 % off
+    assert aspect_mismatches({"640x476": 3}, (640, 480)) == 0
+    assert aspect_mismatches({"640x475": 2}, (640, 480)) == 2
+    assert aspect_mismatches({"640x476": 3, "640x475": 2, "bad": 1, "0x480": 1}, (640, 480)) == 2

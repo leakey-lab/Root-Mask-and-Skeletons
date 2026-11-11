@@ -1,7 +1,10 @@
-"""MeasurementIndex: read-only per-image length/area lookup from the Measure CSVs.
+"""MeasurementIndex: the read-only per-image lookup of the Measure CSVs (KNOWN_ISSUES #3).
 
-The index never computes a metric: it only reads ``root_lengths.csv`` /
-``root_areas.csv`` where the Measure handlers write them (KNOWN_ISSUES #3).
+The index never computes a metric: it reads ``root_lengths.csv`` / ``root_areas.csv`` where
+Measure writes them (never the older layout's folders, #38), verbatim; an ``Error`` row gives
+``None`` and the message, never its 0. A CSV is parsed once per change, by a worker
+(``prewarm``); the GUI thread's ``lookup(load=False)`` never parses. A stem is looked up
+exactly, else without case; a case key two rows share finds nothing (O7).
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ def test_values_are_read_verbatim_from_both_csvs(tmp_path):
     assert m == Measurement(18.77, 16.41, None)
     length, area, error, length_source, area_source = m  # tuple-compatible
     assert (length, area, error) == (18.77, 16.41, None)
-    assert (length_source, area_source) == (None, None)  # no Source column
+    assert (length_source, area_source) == (None, None)  # an empty Source cell
 
 
 def test_lookup_accepts_an_image_path_or_a_stem_as_it_is(tmp_path):
@@ -154,3 +157,102 @@ def test_warm_lookup_is_fast(tmp_path):
         index.lookup(f"IMG_{i:06d}")
     per = (time.perf_counter() - t0) / 200
     assert per < 2e-3  # measured ~0.02 ms; generous for CI
+
+
+SKELETONS = ("skeletons",)
+
+
+OLDER = ("skeletonizer", "test_latest", "images")
+
+
+def _lengths(root, parts: tuple[str, ...] = SKELETONS) -> str:
+    folder = root.joinpath(*parts)
+    folder.mkdir(parents=True, exist_ok=True)
+    row = {
+        "Image": STEM,
+        "Tube": 1,
+        "Position": 44,
+        "Date": "2024.07.18",
+        "Time": "11:15:30",
+        LENGTH_CSV_HEADERS[5]: 9.25,
+    }
+    path = str(folder / "root_lengths.csv")
+    write_metric_csv([row], path, LENGTH_CSV_HEADERS)
+    return path
+
+
+def test_the_gui_thread_never_parses_the_worker_prewarm_does(tmp_path):
+    written = _lengths(tmp_path)
+    index = MeasurementIndex(str(tmp_path))
+    assert index.lookup(STEM, load=False).length_mm is None  # never parsed on the GUI thread
+    assert index.needs_load() is True and index.sources()["length"] == written
+
+    index.prewarm()  # a worker's job
+
+    assert index.lookup(STEM, load=False).length_mm == 9.25
+
+
+@pytest.mark.parametrize(
+    "parts",
+    [OLDER, ("output", *OLDER), ("results", "run1", "test_latest", "images")],
+    ids=["skeletonizer", "output", "walked"],
+)
+def test_a_csv_of_the_older_layout_is_not_found(tmp_path, parts):
+    _lengths(tmp_path, parts)
+    index = MeasurementIndex(str(tmp_path))
+    index.prewarm()
+
+    assert index.lookup(STEM, load=False).length_mm is None
+    assert index.sources()["length"] is None and index.needs_load() is False
+
+
+def test_a_csv_is_found_again_after_a_job_end(tmp_path):
+    """invalidate() (every Measure job end) forgets the located CSV: the GUI thread's search
+    finds it again (a stat), so the bar asks for its parse."""
+    written = _lengths(tmp_path)
+    now = [0.0]
+    index = MeasurementIndex(str(tmp_path), clock=lambda: now[0])
+    index.prewarm()
+    assert index.lookup(STEM, load=False).length_mm == 9.25
+
+    index.invalidate()
+    now[0] += 5.0
+
+    assert index.needs_load() is True
+    assert index.sources()["length"] == written
+    index.prewarm()
+    assert index.lookup(STEM, load=False).length_mm == 9.25
+
+
+def test_a_csv_measure_writes_later_is_found(tmp_path):
+    now = [0.0]
+    index = MeasurementIndex(str(tmp_path), clock=lambda: now[0])
+    index.prewarm()
+    folder = tmp_path / "skeletons"
+    folder.mkdir()
+    row = {"Image": STEM, "Tube": 1, "Position": 44, "Date": "d", "Time": "t"}
+    row[LENGTH_CSV_HEADERS[5]] = 3.5
+    write_metric_csv([row], str(folder / "root_lengths.csv"), LENGTH_CSV_HEADERS)
+    now[0] += 5.0
+
+    assert index.needs_load() is True
+    index.prewarm()
+    assert index.lookup(STEM, load=False).length_mm == 3.5
+
+
+def test_lookup_finds_a_row_whose_stem_differs_in_case(tmp_path):
+    _write_lengths(tmp_path, [_row("a", LENGTH_CSV_HEADERS[5], 18.77)])
+    assert MeasurementIndex(str(tmp_path)).lookup("A") == Measurement(18.77, None, None)
+
+
+def test_a_lookup_prefers_the_row_of_the_exact_stem(tmp_path):
+    column = LENGTH_CSV_HEADERS[5]
+    _write_lengths(tmp_path, [_row("A", column, 1.5), _row("a", column, 2.5)])
+    index = MeasurementIndex(str(tmp_path))
+    assert index.lookup("A").length_mm == 1.5 and index.lookup("a").length_mm == 2.5
+
+
+def test_a_lookup_never_guesses_between_case_variant_rows(tmp_path):
+    column = LENGTH_CSV_HEADERS[5]
+    _write_lengths(tmp_path, [_row("Ab", column, 1.5), _row("aB", column, 2.5)])
+    assert MeasurementIndex(str(tmp_path)).lookup("AB") == Measurement(None, None, None)
