@@ -5,7 +5,7 @@ Letters that act on the whole page are ``QShortcut``s installed from the registr
 Ctrl+Shift+Z, Ctrl+S, the canvas zoom keys, and PgDn / PgUp documented by the Global rows);
 the keys that depend on the gesture (B held, S, Enter, Esc, Delete) go through the canvas
 router to the edited layer. No key is both. Every test presses real keys on the shown, active
-page. The class labels' keys (G, the digits) are in ``test_correct_classes_editor.py``. A held
+page. The class labels' keys (G, the digits) are in ``test_correct_classes_page.py``. A held
 B ends when the canvas loses the keyboard (its release goes elsewhere).
 """
 

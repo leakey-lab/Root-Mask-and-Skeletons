@@ -12,20 +12,26 @@ never race it.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import weakref
+from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 from PIL import Image
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QCheckBox, QPushButton, QWidget
 
 from app.gt.export import ExportResult
 from app.gt.registry import default_registry
 from app.gt.store import Tracing, gt_path, write_tracing
 from app.gui.export_dataset_dialog import ExportDatasetDialog
+from app.project_layout import ProjectLayout
 from app.workers import kept_threads
-from tests.qt_teardown import flush_deleted
+from tests.qt_teardown import delete_widgets, flush_deleted
 from tests.qt_wait import wait_until
 
 _STEMS = [
@@ -33,6 +39,15 @@ _STEMS = [
     "plot_T1_L2_2024.01.01_120000",
     "plot_T2_L1_2024.01.01_120000",
 ]
+
+
+@pytest.fixture(autouse=True)
+def _delete_the_dialogs(app):
+    """Every export dialog a test made is closed and deleted after it: a leaked widget can
+    take the whole test process down (``tests/qt_teardown.py``)."""
+    yield
+    dialogs = [w for w in QApplication.topLevelWidgets() if isinstance(w, ExportDatasetDialog)]
+    delete_widgets(dialogs)
 
 
 def _make_ids(shape, values):
@@ -118,10 +133,12 @@ def test_export_dialog_runs_and_shows_summary(app, tmp_path):
     dialog.start_export()
     _wait_for_thread(dialog)
 
-    assert dialog.result_summary is not None
-    assert isinstance(dialog.result_summary, ExportResult)
-    assert dialog.result_summary.exported > 0
-    assert str(dialog.result_summary.exported) in dialog.status_label.text()
+    result = dialog.result_summary
+    assert isinstance(result, ExportResult)
+    assert (result.exported, result.train + result.val, result.errors) == (3, 3, [])
+    assert dialog.status_label.text() == (
+        f"Exported 3 image(s) ({result.train} train / {result.val} val)"
+    )
     assert dialog.export_button.text() == "Close"
 
 
@@ -287,15 +304,6 @@ def _logged(caplog) -> list[tuple[int, bool]]:
         for record in caplog.records
         if record.name in ("app.gui.export_dataset_dialog", LOGGER_NAME)
     ]
-
-
-def test_the_export_runs_inside_the_worker_error_boundary():
-    """The export thread is a ``GuardedThread``: one error boundary for every background job."""
-    from app.gui.export_dataset_dialog import ExportThread
-    from app.workers import GuardedThread
-
-    assert issubclass(ExportThread, GuardedThread)
-    assert ExportThread.run is GuardedThread.run
 
 
 def _run_failing_export(tmp_path) -> ExportDatasetDialog:
@@ -484,3 +492,141 @@ def test_nothing_to_export_names_both_ways_to_class_labels(app, tmp_path):
     )
     dialog.start_export()
     assert dialog.status_label.text() == text
+
+
+# ------------------------------------------------ the folder field and the count
+@pytest.fixture
+def made(app):
+    """Widgets closed and deleted deterministically after the test."""
+    widgets: list = []
+    yield widgets
+    delete_widgets(widgets)
+
+
+def _photo(folder: Path, name: str) -> str:
+    path = str(folder / name)
+    cv2.imwrite(path, np.full((60, 80, 3), 90, np.uint8))
+    return path
+
+
+def _traced_project(folder: Path, n_images=3, n_traced=2) -> dict[str, str]:
+    images = {}
+    for i in range(n_images):
+        path = _photo(folder, f"plot_{i:03d}.png")
+        images[f"plot_{i:03d}"] = path
+        if i < n_traced:
+            plane = np.zeros((60, 80), np.uint8)
+            plane[10:20, 10:20] = 1
+            write_tracing(
+                ProjectLayout.for_image(path).gt_path(f"plot_{i:03d}"),
+                Tracing(plane),
+                default_registry(),
+            )
+    return images
+
+
+def _run_export(dlg):
+    dlg.start_export()
+    assert dlg.export_thread is not None, dlg.status_label.text()
+    dlg.export_thread.wait(20000)
+    QApplication.processEvents()
+    return dlg.result_summary
+
+
+def test_enter_in_the_folder_field_exports_instead_of_browsing(made, tmp_path, monkeypatch):
+    from PyQt6.QtWidgets import QFileDialog
+
+    images = _traced_project(tmp_path)
+    browsed = []
+    monkeypatch.setattr(
+        QFileDialog, "getExistingDirectory", lambda *a, **k: browsed.append(1) or ""
+    )
+    dlg = ExportDatasetDialog(str(tmp_path), images, default_registry())
+    made.append(dlg)
+    dlg.show()
+    QTest.qWaitForWindowExposed(dlg)
+    defaults = [b.text() for b in dlg.findChildren(QPushButton) if b.isDefault()]
+    assert defaults == ["Export"]
+    assert not dlg.browse_button.autoDefault() and not dlg.cancel_button.autoDefault()
+
+    dlg.output_edit.setText(str(tmp_path / "out"))
+    dlg.output_edit.setFocus()
+    QTest.keyClick(dlg.output_edit, Qt.Key.Key_Return)
+    assert browsed == [] and dlg.export_thread is not None
+    dlg.export_thread.wait(20000)
+    QApplication.processEvents()
+    assert dlg.result_summary is not None and dlg.result_summary.exported == 2
+
+
+def test_export_with_no_traced_image_explains_and_stays_off(made, tmp_path):
+    images = _traced_project(tmp_path, n_images=3, n_traced=0)
+    dlg = ExportDatasetDialog(str(tmp_path), images, default_registry())
+    made.append(dlg)
+    assert dlg.traced_label.text() == (
+        "No image in this folder has class labels yet. Paint some on the Correct page (G) "
+        "first, or use Mark empty for an image that shows none of the classes."
+    )  # the Trace GT stage is gone (WG-T11): the label names where to get them
+    assert not [w for w in dlg.findChildren(QWidget) if "Trace GT" in w.toolTip()]
+    # No "Only fully checked images" option (2026-11-01): every labelled image is exported.
+    assert [b.text() for b in dlg.findChildren(QCheckBox)] == ["Keep each tube in one split"]
+    dlg.output_edit.setText(str(tmp_path / "out"))
+    assert not dlg.export_button.isEnabled()
+    dlg.start_export()
+    assert dlg.export_thread is None
+
+
+def test_a_relative_output_folder_goes_next_to_the_images(made, tmp_path, monkeypatch):
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    images = _traced_project(project_dir)
+    dlg = ExportDatasetDialog(str(project_dir), images, default_registry())
+    made.append(dlg)
+    dlg.output_edit.setText("out")
+    result = _run_export(dlg)
+    assert result is not None and result.exported == 2
+    assert os.path.isdir(project_dir / "out" / "images")
+    assert not os.path.exists(elsewhere / "out")
+    assert dlg.output_edit.text() == str(project_dir / "out")
+
+
+def test_a_pasted_quoted_path_is_unquoted(made, tmp_path):
+    """Explorer's "Copy as path" puts the path in double quotes."""
+    images = _traced_project(tmp_path)
+    dlg = ExportDatasetDialog(str(tmp_path), images, default_registry())
+    made.append(dlg)
+    dlg.output_edit.setText(f'  "{tmp_path / "quoted_out"}"  ')
+    result = _run_export(dlg)
+    assert result is not None and result.exported == 2
+    assert os.path.isdir(tmp_path / "quoted_out" / "masks")
+
+
+def test_an_out_folder_that_cannot_be_made_is_reported_and_the_controls_come_back(
+    app, tmp_path, monkeypatch
+):
+    """A read-only disk: the folder cannot be created. The dialog names the error, offers
+    Export again, and nothing is written."""
+    import app.gt.export as export
+
+    real_makedirs = export.os.makedirs
+
+    def denied(path, exist_ok=False):
+        if "read_only" in str(path):
+            raise PermissionError(13, "Permission denied", str(path))
+        real_makedirs(path, exist_ok=exist_ok)
+
+    project_dir, images, registry = _build_project(tmp_path)
+    monkeypatch.setattr(export.os, "makedirs", denied)
+    dialog = ExportDatasetDialog(project_dir, images, registry)
+    out_dir = tmp_path / "read_only" / "out"
+    dialog.output_edit.setText(str(out_dir))
+
+    dialog.start_export()
+    _wait_for_thread(dialog)
+
+    assert dialog.result_summary is None
+    assert dialog.status_label.text().startswith("Export failed: [Errno 13] Permission denied")
+    assert dialog.export_button.isEnabled() and dialog.export_button.text() == "Export"
+    assert dialog.cancel_button.isEnabled() and not out_dir.exists()

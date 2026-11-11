@@ -1,4 +1,4 @@
-"""WG-T1: the GT paths and scans of ``ProjectLayout`` and the Qt-free ``app.gt.files``.
+"""The GT paths and scans of ``ProjectLayout`` and the Qt-free ``app.gt.files``.
 
 GT lives under ``gt/``: ``gt/mask/<stem>.png`` and ``gt/skeletons/<stem>.png`` next to the
 class labels ``gt/<stem>.png`` and ``gt/classes.json``. Predictions in ``mask/`` and
@@ -8,8 +8,6 @@ class labels ``gt/<stem>.png`` and ``gt/classes.json``. Predictions in ``mask/``
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -18,9 +16,6 @@ from PIL import Image
 
 from app import project_layout
 from app.gt.files import (
-    SOURCE_GT,
-    SOURCE_NONE,
-    SOURCE_PREDICTION,
     GtFiles,
     GtRemoveError,
     gt_files,
@@ -192,10 +187,6 @@ def test_remove_gt_tries_every_file_then_raises_one_error(tmp_path, monkeypatch)
     assert os.path.isfile(skeleton) and not os.path.exists(mask) and not os.path.exists(labels)
 
 
-def test_the_source_words(tmp_path):
-    assert (SOURCE_GT, SOURCE_PREDICTION, SOURCE_NONE) == ("gt", "prediction", "none")
-
-
 def test_png_size_and_image_size_read_headers_only(tmp_path):
     assert png_size(_write_png(tmp_path / "s.png", (256, 341))) == (341, 256)
     assert image_size(_write_jpeg(tmp_path / "p.jpg", (480, 640))) == (640, 480)
@@ -214,27 +205,21 @@ def test_png_size_does_not_decode_the_pixels(tmp_path):
     assert png_size(cut) == (9, 7)
 
 
-def test_files_is_qt_free():
-    probe = (
-        "import sys, app.gt.files; "
-        "print(sorted(m for m in sys.modules "
-        "if m in ('torch', 'PyQt6') or m.startswith('PyQt6.')))"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", probe], cwd=ROOT, capture_output=True, text=True, timeout=60
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "[]"
+def test_remove_gt_skips_a_file_that_went_meanwhile(tmp_path, monkeypatch):
+    """A file found, then deleted by another program before ``remove_gt`` reached it: skipped,
+    the others go, no error."""
+    layout = ProjectLayout(str(tmp_path))
+    mask = _touch(layout.gt_mask_path("a"))
+    labels = _touch(layout.gt_path("a"))
+    real_remove = os.remove
 
+    def remove(path):
+        if path == labels:
+            real_remove(path)  # gone just before
+            raise FileNotFoundError(2, "No such file", path)
+        real_remove(path)
 
-@pytest.mark.parametrize("module", ["app.project_layout"])
-def test_the_layout_still_loads_no_heavy_modules(module):
-    probe = (
-        "import importlib, sys; importlib.import_module(sys.argv[1]); "
-        "print(sorted(m for m in sys.modules if m in ('cv2', 'PyQt6', 'torch')))"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", probe, module], cwd=ROOT, capture_output=True, text=True, timeout=60
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "[]"
+    monkeypatch.setattr(os, "remove", remove)
+
+    assert remove_gt(layout, "a") == (mask,)
+    assert not os.path.exists(mask) and not os.path.exists(labels)

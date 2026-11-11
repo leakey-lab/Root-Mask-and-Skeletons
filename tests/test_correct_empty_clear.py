@@ -144,11 +144,11 @@ def test_skeleton_clear_on_a_skeleton_the_eraser_emptied_adds_no_step(make_edito
     layer.set_size(80)
     drag(page, (5, 110), (100, 110), (195, 110))
     assert not raster(page).any() and layer.is_dirty()
-    steps = len(layer.model._history.undo_stack)
+    steps = page.session.journal.undo_entries
 
     notices = clear(page, SKELETON)
 
-    assert notices == [NO_SKELETON] and len(layer.model._history.undo_stack) == steps
+    assert notices == [NO_SKELETON] and page.session.journal.undo_entries == steps
     assert layer.is_dirty()  # still unsaved: Save writes the emptied skeleton
     assert page.save()
     assert os.path.isfile(project.correction("a"))

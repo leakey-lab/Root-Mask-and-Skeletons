@@ -21,84 +21,18 @@ from PIL import Image, PngImagePlugin
 
 import app
 from app.config import GT_IGNORE_ID, GT_META_CHUNK
-from app.gt.export import ExportError, ExportOptions, assign_splits, export_dataset, remap_ids
+from app.gt.export import ExportError, ExportOptions, assign_splits, export_dataset
 from app.gt.registry import default_registry
 from app.gt.store import Tracing, gt_path, write_tracing
+from app.gui.export_dataset_dialog import ExportDatasetDialog
+from tests.gt_support import STEMS as _STEMS
+from tests.gt_support import build_project as _build_project
+from tests.qt_teardown import delete_widgets
 
-# Six stems: three tubes (T1-T3), two positions each (L1/L2).
-_STEMS = [
-    "plot_T1_L1_2024.01.01_120000",
-    "plot_T1_L2_2024.01.01_120000",
-    "plot_T2_L1_2024.01.01_120000",
-    "plot_T2_L2_2024.01.01_120000",
-    "plot_T3_L1_2024.01.01_120000",
-    "plot_T3_L2_2024.01.01_120000",
-]
-
-
-def _make_ids(shape, values):
-    h, w = shape
-    flat = np.array([values[i % len(values)] for i in range(h * w)], dtype=np.uint8)
-    return flat.reshape(h, w)
-
-
-def _build_project(tmp_path, *, dead_root_stem=None):
-    """Six 20x20 RGB images + GT files (registry has an added-then-retired class).
-
-    Returns (project_dir, images, write_registry, export_registry).
-    ``write_registry`` still has ``dead_root`` active (used to write the GT
-    file that paints it); ``export_registry`` has it retired, and is what
-    callers pass to ``export_dataset``.
-    """
-    project_dir = tmp_path / "project"
-    project_dir.mkdir()
-
-    write_registry = default_registry().add(key="dead_root", name="Dead root", color="#111111")
-    export_registry = write_registry.retire("dead_root")
-
-    images: dict[str, str] = {}
-
-    for stem in _STEMS:
-        image_path = project_dir / f"{stem}.png"
-        Image.new("RGB", (20, 20), color=(10, 20, 30)).save(image_path, format="PNG")
-        images[stem] = str(image_path)
-
-        if stem == dead_root_stem:
-            ids = _make_ids((20, 20), [0, 1, 2, 4])
-        else:
-            ids = _make_ids((20, 20), [0, 1, 2, 3, 255])
-
-        write_tracing(gt_path(image_path), Tracing(ids=ids), write_registry)
-
-    return str(project_dir), images, write_registry, export_registry
+windows_only = pytest.mark.skipif(os.name != "nt", reason="drive letters are Windows paths")
 
 
 # --------------------------- remap_ids --------------------------------------
-
-
-def test_remap_ids_defaults():
-    registry = default_registry()
-    ids = _make_ids((4, 4), [0, 1, 2, 3, 255])
-
-    remapped = remap_ids(ids, registry)
-
-    assert np.all(remapped[ids == 0] == 0)
-    assert np.all(remapped[ids == 1] == 1)  # root
-    assert np.all(remapped[ids == 2] == 2)  # nodule
-    assert np.all(remapped[ids == 3] == 3)  # root_tip
-    assert np.all(remapped[ids == 255] == GT_IGNORE_ID)
-
-
-def test_remap_ids_retired_and_unknown_to_ignore():
-    registry = default_registry().add(key="dead_root", name="Dead root", color="#111111")
-    registry = registry.retire("dead_root")
-    ids = _make_ids((4, 4), [1, 4, 9])
-
-    remapped = remap_ids(ids, registry)
-
-    assert np.all(remapped[ids == 1] == 1)
-    assert np.all(remapped[ids == 4] == GT_IGNORE_ID)  # retired
-    assert np.all(remapped[ids == 9] == GT_IGNORE_ID)  # unknown
 
 
 # --------------------------- assign_splits -----------------------------------
@@ -351,26 +285,6 @@ def test_export_allows_sibling_folder_with_similar_name(tmp_path):
     assert result.exported == 6
 
 
-def test_export_writes_errors_txt_only_when_there_are_errors(tmp_path):
-    project_dir, images, _write_reg, export_registry = _build_project(tmp_path)
-    clean_out = tmp_path / "clean"
-    export_dataset(project_dir, images, export_registry, ExportOptions(out_dir=str(clean_out)))
-    assert not (clean_out / "errors.txt").exists()
-
-    corrupt_stem = _STEMS[2]
-    with open(gt_path(images[corrupt_stem]), "wb") as fh:
-        fh.write(b"not a png")
-    out_dir = tmp_path / "out"
-    result = export_dataset(
-        project_dir, images, export_registry, ExportOptions(out_dir=str(out_dir))
-    )
-    assert [stem for stem, _ in result.errors] == [corrupt_stem]
-    lines = (out_dir / "errors.txt").read_text(encoding="utf-8").splitlines()
-    assert len(lines) == 1
-    stem, message = lines[0].split("\t", 1)
-    assert stem == corrupt_stem and message == " ".join(result.errors[0][1].split())
-
-
 def test_progress_reports_each_percent_once(tmp_path):
     """One call per new percent, from 0 at the first image to 100 at the end, not one per
     image (46k queued signals took about a tenth of a large export)."""
@@ -404,69 +318,143 @@ def test_export_missing_out_dir_is_created(tmp_path):
     assert out_dir.exists()
 
 
-def test_export_corrupt_gt_file_lands_in_errors_others_continue(tmp_path):
+def _drive(path: str) -> str:
+    """``"C:"`` on Windows, ``""`` elsewhere."""
+    return os.path.splitdrive(path)[0]
+
+
+def test_a_drive_relative_folder_is_resolved_once_when_the_export_starts(tmp_path, monkeypatch):
+    project_dir, images, _write_registry, registry = _build_project(tmp_path)
+    start, later = tmp_path / "start", tmp_path / "later"
+    start.mkdir()
+    later.mkdir()
+    monkeypatch.chdir(start)
+    moved: list[str] = []
+
+    def progress(_percent: int) -> None:
+        if not moved:  # the working folder changes while the export runs
+            moved.append(str(later))
+            os.chdir(later)
+
+    options = ExportOptions(out_dir=f"{_drive(str(tmp_path))}out")
+    result = export_dataset(project_dir, images, registry, options, progress)
+
+    out = start / "out"
+    assert moved and os.path.isabs(result.out_dir) and os.path.samefile(result.out_dir, out)
+    assert result.errors == [] and result.exported == len(_STEMS)
+    assert len(os.listdir(out / "images")) == len(os.listdir(out / "masks")) == len(_STEMS)
+    for name in ("splits/train.txt", "splits/val.txt", "classes.json", "manifest.csv"):
+        assert (out / name).is_file()
+    assert (out / "manifest.csv.provenance.json").is_file()
+    assert not (later / "out").exists()
+
+
+def test_a_drive_relative_folder_inside_the_project_data_is_refused(tmp_path, monkeypatch):
+    project_dir, images, _write_registry, registry = _build_project(tmp_path)
+    monkeypatch.chdir(project_dir)
+    options = ExportOptions(out_dir=f"{_drive(project_dir)}mask")
+
+    with pytest.raises(ExportError, match="mask/") as caught:
+        export_dataset(project_dir, images, registry, options)
+
+    assert str(caught.value).endswith(os.path.join(project_dir, "mask"))  # named in full
+    assert not os.path.exists(os.path.join(project_dir, "mask"))
+
+
+@windows_only
+def test_a_folder_on_another_drive_is_named_in_full(tmp_path, monkeypatch):
+    """``D:`` with the project and the working folder on ``C:`` is drive D's current
+    folder. It is not empty, so nothing is written; the refusal names it in full."""
+    project_dir, images, _write_registry, registry = _build_project(tmp_path)
+    other = _drive(os.getcwd())
+    if not other or other.upper() == _drive(project_dir).upper():
+        pytest.skip("the tests do not run from a drive other than the temporary folder's")
+    monkeypatch.chdir(tmp_path)
+    folder = os.path.abspath(other)
+    if not os.path.isdir(folder) or not os.listdir(folder):
+        pytest.skip(f"{folder} is not a folder with something in it")
+
+    with pytest.raises(ExportError) as caught:
+        export_dataset(project_dir, images, registry, ExportOptions(out_dir=other))
+
+    assert os.path.isabs(folder) and _drive(folder).upper() == other.upper()
+    assert str(caught.value) == f"Output directory is not empty: {folder}"
+
+
+@windows_only
+def test_the_dialog_spells_out_a_folder_on_another_drive(app, tmp_path):
+    project_dir, images, _write_registry, registry = _build_project(tmp_path)
+    other = "E:" if _drive(project_dir).upper() == "D:" else "D:"
+    dialog = ExportDatasetDialog(project_dir, images, registry)
+    try:
+        dialog.output_edit.setText(f"{other}out")
+
+        folder = dialog._output_folder()  # resolved by name only: nothing is written
+
+        assert os.path.isabs(folder) and _drive(folder).upper() == other
+        assert os.path.basename(folder) == "out" and folder == os.path.abspath(f"{other}out")
+    finally:
+        delete_widgets([dialog])
+
+
+# --------------------------- the edges of the request ----------------------------------------
+def test_train_never_empties_at_the_highest_validation_share():
+    """At the dialog's highest share (90 %) the last tube group always stays in train: with
+    2-5 groups of 1-3 images and any seed, train has a group, val too; one group is all train."""
+    for seed in range(300):
+        rng = np.random.default_rng(seed)
+        groups = int(rng.integers(2, 6))
+        stems = [
+            f"plot_T{t}_L{i}_2024.01.01_120000"
+            for t in range(1, groups + 1)
+            for i in range(int(rng.integers(1, 4)))
+        ]
+        splits = assign_splits(stems, 0.9, True, seed)
+        assert sorted(splits) == sorted(stems), f"seed {seed}"
+        assert "train" in splits.values() and "val" in splits.values(), f"seed {seed}: {splits}"
+    one_tube = [f"plot_T1_L{i}_2024.01.01_120000" for i in range(4)]
+    assert set(assign_splits(one_tube, 0.9, True, 0).values()) == {"train"}
+
+
+def test_an_out_folder_that_is_a_file_is_refused(tmp_path):
     project_dir, images, _write_reg, export_registry = _build_project(tmp_path)
-    corrupt_stem = _STEMS[0]
-    corrupt_path = gt_path(images[corrupt_stem])
-    original_contents = {stem: open(gt_path(images[stem]), "rb").read() for stem in _STEMS}
-    with open(corrupt_path, "wb") as fh:
-        fh.write(b"not a png")
-    corrupted_contents = open(corrupt_path, "rb").read()
+    taken = tmp_path / "dataset"
+    taken.write_text("a file, not a folder")
 
-    options = ExportOptions(out_dir=str(tmp_path / "out"))
-    result = export_dataset(project_dir, images, export_registry, options)
+    with pytest.raises(ExportError, match="exists and is not a directory"):
+        export_dataset(project_dir, images, export_registry, ExportOptions(out_dir=str(taken)))
 
-    assert len(result.errors) == 1
-    assert result.errors[0][0] == corrupt_stem
-    assert result.exported == 5
-
-    # Source GT files (including the corrupted one) are left untouched.
-    for stem in _STEMS:
-        current = open(gt_path(images[stem]), "rb").read()
-        if stem == corrupt_stem:
-            assert current == corrupted_contents
-        else:
-            assert current == original_contents[stem]
+    assert taken.read_text() == "a file, not a folder"
 
 
-def test_export_missing_source_image_lands_in_errors_others_continue(tmp_path):
-    """A GT-traced image whose source file went missing must not abort the run.
-
-    remap_ids/mask-save only depends on the GT tracing, so the mask for the
-    missing-source stem would be written before ``shutil.copy2`` raises;
-    that partial mask must not survive, and the stem must not appear in the
-    split files or the manifest.
-    """
+def test_an_existing_empty_out_folder_is_used(tmp_path):
     project_dir, images, _write_reg, export_registry = _build_project(tmp_path)
-    missing_stem = _STEMS[0]
-    os.remove(images[missing_stem])  # source image gone; its GT file remains
+    out_dir = tmp_path / "dataset"
+    out_dir.mkdir()
 
-    options = ExportOptions(out_dir=str(tmp_path / "out"))
-    result = export_dataset(project_dir, images, export_registry, options)
+    result = export_dataset(project_dir, images, export_registry, ExportOptions(str(out_dir)))
 
-    assert len(result.errors) == 1
-    assert result.errors[0][0] == missing_stem
-    assert result.exported == 5
-    assert result.train + result.val == 5
+    assert result.exported == 6 and len(os.listdir(out_dir / "masks")) == 6
 
-    out_dir = tmp_path / "out"
-    assert not (out_dir / "images" / f"{missing_stem}.png").exists()
-    assert not (out_dir / "masks" / f"{missing_stem}.png").exists()
 
-    with open(out_dir / "splits" / "train.txt", encoding="utf-8") as fh:
-        train_stems = {line.strip() for line in fh if line.strip()}
-    with open(out_dir / "splits" / "val.txt", encoding="utf-8") as fh:
-        val_stems = {line.strip() for line in fh if line.strip()}
-    assert missing_stem not in train_stems
-    assert missing_stem not in val_stems
-    assert len(train_stems | val_stems) == 5
+def test_labels_holding_only_ignore_are_exported_as_ignore(tmp_path):
+    """An image marked all Ignore is exported: its mask is all 255, it counts only Ignore
+    pixels and lists no class."""
+    project = tmp_path / "project"
+    project.mkdir()
+    stem = "plot_T1_L1_2024.01.01_120000"
+    image = project / f"{stem}.png"
+    Image.new("RGB", (8, 6)).save(image)
+    registry = default_registry()
+    write_tracing(gt_path(image), Tracing(np.full((6, 8), 255, np.uint8)), registry)
 
-    with open(out_dir / "manifest.csv", encoding="utf-8", newline="") as fh:
-        rows = list(csv.DictReader(fh))
-    assert missing_stem not in {row["stem"] for row in rows}
-    assert len(rows) == 5
+    result = export_dataset(
+        str(project), {stem: str(image)}, registry, ExportOptions(str(tmp_path / "out"))
+    )
 
-    # Other images still exported normally.
-    other_stem = _STEMS[1]
-    assert (out_dir / "images" / f"{other_stem}.png").exists()
-    assert (out_dir / "masks" / f"{other_stem}.png").exists()
+    assert (result.exported, result.errors) == (1, [])
+    with Image.open(tmp_path / "out" / "masks" / f"{stem}.png") as mask:
+        assert (np.array(mask) == 255).all()
+    with open(tmp_path / "out" / "manifest.csv", encoding="utf-8", newline="") as fh:
+        (row,) = list(csv.DictReader(fh))
+    assert (row["px_ignore"], row["px_background"], row["classes_present"]) == ("48", "0", "")

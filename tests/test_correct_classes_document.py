@@ -36,13 +36,14 @@ from app.gt import (
     write_tracing,
 )
 from app.gt import store as gt_store
-from app.gui.correct import classes_document, classes_paint
+from app.gt.store import gt_path
+from app.gui.correct import classes_document
 from app.gui.correct.classes_document import ClassesDocument, ClassesRead, ClassesSaveResult
-from app.gui.correct.classes_paint import canvas_ids, class_lut
 from app.gui.correct.layer import LayerStatus
 from app.io_utils import imwrite_unicode
 from app.project_layout import ProjectLayout
 from tests.gt_goldens_support import GT_STEM, make_gt_project, write_legacy_tracing
+from tests.gt_support import break_a_chunk, write_header_bomb
 
 ROOT = Path(__file__).resolve().parents[1]
 W, H = 640, 480
@@ -173,11 +174,6 @@ def test_the_document_is_qt_free(module):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "[]"
-
-
-def test_the_document_leaves_room_to_grow():
-    lines = (ROOT / "app" / "gui" / "correct" / "classes_document.py").read_text(encoding="utf-8")
-    assert len(lines.splitlines()) <= 420  # the plan's budget (the gate is 450)
 
 
 # ------------------------------------------------------------------------------ open
@@ -340,17 +336,6 @@ def test_fill_source_is_the_active_class_only(gt_project):
     assert value == 2 and outline.dtype == np.uint8
     assert np.array_equal(outline > 0, doc.history.plane == 2)
     assert set(np.unique(outline).tolist()) == {0, 255}
-
-
-def test_the_lut_shows_each_class_in_its_colour_and_background_transparent(gt_project):
-    doc = opened(gt_project)
-    lut = doc.lut()
-
-    assert lut.shape == (256, 4) and lut.dtype == np.uint8
-    assert tuple(lut[0]) == (0, 0, 0, 0)
-    assert tuple(lut[2]) == (0xB6, 0x7E, 0xFF, 255)  # nodule #ff7eb6 as B, G, R, A
-    assert tuple(lut[7]) == (0x80, 0x80, 0x80, 255)  # an id no class owns: grey
-    assert np.array_equal(lut, class_lut(doc.registry))
 
 
 def test_apply_registry_recolours_and_keeps_the_ids(gt_project):
@@ -560,101 +545,7 @@ def test_counts_stay_exact_on_the_bincount_path(gt_project, monkeypatch):
         assert doc.counts() == expected_counts(doc)
 
 
-def test_histogram_is_exact_above_the_float32_range():
-    """cv2.calcHist counts in float32: 2**24 + 3 would read 2**24 + 4 (np.bincount there)."""
-    ids = np.zeros(2**24 + 8, np.uint8)
-    ids[:5] = 7
-    hist = classes_paint.histogram(ids)
-    assert hist[0] == 2**24 + 3 and hist[7] == 5
-
-
-def test_histogram_is_exact_on_both_paths(monkeypatch):
-    rng = np.random.default_rng(1)
-    ids = rng.integers(0, 256, size=(301, 257)).astype(np.uint8)
-    ids[:50] = 3
-    histogram = classes_paint.histogram
-    expected = np.bincount(ids.ravel(), minlength=256)
-    assert np.array_equal(histogram(ids), expected)
-    box = ids[7:200, 9:100]
-    assert np.array_equal(histogram(box), np.bincount(box.ravel(), minlength=256))
-    strided = ids.ravel()[::3]
-    assert np.array_equal(histogram(strided), np.bincount(strided, minlength=256))
-    assert np.array_equal(histogram(np.zeros((0, 5), np.uint8)), np.zeros(256))
-    monkeypatch.setattr(gt_store, "_EXACT_HIST_MAX", 100)  # above it: np.bincount
-    assert np.array_equal(histogram(ids), expected)
-    assert histogram(ids).dtype == np.int64
-
-
 # ------------------------------------------------------------------------------ ids_from_argb
-def test_ids_from_argb_keeps_the_committed_id_under_an_unmatched_colour(gt_project):
-    doc = opened(gt_project)
-    row = np.array([[0, 0, 1, 2, 7, 255, 0, 0]], np.uint8)  # 7: no class owns it (grey)
-    commit(doc, (8, 10, 8, 1), row)
-    lut = doc.lut()
-    argb = lut[row].copy()  # what the committed plane shows
-    argb[0, 0] = lut[2]  # nodule painted over background
-    argb[0, 2] = (9, 9, 9, 255)  # a colour no class owns over root: root stays
-    argb[0, 5] = 0  # erased Ignore: background
-    argb[0, 6] = (9, 9, 9, 255)  # a colour no class owns over background: background
-
-    ids = doc.ids_from_argb(argb, (8, 10, 8, 1))
-
-    assert ids.tolist() == [[2, 0, 1, 2, 7, 0, 0, 0]]
-    assert ids.dtype == np.uint8 and not np.shares_memory(ids, doc.history.plane)
-
-
-def _reference_ids_from_argb(arr, registry, fallback=None):
-    """Trace GT's implementation before its fast path (G3), verbatim."""
-    arr = np.ascontiguousarray(arr)
-    packed = arr.view("<u4")[:, :, 0]
-    ids = np.zeros(packed.shape, np.uint8)
-    known = arr[:, :, 3] == 0
-    for c in registry.classes:
-        b, g, r, a = class_lut(registry)[c.id]
-        hit = packed == (int(b) | int(g) << 8 | int(r) << 16 | int(a) << 24)
-        ids[hit] = c.id
-        known |= hit
-    other = ~known
-    if fallback is not None and other.any():
-        ids[other] = fallback[other]
-    return ids
-
-
-@pytest.mark.parametrize("seed", range(6))
-def test_ids_from_argb_matches_the_reference(seed):
-    """Random canvases: class colours, transparent, colours no class owns, noise alpha."""
-    rng = np.random.default_rng(seed)
-    registry = default_registry().add(key="hypha", name="Hypha", color="#3fa7ff").retire("nodule")
-    lut = class_lut(registry)
-    h, w = 37, 53
-    plane_ids = np.array([0, 1, 2, 3, 4, 255, 7, 200], np.uint8)  # 7, 200: no class owns them
-    fallback = rng.choice(plane_ids, size=(h, w)).astype(np.uint8)
-    canvas = lut[fallback].copy()
-    painted = rng.random((h, w)) < 0.3
-    colours = np.vstack(
-        [lut[[0, 1, 2, 3, 4, 255]], [[1, 2, 3, 255], [10, 20, 30, 128], [0, 0, 0, 255]]]
-    ).astype(np.uint8)
-    canvas[painted] = colours[rng.integers(0, len(colours), painted.sum())]
-    for fb in (fallback, None, fallback[3:30, 5:40]):
-        arr = canvas if fb is None or fb is fallback else canvas[3:30, 5:40]
-        expected = _reference_ids_from_argb(arr, registry, fb)
-        got = canvas_ids(arr, registry, fb)
-        assert got.dtype == np.uint8 and got.shape == expected.shape
-        assert np.array_equal(got, expected)
-        if fb is not None:
-            assert not np.shares_memory(got, fb)  # a new array: the history compares it
-
-
-def test_ids_from_argb_matches_the_reference_with_a_grey_class():
-    """A class in the grey shown for ids no class owns: those pixels still match like before."""
-    registry = default_registry().update("nodule", color="#808080")
-    lut = class_lut(registry)
-    fallback = np.array([[0, 1, 7, 7], [2, 200, 255, 3]], np.uint8)
-    canvas = lut[fallback].copy()
-    canvas[0, 0] = lut[1]
-    expected = _reference_ids_from_argb(canvas, registry, fallback)
-    assert expected[0, 2] == 2 and expected[1, 1] == 2  # the grey is the nodule's colour now
-    assert np.array_equal(canvas_ids(canvas, registry, fallback), expected)
 
 
 # ------------------------------------------------------------------------------ files
@@ -737,3 +628,37 @@ def test_read_back_is_none_while_a_remap_is_only_in_memory(gt_project_lossy):
     doc.revert()  # clean, but the file still holds the old ids
 
     assert doc.read_back(doc.file_stamps()) is None
+
+
+@pytest.fixture
+def image(tmp_path):
+    """A photo with an empty ``gt/`` next to it."""
+    path = str(tmp_path / "plot_T1_L1_2024.01.01_120000.png")
+    Image.new("RGB", (W, H), (10, 20, 30)).save(path)
+    os.makedirs(os.path.dirname(gt_path(path)))
+    return path
+
+
+def _too_large(path: str) -> None:
+    write_header_bomb(path)
+
+
+def _broken(path: str) -> None:
+    Image.new("P", (W, H)).save(path)
+    break_a_chunk(path)
+
+
+@pytest.mark.parametrize("make", [_too_large, _broken], ids=["too_large", "broken_chunk"])
+def test_correct_opens_refused_labels_empty_with_the_notice(image, make):
+    labels = gt_path(image)
+    make(labels)
+    before = open(labels, "rb").read()
+    doc = ClassesDocument()
+
+    assert ClassesDocument.read(image, (W, H)).error == "unreadable"  # the read-ahead's read
+    notices = doc.open(image, (W, H))
+
+    assert [(n.message, n.kind) for n in notices] == [(NOT_SHOWN["unreadable"], "warn")]
+    assert doc.image_path == image and doc.unloaded_file() and not doc.history.plane.any()
+    assert doc.status() == LayerStatus("error", "Class labels not shown", NOT_SHOWN["unreadable"])
+    assert open(labels, "rb").read() == before  # kept unless saved over

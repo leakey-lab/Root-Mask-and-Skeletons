@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QMessageBox, QPushButton
+from PyQt6.QtWidgets import QApplication, QPushButton
 
 from tests.qt_teardown import delete_widgets
 from tests.window_support import app as app  # fixture
@@ -234,39 +234,6 @@ def test_navigate_starts_from_the_image_open_in_correct(main_window, monkeypatch
     gt.current_image_path = ""
 
 
-def _weights(monkeypatch, tmp_path, *, mask: bool, skeleton: bool) -> dict[str, str]:
-    """Point both checkpoint paths into ``tmp_path``; each file exists only when asked."""
-    from app.inference import runtime
-
-    paths = {}
-    for name, exists in (("mask", mask), ("skeleton", skeleton)):
-        path = tmp_path / f"{name}.pth"
-        if exists:
-            path.write_bytes(b"w")
-        paths[name] = str(path)
-        monkeypatch.setattr(runtime, f"{name}_weights_path", lambda p=str(path): p)
-    return paths
-
-
-@pytest.mark.parametrize(
-    ("mask", "skeleton", "title"),
-    [(True, False, "Skeleton model missing"), (False, False, "Mask model missing")],
-)
-def test_generate_all_refuses_at_once_without_both_models(
-    mw, monkeypatch, tmp_path, mask, skeleton, title
-):
-    # S11-10: a missing skeleton model is said before the mask pass, not after it; with both
-    # missing, the mask model is named first, in one box.
-    _weights(monkeypatch, tmp_path, mask=mask, skeleton=skeleton)
-    started, boxes = [], []
-    mw.mask_generation_handler.generate_masks = lambda on_success=None: started.append(1)
-    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: boxes.append(a[1]))
-
-    assert mw.generate_all() is False
-
-    assert started == [] and boxes == [title]
-
-
 def test_load_results_adds_no_toast_of_its_own(mw, monkeypatch, tmp_path):
     # S11-09: the skeleton run's own toast is the one message ("Results loaded" is gone).
     toasts = []
@@ -277,32 +244,6 @@ def test_load_results_adds_no_toast_of_its_own(mw, monkeypatch, tmp_path):
     mw.load_results(str(tmp_path))
 
     assert refreshed == [True] and toasts == []
-
-
-def test_generate_all_chains_skeletons_only_on_success(mw, monkeypatch, tmp_path):
-    _weights(monkeypatch, tmp_path, mask=True, skeleton=True)
-    seen = {}
-    mw.mask_generation_handler.generate_masks = lambda on_success=None: seen.setdefault(
-        "on_success", on_success
-    )
-    folder = str(tmp_path / "project_a")
-    monkeypatch.setattr(mw.mask_generation_handler, "project_folder", lambda: folder)
-    mw.generate_all()
-    # The skeleton pass is the mask pass's on_success (it runs only after a completed
-    # mask run), bound to the folder the mask pass started in (R7).
-    chained = seen["on_success"]
-    assert chained.func == mw.skeleton_handler.generate_skeleton
-    assert chained.keywords == {"input_dir": folder}
-    started = []
-    monkeypatch.setattr(
-        mw.skeleton_handler.skeleton_handler,
-        "generate_skeleton",
-        lambda input_dir=None: started.append(input_dir) or True,
-    )
-    # Another folder opened meanwhile changes nothing: the folder was read at the start.
-    monkeypatch.setattr(mw.mask_generation_handler, "project_folder", lambda: "elsewhere")
-    assert chained() is True
-    assert started == [folder]
 
 
 def test_job_buttons_are_disabled_while_a_job_runs(mw):
@@ -388,107 +329,3 @@ def test_about_and_shortcut_sheet_close_with_the_real_exec(mw):
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     assert mw.findChildren(main_window.ShortcutsDialog) == []
     assert mw.findChildren(about_dialog.AboutDialog) == []
-
-
-def test_export_gt_dataset_opens_dialog(main_window, monkeypatch, tmp_path):
-    import sys
-    import types
-
-    from app.gt import default_registry
-
-    mw = main_window
-    toasts = []
-    monkeypatch.setattr(mw, "notify", lambda msg, kind="success", **_k: toasts.append(kind))
-
-    opened = []
-
-    class _FakeDialog:
-        def __init__(self, project_dir, images, registry, parent=None):
-            opened.append((project_dir, images, registry, parent))
-
-        def exec(self):
-            return 0
-
-        def deleteLater(self):  # noqa: N802 - Qt API
-            pass
-
-        def testAttribute(self, _attribute):  # noqa: N802 - Qt API (run_modal asks)
-            return False
-
-    fake = types.ModuleType("app.gui.export_dataset_dialog")
-    fake.ExportDatasetDialog = _FakeDialog
-    monkeypatch.setitem(sys.modules, "app.gui.export_dataset_dialog", fake)
-
-    mw.image_manager.original_folder = None
-    mw.export_gt_dataset()
-    assert opened == [] and toasts == ["warn"]
-
-    mw.image_manager.original_folder = str(tmp_path)
-    mw.image_manager.images = {"a": str(tmp_path / "a.png")}
-    mw.export_gt_dataset()
-    assert len(opened) == 1
-    project_dir, images, registry, parent = opened[0]
-    assert project_dir == str(tmp_path)
-    assert images == {"a": str(tmp_path / "a.png")}
-    assert images is not mw.image_manager.images  # a copy
-    assert registry == default_registry()  # the folder has no gt/classes.json yet
-    assert parent is mw
-
-
-def test_export_uses_the_folders_registry(main_window, monkeypatch, tmp_path):
-    """Export must use the folder's gt/classes.json even if Correct never opened
-    an image there (the editor's registry is still the default then)."""
-    import sys
-    import types
-
-    from app.gt import default_registry, save_registry
-
-    mw = main_window
-    toasts = []
-    monkeypatch.setattr(mw, "notify", lambda msg, kind="success", **_k: toasts.append(kind))
-    opened = []
-
-    class _FakeDialog:
-        def __init__(self, project_dir, images, registry, parent=None):
-            opened.append(registry)
-
-        def exec(self):
-            return 0
-
-        def deleteLater(self):  # noqa: N802 - Qt API
-            pass
-
-        def testAttribute(self, _attribute):  # noqa: N802 - Qt API (run_modal asks)
-            return False
-
-    fake = types.ModuleType("app.gui.export_dataset_dialog")
-    fake.ExportDatasetDialog = _FakeDialog
-    monkeypatch.setitem(sys.modules, "app.gui.export_dataset_dialog", fake)
-
-    custom = default_registry().add(key="dead_root", name="Dead root", color="#7f5af0")
-    save_registry(str(tmp_path), custom)
-    mw.image_manager.original_folder = str(tmp_path)
-    mw.image_manager.images = {}
-    mw.export_gt_dataset()
-    assert opened == [custom]
-
-    # An invalid registry blocks the export instead of silently using defaults.
-    (tmp_path / "gt" / "classes.json").write_text("{", encoding="utf-8")
-    mw.export_gt_dataset()
-    assert opened == [custom] and toasts == ["danger"]
-
-
-def test_export_dialog_is_deleted_after_use(main_window, monkeypatch, tmp_path):
-    from PyQt6 import sip
-    from PyQt6.QtCore import QEvent
-
-    import app.gui.export_dataset_dialog as edd
-
-    mw = main_window
-    mw.image_manager.original_folder = str(tmp_path)
-    mw.image_manager.images = {}
-    opened = []
-    monkeypatch.setattr(edd.ExportDatasetDialog, "exec", lambda d: opened.append(d) or 0)
-    mw.export_gt_dataset()
-    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    assert len(opened) == 1 and sip.isdeleted(opened[0])

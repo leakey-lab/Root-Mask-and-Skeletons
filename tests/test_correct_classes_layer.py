@@ -8,7 +8,8 @@ class's outlines only, each class keeps its own brush size, picking a class is n
 A recording ``FakeHost`` stands in for the page; a real ``CorrectSession`` with
 ``FakePrompts`` answers "would the page ask?".
 
-Ported here (the old files were deleted in WG-T11): the class semantics of
+The unsaved state, remaps, Clear and marked empty are
+``test_correct_classes_layer_unsaved.py``. Ported here (the old files were deleted in WG-T11): the class semantics of
 ``tests/test_gt_tracing_interface.py`` and every case of ``tests/test_gt_unsaved_state.py``
 (unsaved = the ids differ from the saved ones; a remap on open stays unsaved
 until it is saved or discarded). Keys, PgDn, the class panel and the prompts' wording are
@@ -18,23 +19,15 @@ the page's (WG-T5).
 from __future__ import annotations
 
 import os
-import statistics
-import time
-from types import SimpleNamespace
 
-import cv2
 import numpy as np
 import pytest
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QGraphicsScene
 
-from app.editing import planes
 from app.gt import (
-    Registry,
     Tracing,
     default_registry,
-    gt_path,
     read_tracing,
     registry_path,
     save_registry,
@@ -52,145 +45,36 @@ from app.gui.correct.layer import (
     missing_members,
 )
 from app.gui.correct.mask_tools import MaskToolHost
-from app.gui.correct.session import CorrectSession, SaveReport
 from app.gui.key_text import platform_keys
 from app.gui.paint_canvas import pixmap_to_argb_array
 from app.gui.widgets import tokens
-from tests.correct_fakes import FakeHost, FakeLayer, FakePrompts
-from tests.gt_goldens_support import make_gt_project, write_legacy_tracing
+from tests.correct_classes_layer_support import (
+    NO_MODIFIER,
+    H,
+    W,
+    click,
+    file_bytes,
+    ids,
+    locked_text,
+    notices_of,
+    open_layer,
+    shows_the_plane,
+    stroke,
+    write_with_unknown_key,
+)
+from tests.correct_classes_layer_support import gt_project as gt_project  # fixture
+from tests.correct_classes_layer_support import (
+    gt_project_bad_registry as gt_project_bad_registry,  # fixture
+)
+from tests.correct_classes_layer_support import project as project  # fixture
+from tests.correct_classes_layer_support import scene as scene  # fixture
+from tests.correct_fakes import FakeHost, FakeLayer
 
-H, W = 60, 80  # the ported tests' photo
-NO_MODIFIER = Qt.KeyboardModifier.NoModifier
 FILL_MISS = "Fill works inside a closed outline. Close the loop first."
-STRICT = os.environ.get("SPROUTS_PERF_TESTS") == "1"
-strict = pytest.mark.skipif(not STRICT, reason="wall-clock budget: set SPROUTS_PERF_TESTS=1")
-
 
 pytestmark = pytest.mark.usefixtures("no_prompts")
 
 
-@pytest.fixture
-def scene(qapp):
-    return QGraphicsScene()
-
-
-@pytest.fixture
-def project(tmp_path):
-    """``plot_001.png`` (80 x 60) and a full-white ``mask/plot_001.png``: the class labels
-    never read (or write) ``mask/``, so every test starts from empty labels."""
-    folder = tmp_path / "project"
-    (folder / "mask").mkdir(parents=True)
-    image = str(folder / "plot_001.png")
-    cv2.imwrite(image, np.full((H, W, 3), 90, np.uint8))
-    mask = str(folder / "mask" / "plot_001.png")
-    cv2.imwrite(mask, np.full((H, W), 255, np.uint8))
-    return SimpleNamespace(folder=str(folder), image=image, mask=mask, labels=gt_path(image))
-
-
-def _gt_project(tmp_path, case: str) -> SimpleNamespace:
-    image, folder = make_gt_project(str(tmp_path), case)
-    return SimpleNamespace(folder=folder, image=image, labels=gt_path(image))
-
-
-@pytest.fixture
-def gt_project(tmp_path):
-    """The goldens' 640 x 480 photo, nothing under ``gt/``."""
-    return _gt_project(tmp_path, "two_classes_crossing")
-
-
-@pytest.fixture
-def gt_project_bad_registry(tmp_path):
-    """The goldens' photo with an invalid ``gt/classes.json``."""
-    project = _gt_project(tmp_path, "empty_save")
-    os.makedirs(os.path.join(project.folder, "gt"))
-    with open(registry_path(project.folder), "w", encoding="utf-8") as fh:
-        fh.write("{")
-    return project
-
-
-# ------------------------------------------------------------------------------ helpers
-def open_layer(scene, image: str, size=(W, H)):
-    """A ClassesLayer opened on ``image``; ``(layer, host, the open's notices)``."""
-    host = FakeHost()
-    layer = ClassesLayer(host, scene)
-    notices = layer.open(image, size, os.path.dirname(image))
-    return layer, host, notices
-
-
-def open_session(scene, image: str, prompts: FakePrompts | None = None, size=(W, H)):
-    """A real CorrectSession over one ClassesLayer, opened on ``image``."""
-    host = FakeHost()
-    layer = ClassesLayer(host, scene)
-    out = SimpleNamespace(layer=layer, host=host, prompts=prompts or FakePrompts())
-    out.dirty, out.notices = [], []
-    out.session = CorrectSession(
-        [layer],
-        prompts=out.prompts,
-        parent=lambda: None,
-        on_dirty_changed=out.dirty.append,
-        on_notice=lambda message, kind: out.notices.append((message, kind)),
-        on_history_changed=lambda: None,
-        on_undone=lambda *_args: None,
-        on_saved=lambda _outcome: None,
-    )
-    host.session = out.session
-    out.session.open(image, size, os.path.dirname(image))
-    return out
-
-
-def stroke(layer, *points, size=None) -> None:
-    """Press at the first point, a dragging move per further point, release at the last."""
-    if size is not None:
-        layer.set_size(size)
-    layer.press(QPoint(*points[0]), NO_MODIFIER)
-    for point in points[1:]:
-        layer.move(QPoint(*point), True)
-    layer.release(QPoint(*points[-1]))
-
-
-def click(layer, point) -> None:
-    layer.press(QPoint(*point), NO_MODIFIER)
-    layer.release(QPoint(*point))
-
-
-def ids(layer) -> np.ndarray:
-    return layer.document.history.plane
-
-
-def shows_the_plane(layer) -> bool:
-    """The canvas is exactly the plane in the registry's colours."""
-    argb = pixmap_to_argb_array(layer.canvas.image)
-    return np.array_equal(argb, layer.document.lut()[ids(layer)])
-
-
-def notices_of(host: FakeHost) -> list[tuple[str, str]]:
-    return [(call[1], call[2]) for call in host.calls if call[0] == "notify"]
-
-
-def locked_text(layer) -> str:
-    return (
-        "Editing is off: gt/classes.json is invalid ("
-        + layer.document.registry_error
-        + "). Fix the file, then reopen the image."
-    )
-
-
-def file_bytes(path: str) -> bytes:
-    with open(path, "rb") as fh:
-        return fh.read()
-
-
-def write_with_unknown_key(image: str) -> bytes:
-    """A labels file from another project: id 4 = 'hypha', unknown here (becomes Ignore)."""
-    other = default_registry().add(key="hypha", name="Hypha", color="#3fa7ff")
-    plane = np.zeros((H, W), np.uint8)
-    plane[5:15, 5:15] = 4
-    plane[30:40, 30:40] = 1
-    write_tracing(gt_path(image), Tracing(plane), other)
-    return file_bytes(gt_path(image))
-
-
-# ============================================================================== contract
 def test_the_classes_layer_misses_no_member_and_answers_the_optional_protocols(scene):
     layer = ClassesLayer(FakeHost(), scene)
 
@@ -235,7 +119,6 @@ def test_opens_empty_and_never_reads_the_mask(scene, project):
     assert file_bytes(project.mask) == before
 
 
-# ============================================================================== painting
 def test_painting_class_b_over_a_leaves_b_and_the_eraser_leaves_background(scene, gt_project):
     layer, _, _ = open_layer(scene, gt_project.image, (640, 480))
     layer.set_active_class("root")
@@ -397,7 +280,6 @@ def test_retired_class_pixels_survive_open_and_save(scene, project):
     assert set(np.unique(tracing.ids).tolist()) == {0, 1, 4}
 
 
-# ============================================================================== the tick
 def test_picking_a_class_tells_the_panel_and_is_no_edit(scene, project):
     """The class panel ticks the active class (owner decision 2026-11-01): the layer tells
     it of every pick, Ignore included, and a pick changes nothing to save."""
@@ -451,36 +333,6 @@ def test_a_class_picked_mid_stroke_ends_the_stroke_in_its_own_class(scene, proje
     assert set(np.unique(plane).tolist()) == {0, root}
     assert plane[30, 20] == root and plane[30, 65] == 0  # nothing after the pick
     assert len(layer.document.history.undo_stack) == 1
-
-
-def test_an_older_file_with_a_reviewed_list_opens_clean(scene, project):
-    write_legacy_tracing(
-        project.labels, Tracing(np.ones((H, W), np.uint8)), default_registry(), {"nodule"}
-    )
-    save_registry(project.folder, default_registry())
-
-    layer, _, notices = open_layer(scene, project.image)
-
-    assert notices == [] and not layer.is_dirty() and ids(layer).all()
-    assert layer.status() == LayerStatus("clean", "GT", "gt/plot_001.png")
-
-
-# ============================================================================== registry
-def test_press_and_clear_are_refused_while_read_only_with_one_notice(
-    scene, gt_project_bad_registry
-):
-    host = FakeHost()
-    layer = ClassesLayer(host, scene)
-    notices = layer.open(gt_project_bad_registry.image, (640, 480), gt_project_bad_registry.folder)
-    assert notices == [] and layer.is_read_only()  # the first refusal says it (WG-T5 r1)
-
-    layer.press(QPoint(10, 10), NO_MODIFIER)
-    layer.release(QPoint(10, 10))
-    assert layer.clear() is False
-
-    assert notices_of(host).count((locked_text(layer), "danger")) == 1
-    assert notices_of(host) == [(locked_text(layer), "danger")]
-    assert not ids(layer).any() and not layer.can_undo() and not layer.is_dirty()
 
 
 def test_replace_plane_is_refused_while_read_only(scene, gt_project_bad_registry):
@@ -595,7 +447,6 @@ def test_apply_registry_recolours_without_changing_ids(scene, project):
     assert shows_the_plane(layer)
 
 
-# ============================================================================== files
 def test_a_label_file_of_another_size_is_not_shown_and_is_kept(scene, project):
     write_tracing(project.labels, Tracing(np.ones((10, 10), np.uint8)), default_registry())
     before = file_bytes(project.labels)
@@ -661,369 +512,3 @@ def test_the_read_ahead_reads_what_open_reads_and_the_clean_document_is_handed_b
     assert layer.save().ok
     back = layer.read_back(layer.file_stamps())
     assert isinstance(back, ClassesRead) and back.tracing.ids is ids(layer)
-
-
-# ============================================================================== remaps
-def test_a_lossy_remap_asks_before_it_is_saved_and_discard_keeps_the_file(scene, project):
-    before = write_with_unknown_key(project.image)
-
-    opened = open_session(scene, project.image, FakePrompts(unsaved=["discard"]))
-
-    layer = opened.layer
-    assert any(kind == "warn" and "hypha" in message for message, kind in opened.notices)
-    assert layer.is_dirty() and layer.save_needs_prompt()
-    assert layer.status().label == "Unsaved · remapped"
-    assert opened.session.release() is True  # the normal prompt; Discard
-    assert opened.prompts.asked == [("unsaved", None, "class labels", "plot_001.png")]
-    assert file_bytes(project.labels) == before and not layer.is_dirty()
-
-
-def test_saving_a_lossy_remap_writes_ignore_and_ends_the_prompt(scene, project):
-    write_with_unknown_key(project.image)
-    layer, _, _ = open_layer(scene, project.image)
-
-    assert layer.save().ok
-
-    assert (read_tracing(project.labels).ids[5:15, 5:15] == 255).all()
-    assert not layer.save_needs_prompt() and layer.status().label != "Unsaved · remapped"
-
-
-def test_a_lossless_remap_is_saved_without_a_prompt(scene, project):
-    """Ids that differ only by number (same keys) are remapped and saved silently."""
-    swapped = default_registry().to_dict()
-    swapped["classes"][0]["id"], swapped["classes"][1]["id"] = 2, 1  # root=2, nodule=1
-    plane = np.zeros((H, W), np.uint8)
-    plane[5:15, 5:15] = 2  # root in the other project's ids
-    write_tracing(project.labels, Tracing(plane), Registry.from_dict(swapped))
-
-    opened = open_session(scene, project.image)
-
-    assert not [n for n in opened.notices if n[1] == "warn"]
-    assert opened.layer.is_dirty() and not opened.layer.save_needs_prompt()
-    assert opened.layer.status() == LayerStatus("dirty")
-    assert opened.session.save_dirty().ok and opened.prompts.asked == []
-    assert (read_tracing(project.labels).ids[5:15, 5:15] == 1).all()
-
-
-# ============================================================================== unsaved state
-def test_undoing_every_stroke_leaves_nothing_to_save(scene, project):
-    opened = open_session(scene, project.image)
-    layer = opened.layer
-    layer.set_active_class("root")
-    stroke(layer, (10, 30), (70, 30), size=6)
-    layer.set_active_class("nodule")
-    stroke(layer, (40, 5), (40, 55), size=6)
-
-    layer.undo()
-    assert layer.is_dirty()  # the root stroke is still there
-    layer.undo()
-
-    assert not layer.is_dirty() and opened.dirty == [True, False]
-    assert layer.status() == LayerStatus("none", "No class labels")  # as opened
-    assert opened.session.release() is True and opened.prompts.asked == []
-    layer.redo()
-    assert layer.is_dirty() and opened.dirty == [True, False, True]
-
-
-def test_undo_back_to_the_saved_labels_is_saved_again(scene, project):
-    opened = open_session(scene, project.image)
-    layer = opened.layer
-    layer.set_active_class("root")
-    stroke(layer, (10, 30), (70, 30), size=6)
-    assert layer.save().ok
-    layer.set_active_class("nodule")
-    stroke(layer, (40, 5), (40, 55), size=6)
-    opened.dirty.clear()
-
-    layer.undo()
-    assert not layer.is_dirty()
-    assert layer.status() == LayerStatus("clean", "GT", "gt/plot_001.png")
-    layer.redo()
-    assert layer.is_dirty() and layer.status() == LayerStatus("dirty")
-    layer.undo()
-    assert not layer.is_dirty() and opened.dirty == [False, True, False]
-
-
-def test_leaving_after_undoing_everything_asks_nothing_and_writes_nothing(scene, project):
-    opened = open_session(scene, project.image)
-    stroke(opened.layer, (10, 30), (70, 30))
-    opened.layer.undo()
-
-    assert opened.session.release() is True  # leaving: no prompt
-
-    assert opened.prompts.asked == [] and not os.path.exists(project.labels)
-
-
-def test_pgdn_after_undoing_everything_writes_nothing(scene, project):
-    opened = open_session(scene, project.image)
-    stroke(opened.layer, (10, 30), (70, 30))
-    opened.layer.undo()
-
-    assert opened.session.save_dirty() == SaveReport()  # PgDn's save: nothing is dirty
-
-    assert not os.path.exists(project.labels)  # unchanged labels are not written
-
-
-def test_a_stroke_that_changed_nothing_is_no_change(scene, project):
-    layer, _, _ = open_layer(scene, project.image)
-    layer.set_tool("eraser")  # erasing empty labels changes no pixel
-    layer.set_size(6)
-    layer.press(QPoint(10, 30), NO_MODIFIER)
-    layer.move(QPoint(70, 30), True)
-    assert layer.gesture_active()  # the stroke is not committed yet
-
-    layer.release(QPoint(70, 30))
-
-    assert not layer.is_dirty() and layer.status() == LayerStatus("none", "No class labels")
-
-
-def test_a_click_outside_the_image_changes_nothing(scene, project):
-    layer, _, _ = open_layer(scene, project.image)
-    stroke(layer, (W + 40, H + 40))  # a dab entirely off the canvas
-    assert not layer.is_dirty() and not layer.can_undo()
-
-
-def test_clearing_back_to_the_opened_labels_is_no_change(scene, project):
-    """Pixels decide, not the history: two actions later the labels are as opened."""
-    layer, _, _ = open_layer(scene, project.image)
-    stroke(layer, (10, 30), (70, 30))
-    layer.clear()
-
-    assert not layer.is_dirty() and len(layer.document.history.undo_stack) == 2
-    layer.undo()  # the stroke is back
-    assert layer.is_dirty()
-
-
-def test_erasing_a_stroke_by_hand_is_saved_again(scene, project):
-    layer, _, _ = open_layer(scene, project.image)
-    assert layer.save().ok  # empty labels on disk
-    layer.set_active_class("root")
-    stroke(layer, (10, 30), (70, 30), size=6)
-    assert layer.is_dirty()
-
-    layer.set_tool("eraser")
-    stroke(layer, (5, 30), (75, 30), size=20)
-
-    assert not ids(layer).any() and not layer.is_dirty()
-    assert layer.status() == LayerStatus("clean", "GT", "gt/plot_001.png")
-
-
-NOTHING_TO_CLEAR = "No class labels to clear"
-NOTHING_TO_CLEAR_UNSAVED = "No class labels to clear · Mark empty saves an empty file"
-
-
-def test_clearing_empty_labels_changes_nothing(scene, project):
-    """Clear on an all-background plane: no patch, no undo step, and a notice that promises
-    no file (Save writes nothing then: O2)."""
-    opened = open_session(scene, project.image)
-    assert opened.layer.clear() is True
-    assert not opened.layer.is_dirty() and opened.dirty == []
-    assert not opened.layer.can_undo() and not opened.session.can_undo()
-    assert notices_of(opened.host) == [(NOTHING_TO_CLEAR_UNSAVED, "info")]
-
-
-def test_clearing_saved_empty_labels_says_there_is_nothing_to_clear(scene, project):
-    write_tracing(project.labels, Tracing(np.zeros((H, W), np.uint8)), default_registry())
-    opened = open_session(scene, project.image)
-
-    assert opened.layer.clear() is True
-
-    assert not opened.layer.is_dirty() and not opened.layer.can_undo()
-    assert notices_of(opened.host) == [(NOTHING_TO_CLEAR, "info")]
-
-
-def test_clearing_labels_erased_by_hand_adds_no_step(scene, project):
-    """Painted, then erased back to background: the plane is empty, Clear adds nothing."""
-    layer, host, _ = open_layer(scene, project.image)
-    stroke(layer, (10, 30), (70, 30), size=6)
-    layer.set_tool("eraser")
-    stroke(layer, (5, 30), (75, 30), size=20)
-    steps = len(layer.document.history.undo_stack)
-
-    assert layer.clear() is True
-
-    assert len(layer.document.history.undo_stack) == steps
-    assert notices_of(host)[-1] == (NOTHING_TO_CLEAR_UNSAVED, "info")
-
-
-def test_clearing_labelled_pixels_clears_with_the_cleared_notice(scene, project):
-    layer, host, _ = open_layer(scene, project.image)
-    stroke(layer, (10, 30), (70, 30), size=6)
-
-    assert layer.clear() is True
-
-    assert not ids(layer).any() and len(layer.document.history.undo_stack) == 2
-    assert notices_of(host)[-1] == (layer.CLEARED_NOTICE, "info")
-
-
-# ============================================================================== marked empty
-def test_saved_empty_labels_are_marked_empty(scene, project):
-    layer, _, _ = open_layer(scene, project.image)
-    assert not layer.document.marked_empty()  # no file
-    assert layer.save().ok  # an empty file (Mark empty's save)
-
-    assert layer.document.marked_empty()
-    layer.open(project.image, (W, H), project.folder)
-    assert layer.document.marked_empty()
-
-
-def test_labels_with_a_labelled_pixel_are_not_marked_empty(scene, project):
-    plane = np.zeros((H, W), np.uint8)
-    plane[5, 5] = 1
-    write_tracing(project.labels, Tracing(plane), default_registry())
-
-    layer, _, _ = open_layer(scene, project.image)
-
-    assert not layer.document.marked_empty()
-
-
-def test_unsaved_paint_over_empty_labels_is_not_marked_empty(scene, project):
-    write_tracing(project.labels, Tracing(np.zeros((H, W), np.uint8)), default_registry())
-    layer, _, _ = open_layer(scene, project.image)
-    stroke(layer, (10, 30), (70, 30), size=6)
-
-    assert not layer.document.marked_empty()
-    layer.undo()
-    assert layer.document.marked_empty()
-
-
-def test_empty_labels_under_an_invalid_registry_are_not_marked_empty(scene, project):
-    write_tracing(project.labels, Tracing(np.zeros((H, W), np.uint8)), default_registry())
-    with open(registry_path(project.folder), "w", encoding="utf-8") as fh:
-        fh.write("{")
-
-    layer, _, _ = open_layer(scene, project.image)
-
-    assert not layer.document.marked_empty()
-
-
-@pytest.mark.parametrize("kind", ["unreadable", "size"])
-def test_a_labels_file_not_shown_is_not_marked_empty(scene, project, kind):
-    os.makedirs(os.path.dirname(project.labels), exist_ok=True)
-    if kind == "unreadable":
-        with open(project.labels, "wb") as fh:
-            fh.write(b"not a png")
-    else:
-        write_tracing(project.labels, Tracing(np.zeros((10, 10), np.uint8)), default_registry())
-
-    layer, _, _ = open_layer(scene, project.image)
-
-    assert not layer.document.marked_empty()
-
-
-def test_the_document_tells_a_labels_file_changed_since_it_was_read(scene, project):
-    write_tracing(project.labels, Tracing(np.zeros((H, W), np.uint8)), default_registry())
-    layer, _, _ = open_layer(scene, project.image)
-    assert not layer.document.labels_changed_on_disk()
-
-    plane = np.zeros((H, W), np.uint8)
-    plane[0:20, 0:20] = 1  # another size on disk: the stamp changes
-    write_tracing(project.labels, Tracing(plane), default_registry())
-
-    assert layer.document.labels_changed_on_disk()
-    layer.open(project.image, (W, H), project.folder)
-    assert not layer.document.labels_changed_on_disk()
-    os.remove(project.labels)
-    assert layer.document.labels_changed_on_disk()
-
-
-def test_picking_classes_changes_nothing(scene, project):
-    opened = open_session(scene, project.image)
-
-    for key in ("nodule", "ignore", "nodule"):
-        opened.layer.set_active_class(key)
-
-    assert not opened.layer.is_dirty() and opened.dirty == []
-
-
-def test_a_class_picked_before_an_undone_stroke_leaves_nothing_to_save(scene, project):
-    layer, _, _ = open_layer(scene, project.image)
-    layer.set_active_class("root_tip")
-    stroke(layer, (10, 30), (70, 30))
-    layer.undo()
-
-    assert not layer.is_dirty()  # a pick is no edit (it was a tick until 2026-11-01)
-
-
-def test_a_remapped_file_stays_unsaved_after_undoing_every_stroke(scene, project):
-    write_with_unknown_key(project.image)
-    opened = open_session(scene, project.image, FakePrompts(unsaved=["discard"]))
-    layer = opened.layer
-    assert layer.is_dirty() and layer.status().label == "Unsaved · remapped"
-
-    stroke(layer, (10, 40), (70, 40))
-    layer.undo()
-
-    assert layer.is_dirty() and layer.status().label == "Unsaved · remapped"
-    assert opened.session.release() is True  # Discard: the file stays as it is
-    assert not layer.is_dirty()
-    stroke(layer, (10, 40), (70, 40))
-    layer.undo()
-    assert not layer.is_dirty()  # back at the labels as Discard left them
-
-
-# ============================================================================== cost
-def test_a_class_count_change_needs_no_pixel_compare(scene, project, monkeypatch):
-    """The document keeps pixel counts per class: while they differ from the saved ones the
-    labels are unsaved without a full pass; the pixels are compared only when they match."""
-    calls = []
-    real = planes.planes_equal
-    monkeypatch.setattr(planes, "planes_equal", lambda a, b: calls.append(1) or real(a, b))
-    layer, _, _ = open_layer(scene, project.image)
-    stroke(layer, (10, 30), (70, 30))
-    stroke(layer, (10, 40), (70, 40))
-    layer.undo()
-    assert layer.is_dirty() and calls == []
-
-    layer.undo()  # every class count is back: one pass decides
-
-    assert not layer.is_dirty() and calls == [1]
-
-
-def test_the_same_class_counts_elsewhere_are_still_a_change(scene, project):
-    layer, _, _ = open_layer(scene, project.image)
-    layer.set_active_class("root")
-    stroke(layer, (15, 15))  # one dab
-    assert layer.save().ok
-    saved = layer.document.counts()
-    layer.set_tool("eraser")
-    stroke(layer, (15, 15), size=30)  # erased
-    layer.set_tool("brush")
-    layer.set_size(8)
-
-    stroke(layer, (50, 40))  # the same dab elsewhere: the same pixel counts
-
-    assert layer.document.counts() == saved and saved["root"] > 0
-    assert layer.is_dirty()
-
-
-def _big_layer(scene, project):
-    layer, _, _ = open_layer(scene, project.image, (2048, 1536))
-    layer.set_active_class("root")
-    stroke(layer, (100, 100), (1900, 1400), size=40)
-    layer.undo()  # equal planes: the comparison runs to the last pixel
-    return layer
-
-
-def _median_check_ms(layer, count=30) -> float:
-    times = []
-    for _ in range(count):
-        layer.document.touch()  # a new revision: the next check compares again
-        t0 = time.perf_counter()
-        layer.is_dirty()
-        times.append((time.perf_counter() - t0) * 1000)
-    return statistics.median(times)
-
-
-@pytest.mark.wallclock
-def test_the_check_is_cheap_on_a_2048_plane(scene, project):
-    """About 0.05 ms (cv2.norm over 3.1 MB); 2 ms leaves 40x headroom on a busy machine."""
-    layer = _big_layer(scene, project)
-    assert not layer.is_dirty()
-    assert _median_check_ms(layer) < 2.0
-
-
-@pytest.mark.wallclock
-@strict
-def test_the_check_is_within_0_25_ms_on_a_2048_plane(scene, project):
-    assert _median_check_ms(_big_layer(scene, project), 200) <= 0.25

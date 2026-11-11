@@ -344,15 +344,6 @@ def tab_walk(start, steps: int) -> list:
     return seen
 
 
-def test_the_top_bar_correct_page_holds_it_before_remove_gt(window_with_project):
-    window, editor = window_with_project.window, window_with_project.editor
-    page = window.action_bar_stack.widget(window._action_bar_pages["Correct"])
-
-    assert window.gt_empty_button is editor.actions.empty_button
-    assert window.gt_empty_button.parentWidget() is page
-    assert window.gt_empty_button.isVisible() and window.gt_empty_button.isEnabled()
-
-
 def test_tab_follows_the_correct_page_row(window_with_project):
     window = window_with_project.window
 

@@ -9,6 +9,7 @@ Covers the default registry, the ``to_dict``/``from_dict`` round trip, every
 
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
@@ -265,13 +266,6 @@ def test_save_registry_then_load_registry_round_trips(tmp_path):
     assert loaded == reg
 
 
-def test_save_registry_leaves_no_tmp_file(tmp_path):
-    project_dir = str(tmp_path)
-    save_registry(project_dir, default_registry())
-    # No temp file, whatever its name.
-    assert [p.name for p in (tmp_path / "gt").iterdir()] == ["classes.json"]
-
-
 def test_load_registry_invalid_json_raises_registry_error(tmp_path):
     gt_dir = tmp_path / "gt"
     gt_dir.mkdir()
@@ -412,18 +406,6 @@ def test_load_registry_keeps_an_explicit_retired_true(tmp_path):
     assert "root" not in [c.key for c in reg.active()]
 
 
-def test_save_registry_failure_leaves_no_tmp_file(tmp_path, monkeypatch):
-    import os
-
-    def _boom(src, dst):
-        raise OSError("disk full")
-
-    monkeypatch.setattr(os, "replace", _boom)
-    with pytest.raises(OSError, match="disk full"):
-        save_registry(str(tmp_path), default_registry())
-    assert os.listdir(tmp_path / "gt") == []
-
-
 def test_restore_makes_a_retired_class_active_again_in_place():
     retired = default_registry().retire("nodule")
     assert "nodule" not in [c.key for c in retired.active()]
@@ -435,3 +417,66 @@ def test_restore_raises_for_an_unknown_or_an_active_class():
         default_registry().restore("root")
     with pytest.raises(RegistryError, match="No class"):
         default_registry().restore("nothing")
+
+
+def test_restore_keeps_a_class_added_later_in_its_place():
+    reg = default_registry().add(key="dead_root", name="Dead root", color="#111111")
+    retired = reg.retire("nodule").retire("dead_root")
+    assert retired.restore("dead_root").restore("nodule") == reg
+
+
+# --- a hand-edited classes.json, and the limits --------------------------------------------
+def test_a_hand_edited_registry_with_ignore_first_loads_with_ignore_last(tmp_path):
+    data = default_registry().to_dict()
+    data["classes"] = data["classes"][-1:] + data["classes"][:-1]
+    (tmp_path / "gt").mkdir()
+    (tmp_path / "gt" / "classes.json").write_text(json.dumps(data), encoding="utf-8")
+
+    reg = load_registry(str(tmp_path))
+
+    assert reg == default_registry() and reg.classes[-1].key == "ignore"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param({"version": 1}, id="no-classes"),
+        pytest.param({"version": 1, "classes": []}, id="empty"),
+    ],
+)
+def test_a_registry_without_classes_is_invalid(data):
+    with pytest.raises(RegistryError):
+        Registry.from_dict(data)
+
+
+def test_the_name_and_key_limits_are_40_and_32_characters():
+    reg = default_registry()
+    assert reg.add(key="a" * 32, name="n" * 40, color="#010203").by_key("a" * 32).name == "n" * 40
+    with pytest.raises(RegistryError):
+        reg.add(key="b", name="n" * 41, color="#010203")
+    with pytest.raises(RegistryError):
+        reg.add(key="a" * 33, name="Long key", color="#010203")
+
+
+def test_a_class_may_have_id_254_but_not_255():
+    data = _default_dict()
+    data["classes"][0]["id"] = 254
+    assert Registry.from_dict(data).by_key("root").id == 254
+    data["classes"][0]["id"] = 255
+    with pytest.raises(RegistryError):
+        Registry.from_dict(data)
+
+
+def test_254_is_the_last_free_id_and_with_ids_1_to_254_taken_no_class_can_be_added():
+    classes = [
+        {"id": i, "key": f"c{i}", "name": f"Class {i}", "color": f"#{i:06x}", "retired": i % 2 == 0}
+        for i in range(1, 255)
+    ]
+    ignore = {"id": 255, "key": "ignore", "name": "Ignore", "color": "#8a8f98"}
+    assert Registry.from_dict({"version": 1, "classes": [*classes[:-1], ignore]}).next_id() == 254
+    reg = Registry.from_dict({"version": 1, "classes": [*classes, ignore]})
+
+    with pytest.raises(RegistryError, match="No free class id"):
+        reg.next_id()
+    with pytest.raises(RegistryError, match="No free class id"):
+        reg.add(key="one_more", name="One more", color="#fefefe")

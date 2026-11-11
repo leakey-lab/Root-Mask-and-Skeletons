@@ -13,7 +13,7 @@ upgrade may change the bytes with identical pixels, so it does not gate.
 
 ``empty_save`` is the one case the page does not replay: Save writes only the unsaved
 layers (O2), so an untouched image writes no labels file on the page
-(``tests/test_correct_classes_editor.py::test_an_untouched_image_writes_no_class_labels``).
+(``tests/test_correct_classes_saving.py::test_an_untouched_image_writes_no_class_labels``).
 """
 
 from __future__ import annotations

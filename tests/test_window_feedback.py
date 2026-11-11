@@ -20,21 +20,25 @@ Offscreen; every project is a tmp_path folder of four photos (tests.test_correct
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import pytest
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from app.config import ROOT_LENGTHS_CSV
 from app.gui.correct.layer import CLASSES
 from app.gui.panels import Panel
+from app.gui.window.editors import SAVED_TOAST
 from app.handlers.deps import SAVED_PATH_STATUS_MS
 from tests.correct_support import drag, paint
+from tests.correct_support import new_project as correct_project
 from tests.qt_teardown import delete_widgets
 from tests.qt_wait import settle
 from tests.qt_wait import wait_until as _wait
 from tests.qt_wait import wait_until as wait
 from tests.window_project_support import STEMS, enter, new_project, open_project, select
-from tests.window_support import build_window, quiet_window, write_photos
+from tests.window_support import build_window, open_folder, quiet_window, write_photos
 
 pytestmark = pytest.mark.usefixtures("window_guards")
 
@@ -218,6 +222,51 @@ def test_a_class_labels_save_toast_is_worded_alike_and_updates_in_place(window):
 
     assert saved_toasts(window) == [first]
     assert first.message() == f"Saved class labels · {STEMS[1]}.jpg"
+
+
+@pytest.fixture
+def window_with_project(app, tmp_path, no_temp_sweep):
+    """A shown, active MainWindow on a project with image a open in the Correct stage."""
+    project = correct_project(tmp_path)
+    window = build_window(tmp_path / "settings.ini")
+    made = [window]
+    window.activateWindow()
+    assert QTest.qWaitForWindowActive(window, 3000)
+    open_folder(window, project.folder, 2)
+    window.file_list.expandAll()
+    item = window.library_index.item_for("a")
+    window.file_list.setCurrentItem(item)
+    window.on_tree_item_clicked(item, 0)
+    settle()
+    window.ribbon_buttons["Correct"].click()
+    settle()
+    yield SimpleNamespace(window=window, project=project)
+    del window
+    delete_widgets(made, prepare=quiet_window)
+    QApplication.processEvents()
+
+
+def test_unmark_replaces_the_mark_empty_toast_in_place(window_with_project, monkeypatch):
+    """Unmark's toast is the editors' one save toast: it replaces Mark empty's in place (V6)."""
+    window = window_with_project.window
+    toasts: list[tuple[str, object]] = []
+    real = window.notify
+
+    def notify(message, kind="info", *args, key=None, **kwargs):
+        toasts.append((message, key))
+        return real(message, kind, *args, key=key, **kwargs)
+
+    monkeypatch.setattr(window, "notify", notify)
+
+    window.gt_empty_button.click()  # Mark empty
+    settle()
+    window.gt_empty_button.click()  # Unmark
+    settle()
+
+    assert toasts == [
+        ("Saved class labels · a.png", SAVED_TOAST),
+        ("Unmarked · a.png", SAVED_TOAST),
+    ]
 
 
 def test_a_failed_save_stays_beside_a_later_saves_toast(window):

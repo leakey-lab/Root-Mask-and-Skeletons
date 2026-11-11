@@ -4,7 +4,7 @@ prompt answers, input on the canvas and what the layers hold.
 This is their one copy: the test modules that use them import them from here.
 ``test_correct_editor.py`` still re-exports many of them (no other test module imports
 them from it any more). ``wheel`` came from ``test_correct_editor_keys.py``;
-``case_sensitive_folder`` is a copy of ``test_gt_case_variant_lookups.py``'s.
+``case_sensitive_folder`` is its one copy (the class-label tests use it too).
 ``conftest.py`` wraps four of them in fixtures (``correct_guards``, ``make_editor``,
 ``project``, ``answers``). ``install_guards`` is composed from ``tests.guards``; the user's
 config needs no line here, as every test has its own config folder (``conftest.py``).
@@ -405,8 +405,7 @@ def wheel(view, dy: int) -> None:
     QApplication.sendEvent(viewport, event)
 
 
-# A copy of ``test_gt_case_variant_lookups.py``'s helpers (that module is frozen in wave 1;
-# wave 2 imports them from here and drops its own).
+# A folder that tells letter case apart, on any disk (shared with the class-label tests).
 def _case_sensitive(folder: str) -> bool:
     probe = os.path.join(folder, "Probe")
     with open(probe, "wb"):

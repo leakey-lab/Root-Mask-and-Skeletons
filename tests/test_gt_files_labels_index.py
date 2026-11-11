@@ -13,8 +13,6 @@ system may match names unlike ``lower()``.
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 import unicodedata
 
 import pytest
@@ -24,7 +22,8 @@ from app.gt.files import LabelsIndex
 from app.gt.store import gt_path
 from app.naming import stem_key
 from app.project_layout import ProjectLayout
-from tests.test_gt_export import _build_project
+from tests.correct_support import case_sensitive_folder
+from tests.gt_support import build_project as _build_project
 
 
 def _old_labels_file(image_path: str, listed: dict) -> str:
@@ -49,22 +48,6 @@ def _old_find(image_path: str, listed: dict) -> str | None:
 def _touch(path: str) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path, "wb").close()
-
-
-def _make_case_sensitive(path: str) -> bool:
-    os.makedirs(path)
-    if sys.platform == "win32":
-        subprocess.run(
-            ["fsutil", "file", "setCaseSensitiveInfo", path, "enable"],
-            capture_output=True,
-            check=False,
-        )
-    probe = os.path.join(path, "Probe")
-    _touch(probe)
-    try:
-        return not os.path.exists(os.path.join(path, "probe"))
-    finally:
-        os.remove(probe)
 
 
 def _awkward(root: str) -> dict[str, str]:
@@ -124,8 +107,7 @@ def _awkward(root: str) -> dict[str, str]:
 def awkward(request, tmp_path, monkeypatch):
     root = str(tmp_path / "root")
     if request.param == "case_sensitive":
-        if not _make_case_sensitive(root):
-            pytest.skip("needs a case-sensitive folder (fsutil on Windows; the ubuntu CI)")
+        case_sensitive_folder(root)  # else skipped
     else:
         os.makedirs(root)
     paths = _awkward(root)

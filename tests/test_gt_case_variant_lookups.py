@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import os
 import posixpath
-import subprocess
-import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -41,6 +39,7 @@ from tests.correct_support import (
     H,
     W,
     box_plane,
+    case_sensitive_folder,
     draw_line,
     paint,
     raster,
@@ -50,31 +49,6 @@ from tests.correct_support import (
 )
 
 pytestmark = pytest.mark.usefixtures("correct_guards")
-
-
-def _case_sensitive(folder: str) -> bool:
-    probe = os.path.join(folder, "Probe")
-    with open(probe, "wb"):
-        pass
-    try:
-        return not os.path.exists(os.path.join(folder, "probe"))
-    finally:
-        os.remove(probe)
-
-
-def case_sensitive_folder(path: str) -> str:
-    """``path`` created on a case-sensitive file system (folders made in it inherit that
-    on NTFS), else the test is skipped."""
-    os.makedirs(path)
-    if sys.platform == "win32":
-        subprocess.run(
-            ["fsutil", "file", "setCaseSensitiveInfo", path, "enable"],
-            capture_output=True,
-            check=False,
-        )
-    if not _case_sensitive(path):
-        pytest.skip("needs a case-sensitive folder (fsutil on Windows; the ubuntu CI)")
-    return path
 
 
 @pytest.fixture

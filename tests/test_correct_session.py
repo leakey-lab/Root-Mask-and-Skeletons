@@ -815,3 +815,17 @@ def test_saving_an_unknown_layer_raises_and_saves_nothing():
         rig.session.save(CLASSES)  # the rig has no class labels
 
     assert rig.saved() == [] and "save" not in rig.mask.names()
+
+
+def test_reopen_layer_reopens_that_layer_only_and_keeps_the_others_edits():
+    rig = _Rig().opened()
+    rig.mask.act()
+    rig.skeleton.act()
+    rig.clear_log()
+
+    rig.session.reopen_layer("skeleton")
+
+    assert rig.skeleton.calls == [("open", IMAGE, SIZE, BASE)]
+    assert rig.mask.calls == []
+    assert [entry for entry in rig.session.journal.undo_entries] == ["mask"]
+    assert rig.of("history") == [()]  # the page is refreshed once, at the end

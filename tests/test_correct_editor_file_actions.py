@@ -174,7 +174,7 @@ def test_an_unreadable_file_costs_no_edits_and_asks_nothing(
 # ------------------------------------------------------------------------------- Remove GT…
 def test_remove_gt_with_unsaved_edits_deletes_nothing_and_keeps_them(make_editor, project):
     """The guard behind the Remove GT… button, which is off while edits are unsaved
-    (test_correct_classes_editor.py checks the button)."""
+    (test_correct_remove_gt.py checks the button)."""
     write_mask(project.gt_mask(), box_plane())  # a GT mask Remove GT would delete
     editor = make_editor(project.a, project.folder)
     paint(editor, (20, 100), (60, 100))

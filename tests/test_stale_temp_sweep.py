@@ -1,4 +1,4 @@
-"""Stale temp files of killed writes are swept; GT writes use the shared atomic writer (R8).
+"""Stale temp files of killed writes are swept (R8).
 
 ``app.io_utils.atomic_open`` writes to a hidden ``.<name>.<8 hex>.tmp`` next to the
 target and swaps it in. A process killed in between left that file behind for good
@@ -9,9 +9,9 @@ The per-user settings folder (the Enhance defaults, ``normalization_defaults.jso
 too, by ``EnhanceDefaultsStore.load()``: once per process, on a daemon thread, with the same
 age rule; ``load()`` never waits for it and never raises, even when no thread can start (R4).
 
-The GT store and registry had their own non-durable writers (``<path>.tmp``, no
-fsync, no lock retry); they now go through ``app.io_utils`` with the saved bytes
-unchanged, and their old ``<name>.tmp`` leftovers are swept from ``gt/``.
+The GT store and registry had their own non-durable writers (``<path>.tmp``); their old
+``<name>.tmp`` leftovers are swept from ``gt/``. (What those writers write today:
+``tests/test_gt_writes.py``.)
 """
 
 from __future__ import annotations
@@ -20,20 +20,15 @@ import errno
 import json
 import logging
 import os
-import re
 import threading
 import time
 
 import numpy as np
 import pytest
-from PIL import Image, PngImagePlugin
 
 from app import enhancement, io_utils
-from app.config import GT_BACKGROUND_ID, GT_META_CHUNK, GT_UNKNOWN_COLOR
 from app.enhancement import DEFAULTS_FILE_NAME, EnhanceDefaultsStore
-from app.gt.registry import default_registry, save_registry
-from app.gt.store import Tracing, empty_tracing, gt_path, read_tracing, write_tracing
-from app.io_utils import FileLockedError, atomic_open
+from app.io_utils import atomic_open
 from app.project_layout import ProjectLayout
 
 HOUR = 3600.0
@@ -55,12 +50,6 @@ def _file(folder, name: str, *, age_s: float = 0.0, text: str | None = None) -> 
         stamp = time.time() - age_s
         os.utime(path, (stamp, stamp))
     return path
-
-
-def _sharing_violation(path) -> PermissionError:
-    exc = PermissionError(errno.EACCES, "The process cannot access the file", str(path))
-    exc.winerror = 32  # ERROR_SHARING_VIOLATION
-    return exc
 
 
 # ------------------------------------------------------------------ the sweeper
@@ -433,169 +422,3 @@ def test_a_later_load_sweeps_once_a_thread_can_start_again(tmp_path, monkeypatch
 
     assert store.sweep_thread is not None  # the folder was not marked as swept
     store.sweep_thread.join(5)
-
-
-# ------------------------------------------------------------------ GT writers
-
-
-def _hex_to_rgb(color):
-    return [int(color[i : i + 2], 16) for i in (1, 3, 5)]
-
-
-def _pre_r8_write_tracing(path, tracing, registry):
-    """``app.gt.store.write_tracing`` before R8, verbatim but for the ``reviewed`` list it
-    wrote (gone since 2026-11-01): the golden for the saved bytes."""
-    ids = np.ascontiguousarray(tracing.ids, dtype=np.uint8)
-    palette = [0, 0, 0] * 256
-    unknown = _hex_to_rgb(GT_UNKNOWN_COLOR)
-    for i in np.unique(ids).tolist():
-        if i != GT_BACKGROUND_ID:
-            palette[3 * i : 3 * i + 3] = unknown
-    for c in registry.classes:
-        palette[3 * c.id : 3 * c.id + 3] = _hex_to_rgb(c.color)
-    image = Image.fromarray(ids, mode="P")
-    image.putpalette(palette)
-    meta = {
-        "v": 1,
-        "classes": {str(c.id): c.key for c in registry.classes},
-    }
-    info = PngImagePlugin.PngInfo()
-    info.add_text(GT_META_CHUNK, json.dumps(meta))
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as fh:
-        image.save(fh, format="PNG", pnginfo=info, transparency=GT_BACKGROUND_ID)
-    os.replace(tmp, path)
-
-
-def _pre_r8_save_registry(project_dir, registry):
-    """``app.gt.registry.save_registry`` before R8, verbatim (text mode: CRLF on Windows)."""
-    path = os.path.join(project_dir, "gt", "classes.json")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path + ".tmp", "w", encoding="utf-8") as fh:
-        fh.write(json.dumps(registry.to_dict(), indent=2))
-    os.replace(path + ".tmp", path)
-    return path
-
-
-def _tracings():
-    cycle = np.resize(np.array([0, 1, 2, 3, 255], np.uint8), (30, 40))
-    unknown = np.zeros((12, 9), np.uint8)
-    unknown[2:5, 3:7] = 7  # an id no class owns: GT_UNKNOWN_COLOR
-    return {
-        "classes": Tracing(cycle),
-        "empty": empty_tracing(6, 7),
-        "unknown_id": Tracing(unknown),
-    }
-
-
-@pytest.mark.parametrize("kind", sorted(_tracings()))
-def test_write_tracing_bytes_are_unchanged(tmp_path, kind):
-    tracing = _tracings()[kind]
-    registry = default_registry().add(key="dead_root", name="Dead root", color="#9aa0a6")
-    old, new = str(tmp_path / "old" / "a.png"), str(tmp_path / "new" / "gt" / "a.png")
-    _pre_r8_write_tracing(old, tracing, registry)
-    write_tracing(new, tracing, registry)
-    with open(old, "rb") as a, open(new, "rb") as b:
-        assert b.read() == a.read()
-    assert os.listdir(os.path.dirname(new)) == ["a.png"]
-
-
-def test_save_registry_bytes_are_unchanged(tmp_path):
-    registry = default_registry().add(key="dead_root", name="Dead root", color="#9aa0a6")
-    old = _pre_r8_save_registry(str(tmp_path / "old"), registry)
-    new = save_registry(str(tmp_path / "new"), registry)
-    with open(old, "rb") as a, open(new, "rb") as b:
-        assert b.read() == a.read()
-    assert os.listdir(os.path.dirname(new)) == ["classes.json"]
-
-
-def test_gt_saves_are_durable(tmp_path, monkeypatch):
-    synced = []
-    # The one sync point: os.fsync, or the F_BARRIERFSYNC of macOS (X1-05).
-    monkeypatch.setattr(io_utils, "_fsync", synced.append)
-    monkeypatch.setattr(io_utils, "_sync_folder", lambda folder: None)  # file fsyncs only
-    write_tracing(str(tmp_path / "gt" / "a.png"), empty_tracing(4, 4), default_registry())
-    assert len(synced) == 1
-    save_registry(str(tmp_path), default_registry())
-    assert len(synced) == 2
-
-
-def test_gt_writes_use_the_shared_temp_name(tmp_path, monkeypatch):
-    swapped = []
-    real_replace = os.replace
-
-    def spy(src, dst):
-        swapped.append((os.path.basename(src), os.path.basename(dst)))
-        real_replace(src, dst)
-
-    monkeypatch.setattr(io_utils.os, "replace", spy)
-    write_tracing(gt_path(str(tmp_path / f"{STEM}.jpg")), empty_tracing(4, 4), default_registry())
-    save_registry(str(tmp_path), default_registry())
-
-    assert [dst for _, dst in swapped] == [f"{STEM}.png", "classes.json"]
-    for src, dst in swapped:  # ".<name>.<8 hex>.tmp", never "<name>.tmp"
-        assert re.fullmatch(rf"\.{re.escape(dst)}\.[0-9a-f]{{8}}\.tmp", src), src
-    assert sorted(os.listdir(tmp_path / "gt")) == sorted([f"{STEM}.png", "classes.json"])
-
-
-@pytest.mark.parametrize("which", ["tracing", "registry"])
-def test_a_gt_file_held_open_raises_file_locked_error(tmp_path, monkeypatch, which):
-    registry = default_registry()
-    path = str(tmp_path / "gt" / ("a.png" if which == "tracing" else "classes.json"))
-
-    def save(ids):
-        if which == "tracing":
-            write_tracing(path, Tracing(ids), registry)
-        else:
-            save_registry(str(tmp_path), registry.add(key="k", name="K", color="#010203"))
-
-    save(np.zeros((4, 4), np.uint8))
-    with open(path, "rb") as fh:
-        before = fh.read()
-    attempts = []
-
-    def locked(src, dst):
-        attempts.append(dst)
-        raise _sharing_violation(dst)
-
-    monkeypatch.setattr(io_utils.os, "replace", locked)
-    monkeypatch.setattr(io_utils.time, "sleep", lambda s: None)
-    with pytest.raises(FileLockedError, match="open in another program"):
-        save(np.ones((4, 4), np.uint8))
-    assert len(attempts) == len(io_utils.REPLACE_RETRY_DELAYS) + 1  # the lock retry
-    with open(path, "rb") as fh:
-        assert fh.read() == before
-    assert os.listdir(tmp_path / "gt") == [os.path.basename(path)]
-
-
-@pytest.mark.usefixtures("no_prompts", "gl_off")
-def test_the_class_labels_report_a_locked_gt_file(app, tmp_path, monkeypatch):
-    import cv2
-
-    from app.gui.correct.editor import CorrectEditor
-    from app.gui.correct.layer import CLASSES
-    from tests.correct_support import drag
-
-    image = str(tmp_path / f"{STEM}.png")
-    cv2.imwrite(image, np.full((30, 40, 3), 90, np.uint8))
-    notices = []
-    editor = CorrectEditor()
-    editor.resize(900, 700)
-    editor.notice.connect(lambda msg, kind: notices.append((msg, kind)))
-    editor.load_image(image, images_base_folder=str(tmp_path))
-    editor.set_active_layer(CLASSES)
-    drag(editor, (5, 5), (20, 5))
-
-    def locked(src, dst):
-        raise _sharing_violation(dst)
-
-    monkeypatch.setattr(io_utils.os, "replace", locked)
-    monkeypatch.setattr(io_utils.time, "sleep", lambda s: None)
-    notices.clear()
-
-    assert editor.save() is False  # reported, not raised
-    assert any(kind == "danger" and "open in another program" in msg for msg, kind in notices)
-    assert editor.has_unsaved_changes()
-    assert read_tracing(gt_path(image)) is None
-    editor.deleteLater()

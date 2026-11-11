@@ -1,11 +1,10 @@
-"""Export dataset dialog: how many images have a GT tracing (``count_traced``).
+"""The Export dataset dialog says up front how many images have class labels.
 
-The dialog says it up front, before anything is chosen. Counting ran four ``os.path``
-calls per image on the GUI thread: at 46k images the dialog showed 0.65 s late (and the
-count came from one ``gt/`` listing per folder already). It now slices each path instead,
-and still lists each ``gt/`` folder once; the count is the one the old code gives with the
-O7 rule (names compared without case on every platform), pinned here on awkward paths and
-random subsets of them.
+``count_traced`` lists each ``gt/`` folder once and slices each path (four ``os.path`` calls per
+image showed the dialog 0.65 s late at 46k images); it gives the count of the plain listing
+code it replaced, kept here as the reference (names compared without case on every platform,
+O7), on awkward paths and random subsets. The sentence agrees with its numbers: the noun with
+the image count ("1 of 1 image"), the verb with the labelled count ("1 ... has", "2 ... have").
 """
 
 from __future__ import annotations
@@ -16,8 +15,13 @@ import time
 
 import pytest
 
-from app.gt import gt_dir, gt_path
-from app.gui.export_dataset_dialog import count_traced
+from app.gt import gt_dir
+from app.gt.registry import default_registry
+from app.gt.store import (
+    gt_path,
+)
+from app.gui.export_dataset_dialog import ExportDatasetDialog, count_traced
+from tests.qt_teardown import delete_widgets
 
 
 def _reference_count(images: dict[str, str]) -> int:
@@ -119,3 +123,43 @@ def test_46k_images_are_counted_before_the_dialog_is_due(tmp_path):
         runs.append((time.perf_counter() - start) * 1000)
     assert traced == 100
     assert min(runs) < 250, runs
+
+
+@pytest.fixture
+def made(app):
+    dialogs = []
+    yield dialogs
+    delete_widgets(dialogs)
+
+
+def _project(tmp_path, n_images: int, n_traced: int) -> dict[str, str]:
+    """``n_images`` image names, the first ``n_traced`` with a ``gt/<stem>.png`` (the
+    dialog only counts the names)."""
+    folder = gt_dir(str(tmp_path))
+    os.makedirs(folder, exist_ok=True)
+    images = {}
+    for i in range(n_images):
+        stem = f"plot_T1_L{i + 1}_2024.01.01_120000"
+        images[stem] = str(tmp_path / f"{stem}.png")
+        if i < n_traced:
+            open(os.path.join(folder, f"{stem}.png"), "wb").close()
+    return images
+
+
+@pytest.mark.parametrize(
+    "n_images, n_traced, sentence",
+    [
+        (40, 1, "1 of 40 images has class labels."),
+        (40, 2, "2 of 40 images have class labels."),
+        (40, 40, "40 of 40 images have class labels."),
+        (1, 1, "1 of 1 image has class labels."),
+        (2, 1, "1 of 2 images has class labels."),
+    ],
+)
+def test_the_count_sentence_agrees_with_its_number(made, tmp_path, n_images, n_traced, sentence):
+    dialog = ExportDatasetDialog(
+        str(tmp_path), _project(tmp_path, n_images, n_traced), default_registry()
+    )
+    made.append(dialog)
+
+    assert dialog.traced_label.text() == sentence
