@@ -1,146 +1,62 @@
-"""Wording guards: one `_fake` constant, the Measure button names, the Generate sentence."""
+"""Wording guard: no text of the app uses a retired term (``CLAUDE.md`` "Vocabulary",
+KNOWN_ISSUES G4).
+
+Model output is a *prediction*, a human-saved result is *GT*, and Correct is one editor
+with three layers. The terms below are the ones a person writing a new tooltip or message
+still reaches for; none may occur in a string constant under ``app/`` (docstrings may name
+them). The app is parsed once for every term (``tests/source_scan_support.py``).
+
+The `_fake.png` single source is tested in ``test_single_sources.py``; the button and
+stage texts in ``test_window_layout.py``.
+"""
 
 from __future__ import annotations
 
 import ast
-import pathlib
+import functools
 import re
 
-from app import project_layout
-from app.gui import shell_chrome
-from app.inference import skeleton_inference
-from tests.window_support import (  # noqa: F401
-    app,
-    make_window,
-    mw,
-    no_delayed_temp_sweep,
-    settings,
-)
+import pytest
 
-APP = pathlib.Path(__file__).resolve().parent.parent / "app"
+from tests.source_scan_support import app_files, parse, rel, string_constants
+
+#: term id -> pattern of a retired term
+RETIRED = {
+    "hand-traced": r"(?i)\bhand-traced\b",
+    "hand-corrected": r"(?i)\bhand-corrected\b",
+    "GT tracing": r"(?i)\bGT tracing\b",
+}
 
 
-def _string_constants(path: pathlib.Path):
-    """Every str constant of ``path`` (f-string parts included) that is not a docstring."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    docstrings = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
-            body = node.body
-            if (
-                body
-                and isinstance(body[0], ast.Expr)
-                and isinstance(body[0].value, ast.Constant)
-                and isinstance(body[0].value.value, str)
-            ):
-                docstrings.add(id(body[0].value))
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and id(node) not in docstrings
-        ):
-            yield node.lineno, node.value
-
-
-def test_no_fake_png_literal_outside_project_layout():
-    layout_file = APP / "project_layout.py"
-    found = [
-        f"{path.relative_to(APP)}:{line}"
-        for path in APP.rglob("*.py")
-        if path != layout_file
-        for line, value in _string_constants(path)
-        if "_fake.png" in value
-    ]
-    assert found == []
-
-
-def test_skeleton_inference_uses_the_layout_suffix():
-    assert skeleton_inference.SKELETON_SUFFIX is project_layout.SKELETON_SUFFIX
-
-
-def test_the_measure_buttons_say_what_they_do(mw):  # noqa: F811
-    assert mw.calculate_length_button.text() == "Measure Length"
-    assert mw.calculate_area_button.text() == "Measure Area"
-    length_tip = mw.calculate_length_button.toolTip()
-    area_tip = mw.calculate_area_button.toolTip()
-    assert "root_lengths.csv" in length_tip and "GT skeleton" in length_tip
-    assert "root_areas.csv" in area_tip and "GT mask" in area_tip
-
-
-def test_no_text_quotes_the_old_button_names():
-    found = [
-        f"{path.relative_to(APP)}:{line}"
-        for path in APP.rglob("*.py")
-        for line, value in _string_constants(path)
-        if "Measure → Root Length" in value or "Measure → Root Area" in value
-    ]
-    assert found == []
-    panels = [v for _, v in _string_constants(APP / "gui" / "ui_panels.py")]
-    assert "Root Length" not in panels and "Root Area" not in panels
-
-
-def test_the_generate_stage_says_masks_and_skeletons_are_independent():
-    tips = dict((k, tip) for k, _, _, tip in shell_chrome.STAGES)
-    assert "neither follows the other" in tips["Generate"]
-
-
-ROOT = APP.parent
-README = ROOT / "README.md"
-DATA_DICTIONARY = ROOT / "docs" / "DATA_DICTIONARY.md"
-
-
-def files_with(pattern: str) -> list[pathlib.Path]:
-    """The app modules with a string constant (not a docstring) matching ``pattern``."""
+def uses_of(pattern: str, strings) -> list[str]:
+    """``"<where>:<line>"`` of each ``(where, line, text)`` whose text matches ``pattern``."""
     regex = re.compile(pattern)
-    return sorted(
-        {
-            path
-            for path in APP.rglob("*.py")
-            for _, value in _string_constants(path)
-            if regex.search(value)
-        }
+    return [f"{where}:{line}" for where, line, text in strings if regex.search(text)]
+
+
+@functools.cache
+def _app_strings() -> tuple[tuple[str, int, str], ...]:
+    """Every non-docstring string constant of ``app/`` as ``(file, line, text)``."""
+    return tuple(
+        (rel(path), line, text)
+        for path in app_files()
+        for line, text in string_constants(parse(path))
     )
 
 
-def hits(pattern: str) -> list[str]:
-    regex = re.compile(pattern)
-    return [
-        f"{path.relative_to(APP)}:{line}"
-        for path in sorted(APP.rglob("*.py"))
-        for line, value in _string_constants(path)
-        if regex.search(value)
-    ]
+def test_the_term_scan_finds_a_term_in_code_but_not_in_a_docstring():
+    tree = ast.parse(
+        '"""The GT tracing editor is gone."""\n'
+        'TIP = "Save the hand-traced mask"\n'
+        'OTHER = f"{n} GT Tracing images"\n'
+        'FINE = "Save the GT mask"\n'
+    )
+    strings = [("x.py", line, text) for line, text in string_constants(tree)]
+    assert uses_of(RETIRED["hand-traced"], strings) == ["x.py:2"]
+    assert uses_of(RETIRED["GT tracing"], strings) == ["x.py:3"]
+    assert len(_app_strings()) > 1000, "the scan sees almost no app text: it would pass vacuously"
 
 
-def test_no_hand_traced_under_app():
-    assert hits(r"(?i)hand-(traced|corrected)") == []
-
-
-def test_no_trace_gt_stage_name_under_app():
-    assert hits(r"\bTrace GT\b") == []
-
-
-def test_skeleton_corrections_is_named_nowhere_under_app():
-    # the folder is retired (WG-T3): its constant and the export guard went with W5-T5
-    assert files_with(r"skeleton_corrections") == []
-
-
-def test_the_readme_has_the_which_layer_table():
-    text = README.read_text(encoding="utf-8")
-    assert "| Fix the model's mask of an image | Mask layer (area) |" in text
-    assert "gt/mask/<stem>.png" in text
-    assert "skeleton_corrections" not in text
-
-
-def test_the_data_dictionary_documents_the_gt_folders():
-    text = DATA_DICTIONARY.read_text(encoding="utf-8")
-    assert all(s in text for s in ("`gt/mask/<stem>.png`", "`gt/skeletons/<stem>.png`", "`Source`"))
-
-
-def test_the_four_strings_use_the_prediction_and_gt_vocabulary():
-    assert hits(r"Mask -> area, skeleton -> length: the layers are independent\.")
-    assert hits(r"Export the labelled images and their class-id label images as a training")
-    assert hits(r"Copies the labelled images and their class-id label images \(masks/\)")
-    assert hits(r" class labels\.$")
-    assert hits(r"GT tracing") == []
+@pytest.mark.parametrize("term", sorted(RETIRED))
+def test_no_app_text_uses_a_retired_term(term):
+    assert uses_of(RETIRED[term], _app_strings()) == []

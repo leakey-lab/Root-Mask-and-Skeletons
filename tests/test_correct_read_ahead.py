@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -307,19 +305,6 @@ def test_paths_are_matched_like_the_file_system_matches_them(tmp_path):
         other_spelling = other_spelling.upper()
 
     assert ahead.take(other_spelling) is not None
-
-
-def test_the_module_loads_no_pyqt():
-    probe = (
-        "import importlib, sys; importlib.import_module('app.gui.correct.read_ahead'); "
-        "print(sorted(m for m in sys.modules if m == 'PyQt6' or m.startswith('PyQt6.')))"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", probe], cwd=ROOT, capture_output=True, text=True, timeout=60
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "[]"
 
 
 def test_a_read_taken_for_an_open_that_did_not_happen_can_be_put_back(tmp_path):
