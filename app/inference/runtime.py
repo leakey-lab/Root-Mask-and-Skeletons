@@ -41,7 +41,7 @@ Public API:
   skeleton_norm_stats() -> str            ("running" | "image", SPROUTS_SKELETON_NORM_STATS)
   resolve_skeleton_norm_stats(mode) -> str  (a caller's explicit mode, else the above)
   fixed_batch_size(model, device_type) -> int   (never queries the GPU)
-  check_fixed_batch_memory(model, batch_size, device_type) -> float | None
+  check_fixed_batch_memory(model, batch_size, device_type, *, norm_stats) -> float | None
                                           (pre-flight: free GiB, stops below the floor)
 
 Before torch is loaded, the status line names the device through the NVIDIA driver
@@ -79,15 +79,23 @@ DEFAULT_BATCH_POLICY = "fixed"
 
 # Fixed GPU batch sizes (research/o4-gpu-batch.md, Recommendation): masks at 16 need about
 # 12 GiB free to keep their kernel, 4 fits a 6 GB card at no speed cost; skeletons at 64
-# give the same output as every N >= 3 and are not slower than 128. Off the GPU the
-# fixed sizes are config.MASK_BATCH_SIZE_CPU / SKELETON_BATCH_SIZE_CPU (as before).
+# are not slower than 128. The memo found skeletons at 64 equal to every N >= 3 on an
+# older torch build; that no longer holds. On 300 field photos (RTX 5070 Ti,
+# torch 2.15.0+cu132) batches 3, 8, 16 and 32 gave identical files, batch 64
+# differed from them in 62 of 300 files by one grey level (norm statistics "running"; 203
+# files by up to two levels for "image"), batch 1 from both; 0-5 measured lengths moved,
+# by at most 0.12 mm. A fixed size keeps runs comparable; it does not make the output
+# independent of the size chosen. Off the GPU the fixed sizes are
+# config.MASK_BATCH_SIZE_CPU / SKELETON_BATCH_SIZE_CPU (as before).
 FIXED_MASK_BATCH_SIZE_CUDA = 4
 FIXED_SKELETON_BATCH_SIZE_CUDA = 64
 
 # Where the skeleton generator's BatchNorm layers take their statistics from.
 # "running": netG.eval(), the checkpoint's running statistics. "image": each image's own
-# per-channel mean and variance (the checkpoint was trained and validated that way, as
-# pix2pix test.py runs without --eval, batch 1), Dropout off: deterministic, and an image's
+# per-channel mean and variance, Dropout off. Training normalised with the statistics of
+# each training batch; the checkpoint's validation ran per image (pix2pix test.py without
+# --eval, batch 1: each image's own statistics, Dropout on). "image" is that validation
+# forward with Dropout off: deterministic, and an image's
 # result does not depend on the other rows of its batch (the batch shape still picks the
 # GPU kernels, as in "running"). Fixed when the model loads.
 SKELETON_NORM_STATS_ENV = "SPROUTS_SKELETON_NORM_STATS"
@@ -105,11 +113,14 @@ DEFAULT_SKELETON_NORM_STATS = "running"
 #                 leaves ~0.4 GiB, the margin for the cuDNN / cuBLAS handles that load after
 #                 the pre-flight (a Generate run, mask model loaded, needs about 3.8 GiB).
 #   masks 16:    only for a caller's explicit 16: identical down to 12 000 MiB; floor 12.0.
-# The skeleton floor is that of norm statistics "running". "image" needs more: on an RTX
-# 5070 Ti (torch 2.15.0+cu132) batch 64 was identical down to a 4400 MiB cap and changed
-# at 4300, so 3.8 GiB free does not keep its kernels.
+#   skeletons 64, norm statistics "image" (one GPU, RTX 5070 Ti, one build, torch
+#                 2.15.0+cu132, 2026-11-10): identical down to a 4400 MiB cap, changed at
+#                 4300 without an error. 4400 MiB = 4.30 GiB, minus the 0.05 GiB weights =
+#                 4.25 GiB free; + the same ~0.4 GiB margin = 4.65, rounded up: floor 4.7.
+#                 The "running" floor 3.8 does not keep the "image" kernels.
 FIXED_MASK_VRAM_FLOOR_GIB = 3.6
 FIXED_SKELETON_VRAM_FLOOR_GIB = 3.8
+FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB = 4.7
 FIXED_MASK_16_VRAM_FLOOR_GIB = 12.0
 
 _GIB = 1024**3
@@ -233,8 +244,14 @@ def fixed_batch_size(model: str, device_type: str) -> int:
     return gpu if device_type == "cuda" else cpu
 
 
-def check_fixed_batch_memory(model: str, batch_size: int, device_type: str) -> float | None:
+def check_fixed_batch_memory(
+    model: str, batch_size: int, device_type: str, *, norm_stats: str | None = None
+) -> float | None:
     """Pre-flight of a fixed-policy run (O4): free GPU memory in GiB, None off the GPU.
+
+    ``norm_stats`` is the skeleton model's norm statistics mode (default
+    :func:`skeleton_norm_stats`); "image" at the fixed skeleton size has its own floor
+    (``FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB``). The mask ignores it.
 
     Call it once the model is loaded, before the first batch. Garbage is collected
     and the cache emptied (``release_cuda_cache``), then the driver's free memory
@@ -244,6 +261,7 @@ def check_fixed_batch_memory(model: str, batch_size: int, device_type: str) -> f
     caller's other size has no measured floor and is only measured. A failed query
     returns None (logged): the check never breaks a run by itself.
     """
+    mode = resolve_skeleton_norm_stats(norm_stats) if model == "skeleton" else None
     if device_type != "cuda":
         return None
     import torch
@@ -262,10 +280,13 @@ def check_fixed_batch_memory(model: str, batch_size: int, device_type: str) -> f
         ("skeleton", FIXED_SKELETON_BATCH_SIZE_CUDA): FIXED_SKELETON_VRAM_FLOOR_GIB,
         ("mask", 16): FIXED_MASK_16_VRAM_FLOOR_GIB,
     }
+    if mode == "image":
+        floors[("skeleton", FIXED_SKELETON_BATCH_SIZE_CUDA)] = FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB
     needed = floors.get((model, batch_size))
     logger.info(
-        "Fixed %s batch %d: %.2f GiB free GPU memory (floor %s)",
+        "Fixed %s%s batch %d: %.2f GiB free GPU memory (floor %s)",
         model,
+        "" if mode is None else f" ({mode} norm statistics)",
         batch_size,
         free_gib,
         "none measured" if needed is None else f"{needed} GiB",
@@ -644,6 +665,7 @@ __all__ = [
     "FIXED_MASK_BATCH_SIZE_CUDA",
     "FIXED_MASK_VRAM_FLOOR_GIB",
     "FIXED_SKELETON_BATCH_SIZE_CUDA",
+    "FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB",
     "FIXED_SKELETON_VRAM_FLOOR_GIB",
     "ModelUnavailableError",
     "batch_policy",

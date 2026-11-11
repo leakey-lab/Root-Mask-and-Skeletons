@@ -617,8 +617,12 @@ def run_skeleton_generation(
         )
         if image_paths:
             if fixed:
+                # The floor of the mode the model runs (a model without one: the default).
                 report.free_vram_gib = runtime.check_fixed_batch_memory(
-                    "skeleton", batch_size, rt.device.type
+                    "skeleton",
+                    batch_size,
+                    rt.device.type,
+                    norm_stats=getattr(model, "norm_stats", None),
                 )
             run_batches(
                 image_paths,

@@ -298,3 +298,86 @@ def test_the_manifest_records_the_cached_models_mode(
     out = str(tmp_path / "imgs" / "skeletons")
     si.run_skeleton_generation(src, out, batch_size=1)
     assert _manifest_parameters(out)["norm_stats"] == "image"
+
+
+# ---------------------------------------------------------------- the pre-flight floor
+GIB = 1024**3
+
+
+@pytest.fixture
+def free_gpu_memory(monkeypatch):
+    """Fake driver free memory for ``check_fixed_batch_memory`` (no GPU use)."""
+    state = {"free": 8 * GIB}
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device=None: (state["free"], 16 * GIB))
+    monkeypatch.setattr(runtime, "release_cuda_cache", lambda: None)
+    monkeypatch.delenv(runtime.SKELETON_NORM_STATS_ENV, raising=False)
+    return state
+
+
+def test_the_image_mode_has_its_own_measured_floor():
+    assert runtime.FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB == 4.7
+    assert runtime.FIXED_SKELETON_VRAM_FLOOR_GIB == 3.8  # "running" unchanged
+    assert "FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB" in runtime.__all__
+
+
+def test_the_image_mode_stops_below_its_floor_and_says_which(free_gpu_memory):
+    from app.inference.batch_engine import FIXED_MEMORY_MESSAGE, FixedBatchMemoryTooLow
+
+    free_gpu_memory["free"] = int(4.55 * GIB)  # enough for "running", not for "image"
+    with pytest.raises(FixedBatchMemoryTooLow) as caught:
+        runtime.check_fixed_batch_memory("skeleton", 64, "cuda", norm_stats="image")
+    assert str(caught.value) == FIXED_MEMORY_MESSAGE.format(n=64, free=4.5, needed=4.7)
+    assert caught.value.needed_gib == 4.7
+    assert runtime.check_fixed_batch_memory(
+        "skeleton", 64, "cuda", norm_stats="running"
+    ) == pytest.approx(4.55)
+
+
+def test_the_floor_follows_the_environment_when_no_mode_is_given(free_gpu_memory, monkeypatch):
+    from app.inference.batch_engine import FixedBatchMemoryTooLow
+
+    free_gpu_memory["free"] = int(4.0 * GIB)
+    assert runtime.check_fixed_batch_memory("skeleton", 64, "cuda") == pytest.approx(4.0)
+    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "image")
+    with pytest.raises(FixedBatchMemoryTooLow, match=r"4\.0 GiB free, 4\.7 GiB needed"):
+        runtime.check_fixed_batch_memory("skeleton", 64, "cuda")
+    # an explicit mode wins over the environment
+    assert runtime.check_fixed_batch_memory(
+        "skeleton", 64, "cuda", norm_stats="running"
+    ) == pytest.approx(4.0)
+
+
+def test_the_image_floor_is_only_for_its_measured_size_and_model(free_gpu_memory):
+    free_gpu_memory["free"] = int(1.0 * GIB)
+    # no floor measured for another skeleton size: measured, never stopped (as "running")
+    assert runtime.check_fixed_batch_memory(
+        "skeleton", 32, "cuda", norm_stats="image"
+    ) == pytest.approx(1.0)
+    free_gpu_memory["free"] = int(4.0 * GIB)
+    # the mask floors ignore the skeleton mode
+    assert runtime.check_fixed_batch_memory("mask", 4, "cuda", norm_stats="image") == (
+        pytest.approx(4.0)
+    )
+    assert runtime.check_fixed_batch_memory("skeleton", 64, "cpu", norm_stats="image") is None
+    with pytest.raises(ValueError):
+        runtime.check_fixed_batch_memory("skeleton", 64, "cuda", norm_stats="per-image")
+
+
+@pytest.mark.parametrize("mode", ["image", "running", None])
+def test_a_fixed_run_checks_the_floor_of_the_mode_that_runs(
+    tmp_path, cpu_runtime, monkeypatch, mode
+):
+    calls = []
+
+    def check(model, batch_size, device_type, *, norm_stats=None):
+        calls.append((model, batch_size, device_type, norm_stats))
+        return 9.0
+
+    monkeypatch.setattr(runtime, "check_fixed_batch_memory", check)
+    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "image")  # never read for the model's mode
+    model = _StubSkeletonModel() if mode is None else _ModeStub(mode)
+    src = _images(str(tmp_path / "imgs"), ["a.jpg"])
+    si.run_skeleton_generation(
+        src, str(tmp_path / "imgs" / "out"), model=model, batch_size=2, batch_policy="fixed"
+    )
+    assert calls == [("skeleton", 2, "cpu", mode)]

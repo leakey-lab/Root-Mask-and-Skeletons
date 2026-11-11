@@ -330,7 +330,7 @@ def test_a_failed_memory_query_does_not_stop_the_run(monkeypatch, caplog):
 def test_a_fixed_run_checks_memory_and_records_it(tmp_path, cpu_runtime, monkeypatch, kind):
     calls = []
 
-    def check(model, batch_size, device_type):
+    def check(model, batch_size, device_type, **_mode):  # skeleton: norm_stats=
         calls.append((model, batch_size, device_type))
         return 7.4567
 
@@ -354,7 +354,7 @@ def test_the_summary_carries_the_free_memory():
 
 @pytest.mark.parametrize("kind", ["mask", "skeleton"])
 def test_an_auto_run_never_checks_memory(tmp_path, cpu_runtime, monkeypatch, kind):
-    monkeypatch.setattr(runtime, "check_fixed_batch_memory", lambda *a: pytest.fail("checked"))
+    monkeypatch.setattr(runtime, "check_fixed_batch_memory", lambda *a, **k: pytest.fail("checked"))
     src = _images(str(tmp_path / "imgs"), ["a.jpg"])
     model = _StubMaskModel() if kind == "mask" else _StubSkeletonModel()
     _run(kind, src, str(tmp_path / "imgs" / "out"), model, batch_size=2, batch_policy="auto")
@@ -362,7 +362,7 @@ def test_an_auto_run_never_checks_memory(tmp_path, cpu_runtime, monkeypatch, kin
 
 @pytest.mark.parametrize("kind", ["mask", "skeleton"])
 def test_a_memory_stop_runs_no_forward(tmp_path, cpu_runtime, monkeypatch, kind):
-    def check(model, batch_size, device_type):
+    def check(model, batch_size, device_type, **_mode):  # skeleton: norm_stats=
         raise FixedBatchMemoryTooLow(batch_size, free_gib=1.0, needed_gib=3.6)
 
     monkeypatch.setattr(runtime, "check_fixed_batch_memory", check)
