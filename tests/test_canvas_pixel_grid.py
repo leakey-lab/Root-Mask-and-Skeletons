@@ -5,6 +5,12 @@ line on the first device column (row) of every image pixel, at the device edges 
 exact-pixel layers start each pixel block, so the lines sit on the block edges at any zoom.
 Display only: it changes no item and no image. ``toggle_pixel_grid`` is what the shortcut
 calls; ``pixel_grid_changed`` reports the new state.
+
+Inside a window, a raster viewport paints into the window's backing store, moved there by
+its offset in the window (Qt's paint redirection). The grid lines must still sit on the
+device columns where the exact-pixel layer starts each pixel block, at every
+devicePixelRatio: the grid must not add that offset a second time (it did: every line
+landed ``offset x dpr`` device px to the right and below, with no grid over the top-left).
 """
 
 import math
@@ -19,12 +25,14 @@ from PyQt6.QtWidgets import (
     QGraphicsPixmapItem,
     QGraphicsScene,
     QGraphicsView,
+    QWidget,
 )
 
 from app.gui import canvas_gl
 from app.gui.canvas_layers.raster import RasterLayerItem
 from app.gui.canvas_view import CanvasViewMixin, draw_pixel_grid
-from tests.qt_teardown import delete_widgets
+from tests.canvas_view_support import FramelessView
+from tests.qt_teardown import delete_widgets, flush_deleted
 from tests.render_metrics import qimage_to_rgb
 
 W, H = 64, 48
@@ -193,3 +201,82 @@ def test_the_lines_are_one_device_pixel_wide_at_any_device_pixel_ratio(app, dpr)
     middle = int(step / 2)  # a device row inside the first pixel row
     assert {x for x in range(size) if white[middle, x]} == expected
     assert {y for y in range(size) if white[y, middle]} == expected
+
+
+# ------------------------------------------------------------- inside a window
+
+OFFSET = (37, 23)  # the view's position in its window
+VIEW = (320, 240)
+
+
+@pytest.fixture
+def window(app, monkeypatch):
+    """A window holding the view at ``OFFSET``, the checkerboard in exact pixels."""
+    monkeypatch.setenv(canvas_gl.ENV_VAR, "0")
+    canvas = _checkerboard_canvas()
+    host = QWidget()
+    host.resize(500, 400)
+    view = FramelessView(host)
+    view.setGeometry(*OFFSET, *VIEW)
+    scene = QGraphicsScene(view)
+    item = RasterLayerItem(lambda: canvas)
+    scene.addItem(item)
+    view.setScene(scene)
+    view.set_content_rect(QRectF(0, 0, W, H))
+    host.show()
+    app.processEvents()
+    yield host, view
+    scene.removeItem(item)
+    host.close()
+    host.deleteLater()
+    del host, view, scene
+    flush_deleted()
+
+
+def _render(app, host, view, dpr: float, zoom: float, grid: bool) -> np.ndarray:
+    """The whole window at ``dpr`` (the view painted through the window's redirection)."""
+    view.set_pixel_grid(grid)
+    view.set_zoom(zoom)
+    view.centerOn(W / 2 + 0.3, H / 2 + 0.2)
+    app.processEvents()
+    image = QImage(
+        round(host.width() * dpr), round(host.height() * dpr), QImage.Format.Format_ARGB32
+    )
+    image.setDevicePixelRatio(dpr)
+    image.fill(QColor(0, 0, 0))
+    host.render(image)
+    return qimage_to_rgb(image).astype(int)
+
+
+@pytest.mark.parametrize("dpr", [1.0, 1.25, 1.5, 2.0])
+@pytest.mark.parametrize("zoom", [8.0, 10.0, 12.0])
+def test_grid_lines_sit_on_the_block_edges_inside_a_window(app, window, dpr, zoom):
+    host, view = window
+    plain = _render(app, host, view, dpr, zoom, grid=False)
+    lined = _render(app, host, view, dpr, zoom, grid=True)
+
+    # A device row through the middle of image row 20; the view's columns, 2 px in.
+    row_y = math.floor((OFFSET[1] + view.mapFromScene(0.0, 20.5).y() + 0.25) * dpr)
+    first = math.ceil((OFFSET[0] + 2) * dpr)
+    last = math.floor((OFFSET[0] + VIEW[0] - 2) * dpr)
+    row, gridded = plain[row_y], lined[row_y]
+    edges = {x for x in range(first, last) if (row[x] != row[x - 1]).any()}
+    lines = {x for x in range(first, last) if np.abs(gridded[x] - row[x]).sum() > 6}
+
+    assert len(edges) > 10
+    if (zoom * dpr).is_integer():
+        assert lines == edges
+    else:  # the raster engine's nearest walk may move a block edge by one column
+        assert len(lines) == len(edges)
+        assert all(min(abs(x - e) for e in edges) <= 1 for x in lines)
+
+
+def test_the_grid_covers_the_top_left_of_the_view_inside_a_window(app, window):
+    """No band without grid lines at the view's top-left (the doubled offset clipped it)."""
+    host, view = window
+    lined = _render(app, host, view, 1.0, 10.0, grid=True)
+    plain = _render(app, host, view, 1.0, 10.0, grid=False)
+    changed = np.abs(lined - plain).sum(axis=2) > 6
+    x0, y0 = OFFSET
+    band = changed[y0 : y0 + 20, x0 : x0 + VIEW[0]]  # the view's top 20 device rows
+    assert band.any(axis=1).all()  # every row of the band crosses vertical grid lines

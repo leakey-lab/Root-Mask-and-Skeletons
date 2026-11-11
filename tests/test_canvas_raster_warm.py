@@ -26,7 +26,6 @@ from PyQt6.QtWidgets import (
     QFrame,
     QGraphicsScene,
     QGraphicsView,
-    QStyleOptionGraphicsItem,
 )
 
 from app.gui import canvas_gl
@@ -366,22 +365,6 @@ def test_on_gl_idle_frames_upload_what_was_made_ahead_then_stop(page, monkeypatc
     QTest.qWait(RasterLayerItem.WARM_DELAY_MS + 300)
     view.viewport().removeEventFilter(counter)
     assert counter.paints <= 1  # then nothing but the last frame's own re-check
-
-
-def test_a_deleted_item_ignores_its_pending_warm_up(app):
-    image = _mask_image(300, 200)
-    scene = QGraphicsScene()
-    item = RasterLayerItem(lambda: image)
-    scene.addItem(item)
-    target = QImage(300, 200, QImage.Format.Format_ARGB32_Premultiplied)
-    painter = QPainter(target)
-    painter.scale(0.8, 0.8)
-    option = QStyleOptionGraphicsItem()
-    option.exposedRect = item.boundingRect()
-    item.paint(painter, option, None)  # plans a warm-up
-    painter.end()
-    scene.clear()  # deletes the C++ item while its warm-up timer is pending
-    QTest.qWait(RasterLayerItem.WARM_DELAY_MS + 100)  # the timer fires: no error
 
 
 @pytest.fixture

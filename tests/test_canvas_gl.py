@@ -1,12 +1,15 @@
 """OpenGL viewport policy for the image canvases (app/gui/canvas_gl.py).
 
 GL viewports are used only when the env opt-out allows them AND a one-time probe
-found a usable hardware OpenGL context (UI-16, PE-05).
+found a usable hardware OpenGL context (UI-16, PE-05). GL viewports ask for
+``gl_samples()`` MSAA samples (``ROOT_VIEWER_GL_SAMPLES``, default 4, 0 = off).
 """
 
 import pytest
 
 from app.gui import canvas_gl
+from app.gui.canvas_view import CanvasViewMixin
+from tests.qt_teardown import flush_deleted
 
 
 @pytest.fixture(autouse=True)
@@ -195,3 +198,131 @@ def test_no_application_means_no_probe_and_no_cache(monkeypatch):
     assert canvas_gl.opengl_support().checked is False
     assert canvas_gl.canvas_line() == ("OpenGL not checked yet", False)
     assert canvas_gl.slow_path_notice("windows") is None
+
+
+# ----------------------------------------------------------------------------- MSAA
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, 4),
+        ("0", 0),
+        ("8", 8),
+        (" 2 ", 2),
+        ("abc", 4),
+        ("", 4),
+        ("4.5", 4),
+        ("64", 16),
+        ("-3", 0),
+    ],
+)
+def test_gl_samples_reads_the_env_var_at_call_time(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv(canvas_gl.SAMPLES_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(canvas_gl.SAMPLES_ENV_VAR, value)
+    assert canvas_gl.gl_samples() == expected
+
+
+@pytest.mark.parametrize("value", [None, "0", "8"])
+def test_gl_viewport_requests_the_msaa_samples(app, monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv(canvas_gl.SAMPLES_ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(canvas_gl.SAMPLES_ENV_VAR, value)
+    viewport = CanvasViewMixin._new_gl_viewport()  # constructed, never shown
+    try:
+        assert viewport.format().samples() == canvas_gl.gl_samples()
+    finally:
+        viewport.deleteLater()
+        flush_deleted()
+
+
+# ------------------------------------------------------------- the probe's verdict
+class _Format:
+    def __init__(self, major: int, minor: int) -> None:
+        self._version = (major, minor)
+
+    def majorVersion(self) -> int:  # noqa: N802 - Qt name
+        return self._version[0]
+
+    def minorVersion(self) -> int:  # noqa: N802 - Qt name
+        return self._version[1]
+
+
+def _stub_context(monkeypatch, *, created: bool, version=(4, 6), renderer: str = "") -> None:
+    """``QOpenGLContext`` as a stand-in GPU: whether a context is made, its GL version and
+    ``GL_RENDERER`` (the real renderer read needs a current context, which offscreen has not)."""
+    import PyQt6.QtGui
+
+    class Context:
+        def create(self) -> bool:
+            return created
+
+        def format(self) -> _Format:
+            return _Format(*version)
+
+    monkeypatch.setattr(PyQt6.QtGui, "QOpenGLContext", Context)
+    monkeypatch.setattr(canvas_gl, "_renderer_name", lambda context: renderer)
+
+
+@pytest.mark.parametrize(
+    ("created", "version", "renderer", "supported", "reason"),
+    [
+        (False, (4, 6), "", False, "no OpenGL context on this platform"),
+        (True, (1, 1), "", False, "OpenGL 1.1 is below 2.0"),
+        (
+            True,
+            (3, 3),
+            "llvmpipe (LLVM 15.0.7, 256 bits)",
+            False,
+            "software renderer 'llvmpipe (LLVM 15.0.7, 256 bits)'",
+        ),
+        (True, (4, 6), "NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2", True, "hardware OpenGL"),
+    ],
+    ids=["no-context", "gl-1", "software", "hardware"],
+)
+def test_the_probe_judges_the_context_it_made(
+    monkeypatch, created, version, renderer, supported, reason
+):
+    _stub_context(monkeypatch, created=created, version=version, renderer=renderer)
+    support = canvas_gl.probe_opengl_support()
+    assert (support.supported, support.reason) == (supported, reason)
+    assert support.renderer == (renderer if created and version >= (2, 0) else "")
+
+
+@pytest.fixture
+def fresh_probe_cache():
+    """The per-process probe cache, empty before and after the test."""
+    canvas_gl._probed_support.cache_clear()
+    yield
+    canvas_gl._probed_support.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("env", "supported", "level", "message"),
+    [
+        (None, False, "WARNING", "OpenGL canvas viewports off (slower drawing): fake reason"),
+        ("0", False, "INFO", "OpenGL canvas viewports off: fake reason"),
+        (None, True, "INFO", "OpenGL canvas viewports available (GPU)"),
+    ],
+    ids=["requested-unsupported", "opted-out", "supported"],
+)
+def test_the_probe_runs_once_per_process_and_warns_only_when_gl_was_wanted(
+    app, monkeypatch, caplog, fresh_probe_cache, env, supported, level, message
+):
+    calls = []
+
+    def probe():
+        calls.append(1)
+        return canvas_gl.GLSupport(supported, "fake reason", "GPU" if supported else "")
+
+    monkeypatch.setattr(canvas_gl, "probe_opengl_support", probe)
+    if env is None:
+        monkeypatch.delenv(canvas_gl.ENV_VAR, raising=False)
+    else:
+        monkeypatch.setenv(canvas_gl.ENV_VAR, env)
+    with caplog.at_level("INFO", logger=canvas_gl.__name__):
+        first, second = canvas_gl.opengl_support(), canvas_gl.opengl_support()
+
+    assert first is second and first.supported is supported and calls == [1]
+    assert [(r.levelname, r.getMessage()) for r in caplog.records] == [(level, message)]

@@ -126,3 +126,31 @@ def test_undo_and_redo_of_a_whole_plane_skeleton_edit_restore_every_pixel():
     assert history.redo() is not None and np.array_equal(history.plane, edited)
     assert history.redo() is not None and not history.plane.any()
     assert history.plane.dtype == np.uint8
+
+
+@pytest.mark.parametrize(
+    ("rect", "shape"),
+    [((5, 5, 10, 10), (10, 10)), ((-1, 0, 4, 4), (4, 4)), ((0, 0, 4, 4), (3, 4))],
+    ids=["past-the-edge", "negative-origin", "region-of-another-shape"],
+)
+def test_a_commit_that_does_not_fit_the_plane_is_refused_and_changes_nothing(rect, shape):
+    """(The refusal itself is also in test_patch_history_undo.py.) Nothing of the region is
+    written and no step is recorded: a mis-sized edit cannot corrupt the plane."""
+    history = PatchHistory()
+    plane = np.zeros((10, 10), np.uint8)
+    history.reset(plane)
+    history.commit((0, 0, 2, 2), np.ones((2, 2), np.uint8))
+    before = plane.copy()
+
+    with pytest.raises(ValueError):
+        history.commit(rect, np.ones(shape, np.uint8))
+
+    assert np.array_equal(history.plane, before) and history.plane is plane
+    assert len(history.undo_stack) == 1 and not history.can_redo
+
+
+def test_a_commit_without_a_plane_is_refused():
+    history = PatchHistory()
+    with pytest.raises(ValueError, match="no plane"):
+        history.commit((0, 0, 1, 1), np.ones((1, 1), np.uint8))
+    assert len(history.undo_stack) == 0

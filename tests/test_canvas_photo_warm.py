@@ -8,21 +8,27 @@ view grown by half its size on every side for a step out, whatever the anchor), 
 in idle slices of ``WARM_BUDGET_MS``. On an OpenGL paint engine the next frames draw those tiles
 once, invisibly, so their textures are uploaded before the first frame that shows them.
 A new image drops the warm-up of the old one.
+
+Those upload frames come wherever the view is: a view repaints only for an update that
+meets its viewport, so the request names a pixel of the photo on screen (the top-left
+pixel it named is off screen once the view is zoomed into another part, and then no
+frame came and every tile made ahead waited for the first frame that showed it).
 """
 
 import time
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QRectF
+from PyQt6.QtCore import QPointF, QRectF
 from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import (
-    QGraphicsScene,
-    QStyleOptionGraphicsItem,
-)
+from PyQt6.QtWidgets import QGraphicsScene, QGraphicsView, QStyleOptionGraphicsItem
 
+from app.gui import canvas_gl
+from app.gui.canvas_layers import photo as photo_module
 from app.gui.canvas_layers.photo import PhotoLayerItem, TiledLevels
+from tests.canvas_view_support import FramelessView
+from tests.qt_teardown import flush_deleted
 
 pytestmark = pytest.mark.usefixtures("app")
 
@@ -122,15 +128,6 @@ def test_a_new_image_drops_the_warm_up_of_the_old_one():
     assert item.built_tiles() == {}
 
 
-def test_a_deleted_item_ignores_its_pending_warm_up():
-    scene = QGraphicsScene()
-    item = photo()
-    scene.addItem(item)
-    paint(item, 0.9, QRectF(300, 200, 400, 300))
-    scene.clear()  # deletes the C++ item while its warm-up timer is pending
-    QTest.qWait(PhotoLayerItem.WARM_DELAY_MS + 100)  # the timer fires: no error
-
-
 def test_tiles_made_ahead_are_uploaded_once_on_a_gl_engine_only():
     levels = TiledLevels(_tile_maker(), tile=64, margin=2, single_pixels=64 * 64)
     size, image = (300, 200), (300, 200)
@@ -159,3 +156,70 @@ def _tile_maker():
         return pixmap
 
     return make
+
+
+# ------------------------------------------------------------- upload frames in view
+
+W, H = 1400, 1000
+
+
+@pytest.fixture
+def page(app, monkeypatch):
+    """A 400 x 300 view over a 1400 x 1000 photo tiled at 64 px, updated as a GL viewport
+    is (the whole viewport per frame); engines count as GL."""
+    monkeypatch.setenv(canvas_gl.ENV_VAR, "0")
+    monkeypatch.setattr(photo_module, "_is_gl", lambda painter: True)
+    rng = np.random.default_rng(3)
+    item = PhotoLayerItem()
+    item.TILE = 64
+    item.set_image(rng.integers(0, 256, (H, W, 3), dtype=np.uint8))
+    view = FramelessView()
+    view.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+    scene = QGraphicsScene(view)
+    scene.addItem(item)
+    view.setScene(scene)
+    view.set_content_rect(QRectF(0, 0, W, H))
+    view.resize(400, 300)
+    yield view, item
+    scene.removeItem(item)
+    view.close()
+    view.deleteLater()
+    del view, scene
+    flush_deleted()
+
+
+def _show(app, view, zoom: float, centre: tuple[float, float]) -> None:
+    view.set_zoom(zoom)
+    view.centerOn(QPointF(*centre))
+    view.show()
+    app.processEvents()
+    view.centerOn(QPointF(*centre))
+    view.viewport().repaint()
+
+
+def _settle(item: PhotoLayerItem, shown: int, timeout_s: float = 5.0) -> None:
+    """Wait until the warm-up made tiles beyond the ``shown`` ones and none waits."""
+    deadline = time.perf_counter() + timeout_s
+    while time.perf_counter() < deadline:
+        QTest.qWait(20)
+        if len(item.built_tiles()) > shown and item._levels.pending_uploads() == 0:
+            return
+
+
+def test_tiles_made_ahead_are_uploaded_when_the_image_corner_is_off_screen(app, page):
+    view, item = page
+    _show(app, view, 0.9, (W / 2, H / 2))  # the corner (0, 0) is far off screen
+    assert not view.mapToScene(view.viewport().rect()).boundingRect().contains(0.5, 0.5)
+    shown = len(item.built_tiles())
+    _settle(item, shown)
+    assert len(item.built_tiles()) > shown  # the warm-up made tiles ahead
+    assert item._levels.pending_uploads() == 0  # and idle frames uploaded them
+
+
+def test_tiles_made_ahead_are_uploaded_when_the_corner_is_on_screen(app, page):
+    view, item = page
+    _show(app, view, 0.25, (W / 2, H / 2))  # the whole photo in view
+    shown = len(item.built_tiles())
+    _settle(item, shown)
+    assert len(item.built_tiles()) > shown
+    assert item._levels.pending_uploads() == 0

@@ -285,16 +285,24 @@ def test_edits_grow_the_boxes_and_frames_stay_identical(kind, monkeypatch):
     assert worked == []  # strokes grew the boxes on record: no canvas scan per stroke frame
 
 
-def test_a_replaced_canvas_works_its_boxes_out_again():
-    canvas = _Canvas(_canvas("sparse"))
+def test_a_replaced_canvas_shows_its_content_where_the_old_one_was_blank():
+    """The next image's mask lies in a tile that was blank before: a content box left from
+    the old canvas would skip that tile and hide the new pixels."""
+    canvas = _Canvas(_canvas("sparse"))  # tile (1, 1) holds nothing
     item = _scene(RasterLayerItem(lambda: canvas.image))
-    _frame(item, 1.0, 1.0, (0.0, 0.0))
-    assert item._boxes[(1, 1)] is None and item._boxes[(1, 0)] is not None
-    canvas.image = _canvas("blank")
+    whole = _scene(_WholeTiles(lambda: canvas.image))
+    origin = (241.3, 237.6)
+    for zoom in (1.0, 2.0):  # every box read, with and without its extent
+        _frame(item, zoom, 1.0, origin)
+    colour = QColor(tokens.MASK)
+    bgra = np.zeros((H, W, 4), np.uint8)
+    bgra[300:320, 300:320] = (colour.blue(), colour.green(), colour.red(), 255)  # tile (1, 1)
+    canvas.image = _image(bgra)
     item.canvas_replaced()
-    assert item._boxes == {}
-    _frame(item, 1.0, 1.0, (0.0, 0.0))
-    assert set(item._boxes.values()) == {None}
+    whole.canvas_replaced()
+    for zoom in (1.0, 2.0):
+        got = _frame(item, zoom, 1.0, origin)
+        assert _bytes(got) == _bytes(_frame(whole, zoom, 1.0, origin)), zoom
 
 
 def test_a_straight_alpha_canvas_is_drawn_whole():

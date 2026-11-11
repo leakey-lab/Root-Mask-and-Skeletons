@@ -262,6 +262,26 @@ def test_middle_drag_pans_by_the_drag_distance(make_view, view_cls):
 
 
 @pytest.mark.parametrize("view_cls", VIEWS, ids=lambda c: c.__name__)
+def test_a_pan_adds_up_sub_pixel_motion(make_view, view_cls):
+    """High-DPI and touchpad moves come in fractions of a pixel: ten moves of 0.4 px pan
+    4 px, they are not each rounded away."""
+    view = make_view(view_cls)
+    middle = Qt.MouseButton.MiddleButton
+    h0, v0 = _scroll(view)
+    _mouse(view, QEvent.Type.MouseButtonPress, QPointF(200, 150), middle)
+    for i in range(1, 11):
+        _mouse(
+            view,
+            QEvent.Type.MouseMove,
+            QPointF(200 + 0.4 * i, 150),
+            Qt.MouseButton.NoButton,
+            middle,
+        )
+    _mouse(view, QEvent.Type.MouseButtonRelease, QPointF(204, 150), middle, Qt.MouseButton.NoButton)
+    assert _scroll(view) == (h0 - 4, v0)
+
+
+@pytest.mark.parametrize("view_cls", VIEWS, ids=lambda c: c.__name__)
 def test_space_hold_turns_left_drag_into_a_pan_with_hand_cursors(make_view, view_cls):
     view = make_view(view_cls)
     vp = view.viewport()

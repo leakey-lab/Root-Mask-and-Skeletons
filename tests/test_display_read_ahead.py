@@ -1,4 +1,10 @@
-"""The Library read-ahead counts a decode against its bytes once it finishes, shown or not.
+"""The Library read-ahead (app/gui/display_read_ahead.py): photos decoded ahead off the GUI
+thread, used only while their file is unchanged, bounded by count and by bytes.
+
+A read still queued when its photo is asked for is dropped (the caller decodes it itself);
+one already running is waited for. Decoded arrays are read-only.
+
+The read-ahead counts a decode against its bytes once it finishes, shown or not.
 
 ``DisplayReadAhead`` keeps the photo shown and its neighbours decoded ahead, bounded by
 count and by bytes (192 MiB). A decode used to count only once it was shown (``get``), so
@@ -11,8 +17,12 @@ A decode whose end reports only after its photo was shown and kept changes nothi
 
 from __future__ import annotations
 
+import os
+import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
+import cv2
 import numpy as np
 
 from app.gui.display_read_ahead import DisplayReadAhead
@@ -185,3 +195,120 @@ def test_the_bound_holds_when_reads_finish_on_the_worker_thread(tmp_path):
         assert ahead.pending() == [_key(path) for path in paths[3:]]
     finally:
         ahead.close()
+
+
+# ------------------------------------------------------------------ freshness and bounds
+
+
+class InlineExecutor:
+    """Runs a job when told to, so a test controls queued / running / done."""
+
+    def __init__(self) -> None:
+        self.jobs: list[tuple[Future, object]] = []
+
+    def submit(self, fn, *args):
+        future: Future = Future()
+        self.jobs.append((future, lambda: fn(*args)))
+        return future
+
+    def run_all(self) -> None:
+        for future, job in self.jobs:
+            if future.set_running_or_notify_cancel():
+                future.set_result(job())
+        self.jobs.clear()
+
+    def shutdown(self, wait=True, cancel_futures=False) -> None:
+        pass
+
+
+def _photo(path, value: int) -> str:
+    image = np.full((12, 16, 3), value, np.uint8)
+    assert cv2.imwrite(str(path), image)
+    return str(path)
+
+
+def _imread(path: str):
+    return cv2.imread(path, cv2.IMREAD_COLOR)
+
+
+def test_a_finished_read_is_used_until_its_file_changes(tmp_path):
+    executor = InlineExecutor()
+    ahead = DisplayReadAhead(_imread, executor=executor)
+    path = _photo(tmp_path / "a.png", 50)
+    ahead.request([path])
+    assert ahead.get(path) is None  # still queued: the caller decodes it itself
+    ahead.request([path])
+    executor.run_all()
+    image = ahead.get(path)
+    assert image is not None and int(image[0, 0, 0]) == 50
+    assert not image.flags.writeable  # shared with the photo item: never modified
+    assert ahead.get(path) is image  # kept for PgUp, not handed over once
+
+    time.sleep(0.02)
+    _photo(tmp_path / "a.png", 90)
+    os.utime(path, ns=(time.time_ns(), time.time_ns() + 10_000_000))
+    assert ahead.get(path) is None  # the file changed: never a stale photo
+
+
+def test_a_running_read_is_waited_for(tmp_path):
+    path = _photo(tmp_path / "b.png", 70)
+    started, release = threading.Event(), threading.Event()
+
+    def slow(p):
+        started.set()
+        release.wait(5)
+        return _imread(p)
+
+    ahead = DisplayReadAhead(slow)
+    try:
+        ahead.request([path])
+        assert started.wait(5)
+        threading.Timer(0.05, release.set).start()
+        image = ahead.get(path)
+        assert image is not None and int(image[0, 0, 0]) == 70
+    finally:
+        release.set()
+        ahead.close()
+
+
+def test_kept_images_and_reads_are_bounded(tmp_path):
+    executor = InlineExecutor()
+    ahead = DisplayReadAhead(_imread, max_images=3, executor=executor)
+    paths = [_photo(tmp_path / f"{i}.png", 10 * i) for i in range(5)]
+    for p in paths[:2]:
+        ahead.keep(p, file_stamp(p), _imread(p))
+    ahead.request(paths[2:4])
+    executor.run_all()
+    assert len(ahead.pending()) == 3
+    assert ahead.get(paths[0]) is None  # the oldest went first
+    ahead.retain([paths[3]])
+    assert ahead.pending() == [path_key(paths[3])]
+    ahead.clear()
+    assert ahead.pending() == []
+
+
+def test_a_read_that_tips_the_byte_bound_is_still_handed_over(tmp_path):
+    # The read asked for is the oldest entry, and its photo tips the byte bound once it
+    # arrives: the trim must drop another entry, never the one being handed over.
+    executor = InlineExecutor()
+    first = _photo(tmp_path / "first.png", 10)
+    shown = _photo(tmp_path / "shown.png", 20)
+    one = _imread(first).nbytes
+    ahead = DisplayReadAhead(_imread, max_images=3, max_bytes=int(one * 1.5), executor=executor)
+    ahead.request([first])
+    ahead.keep(shown, file_stamp(shown), _imread(shown))
+    executor.run_all()
+
+    image = ahead.get(first)
+
+    assert image is not None and int(image[0, 0, 0]) == 10
+    assert ahead.pending() == [path_key(first)]
+
+
+def test_an_unreadable_file_gives_nothing(tmp_path):
+    executor = InlineExecutor()
+    ahead = DisplayReadAhead(_imread, executor=executor)
+    missing = str(tmp_path / "missing.png")
+    ahead.request([missing])
+    executor.run_all()
+    assert ahead.get(missing) is None

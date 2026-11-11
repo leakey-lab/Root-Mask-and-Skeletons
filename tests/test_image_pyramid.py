@@ -317,6 +317,26 @@ def test_levels_never_read_are_never_built():
     assert len(inputs) == 3  # level 2 waits until it is read
 
 
+def test_more_disjoint_invalidations_than_are_kept_apart_still_equal_a_rebuild():
+    """Past the dirty rects kept apart per level (8) they are merged into their union: twelve
+    separate strokes before the next read must all reach every level (a stale zoomed-out
+    skeleton or mask otherwise)."""
+    rng = np.random.default_rng(RNG_SEED)
+    image = _random((300, 300))
+    pyramid = ImagePyramid(image, min_side=4)
+    for k in range(pyramid.count):
+        pyramid.level(k)
+    # 3 x 3 rects, none touching another: a far corner first, so that no union of the others
+    # covers it, then a diagonal run.
+    spots = [(5, 5), (285, 5)] + [(20 + 24 * i, 30 + 24 * i) for i in range(10)]
+    for x, y in spots:
+        _paint(image, (x, y, 3, 3), rng)
+        pyramid.invalidate((x, y, 3, 3))
+    expected = _full_rebuild(image, min_side=4)
+    for k in range(pyramid.count):
+        assert np.array_equal(pyramid.level(k), expected[k]), k
+
+
 # ------------------------------------------------------------------------ connectivity
 def _components(mask: np.ndarray) -> int:
     count, _ = cv2.connectedComponents((mask > 0).astype(np.uint8), connectivity=8)

@@ -153,6 +153,21 @@ def test_the_anchor_point_stays_put_on_every_frame(view):
     assert len(drift) >= 8 and all(abs(d.x()) <= 1.0 and abs(d.y()) <= 1.0 for d in drift)
 
 
+def test_a_run_of_glides_into_a_deep_zoom_keeps_the_point_under_the_cursor(view):
+    """Each frame aims at the scene point the glide started from: re-reading the point under
+    the anchor every frame took each frame's half-pixel scroll error as the new target, and
+    a run of steps into a deep zoom slid the image under a still cursor."""
+    anchor = QPointF(123.4, 87.7)
+    view.set_zoom(2.0, anchor)
+    start = view.mapToScene(anchor.toPoint())
+    for _ in range(8):  # 2x -> 16x along the ladder, eight glides of eight frames each
+        view.zoom_step(+1, anchor)
+        play(view)
+    shown = view.mapFromScene(start)
+    assert view.zoom_factor == pytest.approx(16.0)
+    assert abs(shown.x() - anchor.toPoint().x()) <= 1 and abs(shown.y() - anchor.toPoint().y()) <= 1
+
+
 def test_steps_during_a_glide_go_on_from_its_target(view):
     seen = []
     view.zoom_changed.connect(seen.append)

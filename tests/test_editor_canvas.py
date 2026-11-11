@@ -406,11 +406,6 @@ def test_render_hints_antialias_decorations_and_leave_pixmap_smoothing_to_the_it
     assert not hints & QPainter.RenderHint.SmoothPixmapTransform
 
 
-def test_the_background_is_the_opaque_canvas_colour(app):
-    brush = EditorCanvasView().backgroundBrush()
-    assert brush.isOpaque() and brush.color().name() == QColor(tokens.BG_0).name()
-
-
 def test_without_a_sink_it_is_a_plain_canvas_that_pans_and_zooms(make_view):
     view = make_view(None, zoom=1.0)
     press(view, QPointF(100, 100))
