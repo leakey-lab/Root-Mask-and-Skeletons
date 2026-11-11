@@ -82,27 +82,6 @@ def test_the_requirements_files_are_utf8(name):
 #: Imports between test modules that wave 2 (generation, class labels, dashboards) still has
 #: to remove; this list may only shrink.
 WAVE_2_LEFT = {
-    # Two files that came in with the merge of 30cca51..5ff4ee6 (wave 2 removes them too).
-    "test_correct_session_reopen_layer": {"test_correct_session"},
-    "test_skeleton_norm_stats": {"test_generation_inference"},
-    "test_generation_failed_run_manifest": {"test_generation_batch_engine", "test_generation_inference"},
-    "test_generation_fixed_batches": {"test_generation_batch_engine", "test_generation_inference"},
-    "test_generation_job_folder_binding": {"test_generation_handlers"},
-    "test_generation_oom_backoff": {"test_generation_batch_engine"},
-    "test_generation_threads_freed": {"test_generation_handlers"},
-    "test_gt_export_out_dir": {"test_gt_export"},
-    "test_gt_export_too_large": {"test_gt_export"},
-    "test_gt_files_labels_index": {"test_gt_export"},
-    "test_gt_store_refused_files": {"test_gt_export", "test_gt_store"},
-    "test_robust_batch_disk_full": {"test_generation_batch_engine"},
-    "test_robust_batch_progress": {"test_generation_batch_engine"},
-    "test_robust_generation_cleanup": {"test_generation_failed_run_manifest", "test_generation_inference"},
-    "test_robust_generation_handler_ux": {"test_generation_handlers"},
-    "test_robust_gt_export_atomic": {"test_gt_export"},
-    "test_robust_gt_export_size_mismatch": {"test_gt_export"},
-    "test_robust_run_manifest_fallback": {"test_generation_failed_run_manifest", "test_generation_inference"},
-    "test_robust_skeleton_handler_refresh": {"test_generation_handlers"},
-    "test_run_record_history": {"test_generation_inference"},
     "test_viz_dash_view_names": {"test_viz_data_cache"},
     "test_viz_data_faceted": {"test_viz_data_cache"},
     "test_viz_data_growth": {"test_viz_data_cache"},
