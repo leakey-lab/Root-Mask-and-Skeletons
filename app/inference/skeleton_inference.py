@@ -429,8 +429,9 @@ class SkeletonModel:
     ``norm_stats`` (``runtime.SKELETON_NORM_STATS_MODES``; default
     ``runtime.skeleton_norm_stats()``, read once here) says where the generator's
     BatchNorm layers take their statistics from, and stays the mode of this model:
-    ``"running"``, the checkpoint's running statistics (``netG.eval()``); ``"image"``,
-    each image's own statistics (:class:`ImageStatsBatchNorm2d`). Dropout is off in both.
+    ``"image"`` (the default), each image's own statistics (:class:`ImageStatsBatchNorm2d`);
+    ``"running"``, the checkpoint's running statistics (``netG.eval()``). Dropout is off in
+    both.
     """
 
     def __init__(self, gpu_ids=None, norm_stats: str | None = None):
@@ -440,7 +441,10 @@ class SkeletonModel:
         gpu_ids = gpu_ids or []
         self.device = torch.device(f"cuda:{gpu_ids[0]}") if gpu_ids else torch.device("cpu")
         self.netG = self._load_network()
-        # Eval mode: Dropout off, and no BatchNorm layer updates its running statistics.
+        # Eval mode: Dropout off, and no BatchNorm layer updates its running statistics. In
+        # "image" mode the layers then become ImageStatsBatchNorm2d (each image's own
+        # statistics, whatever the training flag); in "running" mode they use the
+        # checkpoint's running statistics.
         self.netG.eval()
         if self.norm_stats == "image":
             use_image_norm_stats(self.netG)

@@ -2,7 +2,8 @@
 
 ``tests/test_correct_goldens.py`` replays the four op scripts on drawn inputs. These cases
 replay the same scripts, through the same driver, on real minirhizotron photos with their
-production model outputs (``docs/examples``, the files the 46k project made):
+model outputs (``docs/examples``: the masks are the files the 46k project made, the
+skeletons were generated in the default ``image`` mode):
 
 - ``real_mask_and_skeleton`` (T001 L044): a model mask and a generated skeleton;
 - ``real_empty_generated`` (T001 L050): a model mask and an empty (all black) skeleton;

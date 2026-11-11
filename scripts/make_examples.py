@@ -5,10 +5,15 @@ and draw the graph (owner decision O35).
     ./venv/Scripts/python.exe scripts/make_examples.py
 
 ``--source DIR`` first copies nine named files from ``DIR`` (the three photos, their masks
-and their skeletons: the production outputs of the full project, copied unchanged, not
-regenerated). ``DIR`` is read by direct path, never listed, and never written. Without it
-the script only measures the folder as it is and redraws the graph, which is what to run
-after a change of the calibration or the length estimator.
+and their skeletons: the outputs of the full project, copied unchanged, not regenerated).
+``DIR`` is read by direct path, never listed, and never written. Without it the script only
+measures the folder as it is and redraws the graph, which is what to run after a change of
+the calibration or the length estimator.
+
+The committed example skeletons were generated in the skeleton model's default mode
+(``SPROUTS_SKELETON_NORM_STATS``, ``image``). A full project generated in the earlier
+``running`` mode holds other skeletons: ``--source`` from such a project brings those back,
+so run Generate on the three photos afterwards (or do not pass ``--source``).
 
 Measure runs through the same entry as the app (:class:`app.inference.measure_run.MeasureRun`
 with the inputs ``SkeletonHandler`` gives it) and writes ``skeletons/root_lengths.csv`` and

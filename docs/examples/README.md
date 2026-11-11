@@ -17,7 +17,12 @@ sidecars), so opening the checkout itself would rewrite its tracked files.
 | `results/length_and_area.svg` | root length and root area of the three images |
 
 Origin: the Leakey lab 2024 field campaign (camera `24EFCAM1`); masks and skeletons are
-the outputs of the checkpoints in `docs/MODELS.md`, copied unchanged from the full project.
+the outputs of the checkpoints in `docs/MODELS.md`. The masks are copied unchanged from the
+full project. The skeletons come from the skeleton model's default mode (`image`, each
+image's own normalisation statistics): Generate on a GPU at batch 64 wrote them again for
+these three photos (the empty one is byte-identical to the earlier mode's). Measure gives
+root lengths of 21.7, 0.0 and 6.14 mm for them (17.94, 0.0 and 2.73 mm in the earlier
+`running` mode).
 Licence: CC-BY-4.0 for the photos, masks, skeletons, CSVs and graph; cite SPROUTS (see the
 README). These three images are the only ones of the dataset that are published.
 Regenerate the CSVs and the graph with `./venv/Scripts/python.exe scripts/make_examples.py`.

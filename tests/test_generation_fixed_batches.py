@@ -257,21 +257,33 @@ def gpu_memory(monkeypatch):
 
     monkeypatch.setattr(torch.cuda, "mem_get_info", mem_get_info)
     monkeypatch.setattr(runtime, "release_cuda_cache", lambda: state["events"].append("release"))
+    monkeypatch.delenv(runtime.SKELETON_NORM_STATS_ENV, raising=False)  # the default mode
     return state
 
 
 def test_the_floors_are_the_measured_ones():
     # Driver free memory after the model loads (weights excluded), plus a margin.
     assert runtime.FIXED_MASK_VRAM_FLOOR_GIB == 3.6
-    assert runtime.FIXED_SKELETON_VRAM_FLOOR_GIB == 3.8
+    assert runtime.FIXED_SKELETON_VRAM_FLOOR_GIB == 3.8  # norm statistics "running"
+    assert runtime.FIXED_SKELETON_IMAGE_VRAM_FLOOR_GIB == 4.7  # "image", the default
     assert runtime.FIXED_MASK_16_VRAM_FLOOR_GIB == 12.0
 
 
 @pytest.mark.parametrize(
-    ("model", "n", "needed"), [("mask", 4, 3.6), ("skeleton", 64, 3.8), ("mask", 16, 12.0)]
+    ("model", "n", "mode", "needed"),
+    [
+        ("mask", 4, None, 3.6),
+        ("skeleton", 64, None, 4.7),  # the default norm statistics, "image"
+        ("skeleton", 64, "running", 3.8),
+        ("mask", 16, None, 12.0),
+    ],
 )
-def test_too_little_free_memory_stops_before_the_first_batch(gpu_memory, model, n, needed):
+def test_too_little_free_memory_stops_before_the_first_batch(
+    gpu_memory, monkeypatch, model, n, mode, needed
+):
     gpu_memory["free"] = int(2.05 * GIB)
+    if mode is not None:
+        monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, mode)
 
     with pytest.raises(FixedBatchMemoryTooLow) as caught:
         runtime.check_fixed_batch_memory(model, n, "cuda")
@@ -295,6 +307,9 @@ def test_free_memory_just_below_the_floor_never_reads_as_enough(gpu_memory):
 
 def test_the_skeleton_floor_keeps_a_margin(gpu_memory):
     gpu_memory["free"] = int(3.7 * GIB)  # enough for the bare cap (about 3.4 GiB), no margin
+    with pytest.raises(FixedBatchMemoryTooLow):
+        runtime.check_fixed_batch_memory("skeleton", 64, "cuda", norm_stats="running")
+    gpu_memory["free"] = int(4.6 * GIB)  # "image" (the default): its bare cap is 4.25 GiB
     with pytest.raises(FixedBatchMemoryTooLow):
         runtime.check_fixed_batch_memory("skeleton", 64, "cuda")
 

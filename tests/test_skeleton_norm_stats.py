@@ -1,11 +1,12 @@
 """How the skeleton generator's BatchNorm layers get their statistics (``norm_stats``).
 
-``"running"`` (the default): ``netG.eval()``, the checkpoint's running statistics.
-``"image"``: every image of a batch is normalised with its own per-channel mean and
-biased variance over H x W, then the checkpoint's ``weight`` / ``bias``; no running
-statistic is used or updated and Dropout is off. At batch size one that is what the
-pix2pix ``test.py`` without ``--eval`` computed with its Dropout layers off, and an
+``"image"`` (the default): every image of a batch is normalised with its own per-channel
+mean and biased variance over H x W, then the checkpoint's ``weight`` / ``bias``; no
+running statistic is used or updated and Dropout is off. At batch size one that is what
+the pix2pix ``test.py`` without ``--eval`` computed with its Dropout layers off, and an
 image's output never depends on the other rows of its batch.
+``"running"`` (asked for explicitly or with ``SPROUTS_SKELETON_NORM_STATS=running``):
+``netG.eval()``, the checkpoint's running statistics, bit for bit.
 
 CPU only, random weights, no checkpoint: the network is built with randomised BatchNorm
 affine parameters and running statistics, saved to a temporary checkpoint and loaded
@@ -173,16 +174,35 @@ def test_image_mode_keeps_the_checkpoint_keys_and_load_properties(checkpoint):
 
 
 # ---------------------------------------------------------------- "running" statistics
-def test_running_mode_is_eval_mode_bit_for_bit(checkpoint):
-    model = si.SkeletonModel(gpu_ids=[])  # the default
-    assert model.norm_stats == "running" == runtime.DEFAULT_SKELETON_NORM_STATS
+def test_running_mode_is_eval_mode_bit_for_bit(checkpoint, monkeypatch):
     reference = copy.deepcopy(checkpoint).eval()
     x = _inputs(3)
     with torch.no_grad():
         expected = reference(x)
-    assert torch.equal(model.run_batch(x), expected)
     explicit = si.SkeletonModel(gpu_ids=[], norm_stats="running")
+    assert explicit.norm_stats == "running"
     assert torch.equal(explicit.run_batch(x), expected)
+    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "running")  # the earlier behaviour
+    from_env = si.SkeletonModel(gpu_ids=[])
+    assert from_env.norm_stats == "running"
+    assert torch.equal(from_env.run_batch(x), expected)
+
+
+# ---------------------------------------------------------------- the default
+def test_the_default_is_image_mode():
+    assert runtime.DEFAULT_SKELETON_NORM_STATS == "image"
+
+
+def test_the_default_model_is_the_per_image_reference(checkpoint):
+    model = si.SkeletonModel(gpu_ids=[])  # environment unset (the fixture): the default
+    assert model.norm_stats == "image" == runtime.DEFAULT_SKELETON_NORM_STATS
+    for k in range(2):
+        x = _inputs(1, seed=20 + k)
+        assert torch.equal(model.run_batch(x), _train_mode_reference(checkpoint, x))
+    eval_ref = copy.deepcopy(checkpoint).eval()
+    x = _inputs(1)
+    with torch.no_grad():
+        assert not torch.allclose(model.run_batch(x), eval_ref(x), rtol=0, atol=1e-3)
 
 
 def test_the_two_modes_differ(checkpoint):
@@ -203,10 +223,12 @@ def test_the_environment_selects_the_mode(monkeypatch, caplog):
     assert env == "SPROUTS_SKELETON_NORM_STATS"
     assert runtime.SKELETON_NORM_STATS_MODES == ("running", "image")
     monkeypatch.delenv(env, raising=False)
-    assert runtime.skeleton_norm_stats() == "running"
+    assert runtime.skeleton_norm_stats() == "image"
     for raw, expected in (
-        ("", "running"),
-        ("   ", "running"),
+        ("", "image"),
+        ("   ", "image"),
+        (" Running ", "running"),
+        ("RUNNING", "running"),
         (" Image ", "image"),
         ("IMAGE", "image"),
         ("\trunning\n", "running"),
@@ -219,13 +241,16 @@ def test_the_environment_selects_the_mode(monkeypatch, caplog):
     monkeypatch.setenv(env, "per-image")
     with caplog.at_level(logging.WARNING, logger=runtime.__name__):
         caplog.clear()
-        assert runtime.skeleton_norm_stats() == runtime.DEFAULT_SKELETON_NORM_STATS
+        assert runtime.skeleton_norm_stats() == runtime.DEFAULT_SKELETON_NORM_STATS == "image"
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1 and env in warnings[0].getMessage()
 
 
 def test_an_explicit_mode_wins_over_the_environment(monkeypatch):
-    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "image")
+    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "running")
+    assert runtime.resolve_skeleton_norm_stats(None) == "running"
+    assert runtime.resolve_skeleton_norm_stats("image") == "image"
+    monkeypatch.delenv(runtime.SKELETON_NORM_STATS_ENV)
     assert runtime.resolve_skeleton_norm_stats(None) == "image"
     assert runtime.resolve_skeleton_norm_stats("running") == "running"
     with pytest.raises(ValueError):
@@ -233,30 +258,31 @@ def test_an_explicit_mode_wins_over_the_environment(monkeypatch):
 
 
 def test_the_model_reads_the_environment_when_it_is_built(checkpoint, monkeypatch):
-    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "image")
-    model = si.SkeletonModel(gpu_ids=[])
     monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "running")
-    assert model.norm_stats == "image"  # fixed at load time
+    model = si.SkeletonModel(gpu_ids=[])
+    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "image")
+    assert model.norm_stats == "running"  # fixed at load time
     x = _inputs(1)
-    assert torch.equal(model.run_batch(x), _train_mode_reference(checkpoint, x))
+    with torch.no_grad():
+        assert torch.equal(model.run_batch(x), copy.deepcopy(checkpoint).eval()(x))
 
 
 # ---------------------------------------------------------------- the model cache
 def test_the_cache_never_serves_another_mode(checkpoint, cpu_runtime, monkeypatch):
     cpu = torch.device("cpu")
     env = runtime.SKELETON_NORM_STATS_ENV
-    monkeypatch.setenv(env, "image")
-    image = runtime.get_skeleton_model(cpu)
-    assert image.norm_stats == "image"
-    assert runtime.get_skeleton_model(cpu) is image  # still one cached model per mode
     monkeypatch.setenv(env, "running")
     running = runtime.get_skeleton_model(cpu)
-    assert running is not image and running.norm_stats == "running"
-    monkeypatch.delenv(env)
-    assert runtime.get_skeleton_model(cpu).norm_stats == "running"
-    assert runtime.get_skeleton_model(cpu, norm_stats="image").norm_stats == "image"
+    assert running.norm_stats == "running"
+    assert runtime.get_skeleton_model(cpu) is running  # still one cached model per mode
     monkeypatch.setenv(env, "image")
-    assert runtime.get_skeleton_model(cpu).norm_stats == "image"
+    image = runtime.get_skeleton_model(cpu)
+    assert image is not running and image.norm_stats == "image"
+    monkeypatch.delenv(env)
+    assert runtime.get_skeleton_model(cpu) is image  # the default
+    assert runtime.get_skeleton_model(cpu, norm_stats="running").norm_stats == "running"
+    monkeypatch.setenv(env, "running")
+    assert runtime.get_skeleton_model(cpu).norm_stats == "running"
     assert runtime.describe_runtime().skeleton_loaded is True
 
 
@@ -290,14 +316,16 @@ def test_the_manifest_records_the_mode_that_ran(tmp_path, cpu_runtime, mode):
     }
 
 
+@pytest.mark.parametrize("env, expected", [(None, "image"), ("running", "running")])
 def test_the_manifest_records_the_cached_models_mode(
-    tmp_path, checkpoint, cpu_runtime, monkeypatch
+    tmp_path, checkpoint, cpu_runtime, monkeypatch, env, expected
 ):
-    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "image")
+    if env is not None:
+        monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, env)
     src = _images(str(tmp_path / "imgs"), ["a.jpg"])
     out = str(tmp_path / "imgs" / "skeletons")
     si.run_skeleton_generation(src, out, batch_size=1)
-    assert _manifest_parameters(out)["norm_stats"] == "image"
+    assert _manifest_parameters(out)["norm_stats"] == expected
 
 
 # ---------------------------------------------------------------- the pre-flight floor
@@ -337,14 +365,14 @@ def test_the_floor_follows_the_environment_when_no_mode_is_given(free_gpu_memory
     from app.inference.batch_engine import FixedBatchMemoryTooLow
 
     free_gpu_memory["free"] = int(4.0 * GIB)
-    assert runtime.check_fixed_batch_memory("skeleton", 64, "cuda") == pytest.approx(4.0)
-    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "image")
+    # the default ("image") has the 4.7 GiB floor
     with pytest.raises(FixedBatchMemoryTooLow, match=r"4\.0 GiB free, 4\.7 GiB needed"):
         runtime.check_fixed_batch_memory("skeleton", 64, "cuda")
+    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "running")
+    assert runtime.check_fixed_batch_memory("skeleton", 64, "cuda") == pytest.approx(4.0)
     # an explicit mode wins over the environment
-    assert runtime.check_fixed_batch_memory(
-        "skeleton", 64, "cuda", norm_stats="running"
-    ) == pytest.approx(4.0)
+    with pytest.raises(FixedBatchMemoryTooLow):
+        runtime.check_fixed_batch_memory("skeleton", 64, "cuda", norm_stats="image")
 
 
 def test_the_image_floor_is_only_for_its_measured_size_and_model(free_gpu_memory):
@@ -374,7 +402,7 @@ def test_a_fixed_run_checks_the_floor_of_the_mode_that_runs(
         return 9.0
 
     monkeypatch.setattr(runtime, "check_fixed_batch_memory", check)
-    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "image")  # never read for the model's mode
+    monkeypatch.setenv(runtime.SKELETON_NORM_STATS_ENV, "running")  # never read for the model's
     model = _StubSkeletonModel() if mode is None else _ModeStub(mode)
     src = _images(str(tmp_path / "imgs"), ["a.jpg"])
     si.run_skeleton_generation(

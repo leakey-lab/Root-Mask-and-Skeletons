@@ -38,7 +38,7 @@ Public API:
   release_cuda_cache() -> None            (call once when a batch job ends)
   batch_policy() -> str                   ("fixed" | "auto", SPROUTS_BATCH_POLICY; O4)
   resolve_batch_policy(policy) -> str     (a caller's explicit policy, else batch_policy())
-  skeleton_norm_stats() -> str            ("running" | "image", SPROUTS_SKELETON_NORM_STATS)
+  skeleton_norm_stats() -> str            ("image" | "running", SPROUTS_SKELETON_NORM_STATS)
   resolve_skeleton_norm_stats(mode) -> str  (a caller's explicit mode, else the above)
   fixed_batch_size(model, device_type) -> int   (never queries the GPU)
   check_fixed_batch_memory(model, batch_size, device_type, *, norm_stats) -> float | None
@@ -90,17 +90,21 @@ DEFAULT_BATCH_POLICY = "fixed"
 FIXED_MASK_BATCH_SIZE_CUDA = 4
 FIXED_SKELETON_BATCH_SIZE_CUDA = 64
 
-# Where the skeleton generator's BatchNorm layers take their statistics from.
-# "running": netG.eval(), the checkpoint's running statistics. "image": each image's own
-# per-channel mean and variance, Dropout off. Training normalised with the statistics of
-# each training batch; the checkpoint's validation ran per image (pix2pix test.py without
-# --eval, batch 1: each image's own statistics, Dropout on). "image" is that validation
-# forward with Dropout off: deterministic, and an image's
-# result does not depend on the other rows of its batch (the batch shape still picks the
-# GPU kernels, as in "running"). Fixed when the model loads.
+# Where the skeleton generator's BatchNorm layers take their statistics from, fixed when
+# the model loads. "image" (the default): each image's own per-channel mean and variance,
+# the checkpoint's weight and bias, Dropout off. It is the forward the checkpoint was
+# validated with (pix2pix test.py without --eval, batch 1) without Dropout: deterministic,
+# and an image's result does not depend on the other rows of its batch (the batch shape
+# still picks the GPU kernels). "running" (SPROUTS_SKELETON_NORM_STATS=running): netG.eval(),
+# the checkpoint's running statistics.
+# Why "image": on the 73 held-out labelled images, length R² 0.857 and bias -11.3 % against
+# 0.317 and -36.3 % for "running"; all-black predictions 0 of 726 labelled images against 38.
+# Limit: it draws skeleton fragments on more photos without roots, and on low-contrast
+# photos it can trace soil texture, smears and glare (review them in Correct). It is about
+# 10 % slower and needs 4.7 GiB free GPU memory at batch 64 (3.8 for "running").
 SKELETON_NORM_STATS_ENV = "SPROUTS_SKELETON_NORM_STATS"
 SKELETON_NORM_STATS_MODES = ("running", "image")
-DEFAULT_SKELETON_NORM_STATS = "running"
+DEFAULT_SKELETON_NORM_STATS = "image"
 
 # Pre-flight floors (GiB) of a fixed-size GPU run (research/o4-gpu-batch.md, Exp 1c /
 # Exp 4). Below them cuDNN can switch kernels without an error and outputs change. They
@@ -114,7 +118,7 @@ DEFAULT_SKELETON_NORM_STATS = "running"
 #                 the pre-flight (a Generate run, mask model loaded, needs about 3.8 GiB).
 #   masks 16:    only for a caller's explicit 16: identical down to 12 000 MiB; floor 12.0.
 #   skeletons 64, norm statistics "image" (one GPU, RTX 5070 Ti, one build, torch
-#                 2.15.0+cu132, 2026-11-10): identical down to a 4400 MiB cap, changed at
+#                 2.15.0+cu132): identical down to a 4400 MiB cap, changed at
 #                 4300 without an error. 4400 MiB = 4.30 GiB, minus the 0.05 GiB weights =
 #                 4.25 GiB free; + the same ~0.4 GiB margin = 4.65, rounded up: floor 4.7.
 #                 The "running" floor 3.8 does not keep the "image" kernels.
@@ -542,7 +546,9 @@ def get_skeleton_model(device: torch.device | None = None, norm_stats: str | Non
     """Return the cached SkeletonModel for skeleton inference.
 
     The generator network and its checkpoint are loaded once per (device, norm
-    statistics mode), on the runtime device, in eval mode and (on CUDA) channels_last.
+    statistics mode), on the runtime device, in eval mode (Dropout off; in the default
+    "image" mode the BatchNorm layers still use each image's own statistics) and (on CUDA)
+    channels_last.
     ``norm_stats`` defaults to :func:`skeleton_norm_stats`, resolved here on every call,
     so a model built for one mode is never served for another; the cache holds one
     model, so switching modes releases the other one. ``cache_info`` / ``cache_clear``
