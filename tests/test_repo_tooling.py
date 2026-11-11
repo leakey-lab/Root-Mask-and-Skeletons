@@ -77,19 +77,10 @@ def test_the_requirements_files_are_utf8(name):
     raw.decode("utf-8")  # strict: raises on anything else
 
 
-# --------------------------------------------- no test module imports another (wave 0)
-
-#: Imports between test modules that wave 2 (generation, class labels, dashboards) still has
-#: to remove; this list may only shrink.
-WAVE_2_LEFT = {
-    "test_viz_dash_view_names": {"test_viz_data_cache"},
-    "test_viz_data_faceted": {"test_viz_data_cache"},
-    "test_viz_data_growth": {"test_viz_data_cache"},
-    "test_viz_data_metric_charts": {"test_viz_data_cache"},
-    "test_viz_data_theme": {"test_viz_data_cache"},
-    "test_viz_data_time_view": {"test_viz_data_cache"},
-    "test_viz_theme_bar_label_contrast": {"test_viz_data_cache"},
-}  # fmt: skip
+# ------------------------------------------------------ no test module imports another
+# Helpers that two test files share live in a support module (``tests/<area>_support.py``), so
+# that a test file can be moved, split or deleted alone. (A module that imports itself, to
+# patch its own globals from a child process, is not meant.)
 
 
 def imported_test_modules(source: str, own: str) -> set[str]:
@@ -123,7 +114,6 @@ def test_the_import_reader_finds_a_test_module_import():
 def test_no_test_module_imports_another_test_module():
     found = {}
     for path in sorted((ROOT / "tests").glob("test_*.py")):
-        imported = imported_test_modules(path.read_text(encoding="utf-8"), path.stem)
-        if extra := imported - WAVE_2_LEFT.get(path.stem, set()):
-            found[path.name] = sorted(extra)
+        if imported := imported_test_modules(path.read_text(encoding="utf-8"), path.stem):
+            found[path.name] = sorted(imported)
     assert found == {}, "move shared helpers into a tests/<area>_support.py module"
